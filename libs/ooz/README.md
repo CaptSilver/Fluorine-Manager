@@ -8,7 +8,7 @@ and are covered by this one.
 
 Vendored rather than submoduled because we have to modify it. A submodule
 would pin someone else's tree, so carrying these patches would mean
-maintaining a fork of a dead repo or a build-time patch step that can fail.
+maintaining a fork or a build-time patch step that can fail.
 
 ## Local modifications
 
@@ -20,10 +20,14 @@ MSVC typedefs. GCC's `x86intrin.h` supplies `_rotl`.
 It exists so `diff kraken.cpp kraken_lib.cpp` shows exactly what we changed.
 Adding it to the target produces duplicate-symbol link errors.
 
-**`kraken_lib.cpp`**: adds `ooz_decompress_seekchunked`, the entry point we
-actually call. `Kraken_ParseHeader` also refuses LZNA (type 5) and BitKnit
+**`kraken_lib.cpp`**: adds `ooz_decompress_seekchunked`, the only entry point we
+export and call. `Kraken_ParseHeader` also refuses LZNA (type 5) and BitKnit
 (type 11) streams: their decoders do no bounds checking, the input is
 untrusted mod content, and nothing FromSoftware ships uses them.
+Upstream says the decoder as a whole is "not fuzz safe", and the Kraken-family
+decoders that remain are no more hardened: they run in-process on untrusted mod
+archives, so a crafted archive can still crash the process. Decoding out of
+process would be the real fix.
 
 **`stdafx.h`**: every vendored `.cpp` still `#include`s this (an MSVC
 precompiled-header convention). Upstream's version pulls in `<Windows.h>` and

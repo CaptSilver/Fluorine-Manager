@@ -4284,38 +4284,13 @@ bool Verify(const char *filename, uint8 *output, int outbytes, const char *curfi
   }
   return true;
 }
-// C entry point for ctypes
-extern "C" int ooz_kraken_decompress(const byte *src, size_t src_len, byte *dst, size_t dst_len) {
-    return Kraken_Decompress(src, src_len, dst, dst_len);
-}
-
-extern "C" int ooz_debug_decompress(const byte *src, size_t src_len, byte *dst, size_t dst_len) {
-  KrakenDecoder *dec = Kraken_Create();
-  int offset = 0, blk = 0;
-  while (dst_len != 0) {
-    fprintf(stderr, "[blk %d] offset=%d dst_left=%zu src_left=%zu\n", blk, offset, dst_len, src_len);
-    if (!Kraken_DecodeStep(dec, dst, offset, dst_len, src, src_len)) {
-      fprintf(stderr, "  -> DecodeStep FAILED. hdr: decoder_type=%d restart=%d uncompressed=%d checksums=%d\n",
-              dec->hdr.decoder_type, (int)dec->hdr.restart_decoder, (int)dec->hdr.uncompressed, (int)dec->hdr.use_checksums);
-      fprintf(stderr, "  -> next src bytes: %02x %02x %02x %02x %02x %02x\n",
-              src[0],src[1],src[2],src[3],src[4],src[5]);
-      Kraken_Destroy(dec); return -1;
-    }
-    fprintf(stderr, "  -> ok src_used=%d dst_used=%d type=%d\n", dec->src_used, dec->dst_used, dec->hdr.decoder_type);
-    if (dec->src_used == 0) { fprintf(stderr, "  -> src_used==0\n"); Kraken_Destroy(dec); return -1; }
-    src += dec->src_used; src_len -= dec->src_used;
-    dst_len -= dec->dst_used; offset += dec->dst_used; blk++;
-  }
-  Kraken_Destroy(dec);
-  return offset;
-}
-
 // Decode a FromSoft DCX stream: seekChunkReset=true means every 256k chunk is
 // independently coded, so back-references are chunk-relative, not buffer-relative.
 extern "C" int ooz_decompress_seekchunked(const byte *src, size_t src_len, byte *dst, size_t dst_len) {
   KrakenDecoder *dec = Kraken_Create();
   size_t written = 0;
   while (dst_len != 0) {
+    if (src_len < 2) { Kraken_Destroy(dec); return -1; }
     if (!Kraken_DecodeStep(dec, dst + written, 0, dst_len, src, src_len)) { Kraken_Destroy(dec); return -1; }
     if (dec->src_used == 0) { Kraken_Destroy(dec); return -2; }
     src += dec->src_used; src_len -= dec->src_used;
