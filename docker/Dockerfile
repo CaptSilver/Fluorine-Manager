@@ -153,3 +153,9 @@ WORKDIR /build
 # Native FAudio sanitizer probes and Python bridge mocks used during test builds.
 RUN apt-get update && apt-get install -y --no-install-recommends libsdl2-dev libgmock-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Test runner for the Elden Ring plugin's vendored suite (src/tests/eldenring).
+# Build-time only: build-inner.sh empties site-packages before packaging. A
+# layer of its own so the Rust and libloot layers above stay cached.
+RUN uv pip install --system --break-system-packages \
+      --python /opt/python-bundled/bin/python3 --no-cache "pytest>=8,<10"
