@@ -11,6 +11,7 @@
 #include <QTemporaryDir>
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
