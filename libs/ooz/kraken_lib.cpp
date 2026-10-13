@@ -471,7 +471,7 @@ const byte *Kraken_ParseHeader(KrakenHeader *hdr, const byte *p) {
     b = p[1];
     hdr->decoder_type = b & 0x7F;
     hdr->use_checksums = !!(b >> 7);
-    if (hdr->decoder_type != 6 && hdr->decoder_type != 10 && hdr->decoder_type != 5 && hdr->decoder_type != 11 && hdr->decoder_type != 12)
+    if (hdr->decoder_type != 6 && hdr->decoder_type != 10 && hdr->decoder_type != 12)
       return NULL;
     return p + 2;
   }

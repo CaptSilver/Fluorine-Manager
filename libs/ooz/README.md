@@ -2,7 +2,7 @@
 
 Kraken/Mermaid/Selkie/Leviathan/LZNA/BitKnit decompressor from
 https://github.com/powzix/ooz, Copyright (C) 2016 Powzix, GPL-3.0-or-later.
-Upstream has not moved since 2019. `kraken_lib.cpp` and `kraken.cpp` keep the
+`kraken_lib.cpp` and `kraken.cpp` keep the
 upstream notice at the top; `bitknit.cpp` and `lzna.cpp` have none upstream
 and are covered by this one.
 
@@ -21,7 +21,9 @@ It exists so `diff kraken.cpp kraken_lib.cpp` shows exactly what we changed.
 Adding it to the target produces duplicate-symbol link errors.
 
 **`kraken_lib.cpp`**: adds `ooz_decompress_seekchunked`, the entry point we
-actually call.
+actually call. `Kraken_ParseHeader` also refuses LZNA (type 5) and BitKnit
+(type 11) streams: their decoders do no bounds checking, the input is
+untrusted mod content, and nothing FromSoftware ships uses them.
 
 **`stdafx.h`**: every vendored `.cpp` still `#include`s this (an MSVC
 precompiled-header convention). Upstream's version pulls in `<Windows.h>` and
