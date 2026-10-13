@@ -1369,3 +1369,20 @@ add_dependencies(fluorine-tests test_archive_extraction_containment)
 
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)
+
+# ---------------------------------------------------------------------------
+# Elden Ring plugin: the vendored erm library's tests
+# ---------------------------------------------------------------------------
+# Runs on the bundled interpreter, the one the plugin ships on. build-inner.sh
+# always passes it as Python_EXECUTABLE; Python3_EXECUTABLE above may name a
+# different one. -p no:cacheprovider stops pytest writing .pytest_cache into the
+# source tree, where nothing ignores it (__pycache__ is ignored, and -B skips it
+# anyway, as the other Python tests in this file do).
+add_test(NAME test_erm_suite
+    COMMAND ${Python_EXECUTABLE} -B -m pytest -q -p no:cacheprovider
+            ${CMAKE_CURRENT_SOURCE_DIR}/eldenring)
+# ENVIRONMENT is a list property: set everything in this one call, because a
+# second set_tests_properties for it replaces the value instead of adding to it.
+set_tests_properties(test_erm_suite PROPERTIES
+    ENVIRONMENT "FLUORINE_OOZ_LIB=$<TARGET_FILE:ooz>")
+add_dependencies(fluorine-tests ooz)

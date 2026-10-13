@@ -1,21 +1,14 @@
-"""Build and call the vendored Oodle Kraken decompressor.
+"""Call the Oodle Kraken decompressor that CMake builds as libooz.so.
 
 FromSoftware ships game archives Kraken-compressed. There is no open-source
 Kraken *encoder*, but we never need one: the game also reads plain zlib DCX
 (see dcx.py), so decompress-only is enough.
 """
 import ctypes
-import hashlib
-import subprocess
-from pathlib import Path
+import os
 
 from ..errors import ErmError
 
-SRC_DIR = Path("vendor-src/ooz")
-BUILD_DIR = Path("tools/ooz")
-SOURCES = ("kraken_lib.cpp", "bitknit.cpp", "lzna.cpp")
-# Bumped whenever the build flags change, so a flag-only edit still rebuilds.
-BUILD_KEY = "1"
 # DCX's uncompressed-size field is a bare big-endian u32 straight from the
 # file -- up to 4 GB -- with nothing upstream validating it against reality.
 # Upstream ooz's own CLI caps at 1 GB; matched here. The largest uncompressed
@@ -29,46 +22,28 @@ _lib = None
 
 
 class OozError(ErmError):
-    """The Kraken decompressor could not be built, loaded, or run."""
-
-
-def _source_digest():
-    """sha256 over the sources and build flags. Rebuild when this changes, so a
-    vendored-source edit can't leave a stale .so behind."""
-    h = hashlib.sha256(BUILD_KEY.encode())
-    for name in sorted(SOURCES) + ["compat.h", "stdafx.h"]:
-        h.update((SRC_DIR / name).read_bytes())
-    return h.hexdigest()
+    """The Kraken decompressor could not be loaded or run."""
 
 
 def library_path():
-    """Path to libooz.so, building it if missing or stale."""
-    digest = _source_digest()
-    stamp = BUILD_DIR / "build.sha256"
-    lib = BUILD_DIR / "libooz.so"
-    if lib.exists() and stamp.exists() and stamp.read_text().strip() == digest:
-        return lib
-    BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    cmd = ["g++", "-O2", "-fPIC", "-shared", "-w",
-           "-o", str(lib), *[str(SRC_DIR / s) for s in SOURCES]]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-    except FileNotFoundError as exc:
-        raise OozError(
-            "g++ not found — it's needed once to build the Kraken decompressor "
-            "that reads the game's compressed archives. It ships in the Bazzite "
-            "base image; inside a distrobox run `dnf install gcc-c++`.") from exc
-    if proc.returncode != 0:
-        raise OozError(f"building libooz.so failed:\n{proc.stderr.strip()}")
-    stamp.write_text(digest)
-    return lib
+    """What to hand ctypes.CDLL.
+
+    The test suite points FLUORINE_OOZ_LIB at the library CMake just built. In
+    the bundle it is unset, and the bare soname goes to the dynamic loader,
+    which finds lib/libooz.so through the LD_LIBRARY_PATH the launcher exports.
+    """
+    return os.environ.get("FLUORINE_OOZ_LIB") or "libooz.so"
 
 
 def _load():
     global _lib
     if _lib is None:
-        lib = ctypes.CDLL(str(library_path()))
-        fn = lib.ooz_decompress_seekchunked
+        name = library_path()
+        try:
+            fn = ctypes.CDLL(name).ooz_decompress_seekchunked
+        except (OSError, AttributeError) as exc:
+            raise OozError(
+                f"cannot load the Kraken decompressor ({name}): {exc}") from exc
         fn.restype = ctypes.c_int
         fn.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
                        ctypes.c_char_p, ctypes.c_size_t]
