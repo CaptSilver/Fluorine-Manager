@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import traceback
+
 from PyQt6.QtCore import Qt, qWarning
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox, QProgressDialog
@@ -23,6 +25,9 @@ class _Busy:
         self._dialog.setWindowTitle(title)
         self._dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         self._dialog.show()
+        # Paint it now: the work that follows blocks the event loop until the
+        # first update() call, and without this the dialog shows up blank.
+        QApplication.processEvents()
 
     def update(self, message: str) -> None:
         self._dialog.setLabelText(message)
@@ -30,6 +35,7 @@ class _Busy:
 
     def close(self) -> None:
         self._dialog.close()
+        self._dialog.deleteLater()
 
 
 class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
@@ -75,7 +81,9 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
         except ErmError as exc:
             QMessageBox.critical(self._parent, self.displayName(), str(exc))
         except Exception as exc:  # a tool must not take the UI down with it
-            qWarning(f"{self.displayName()}: unexpected failure: {exc!r}")
+            qWarning(
+                f"{self.displayName()}: unexpected failure: {exc!r}\n{traceback.format_exc()}"
+            )
             QMessageBox.critical(
                 self._parent, self.displayName(), f"Unexpected failure: {exc}"
             )

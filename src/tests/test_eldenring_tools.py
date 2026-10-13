@@ -9,6 +9,7 @@ from unittest import mock
 SHOWN: list[tuple[str, str, str]] = []
 WARNINGS: list[str] = []
 DIALOGS: list = []
+EVENTS: list[str] = []
 
 
 class _QMessageBox:
@@ -28,6 +29,7 @@ class _QProgressDialog:
         self.labels = [label]
         self.closed = False
         self.shown = False
+        self.deleted = False
         DIALOGS.append(self)
 
     def setWindowTitle(self, title) -> None:
@@ -38,12 +40,16 @@ class _QProgressDialog:
 
     def show(self) -> None:
         self.shown = True
+        EVENTS.append("show")
 
     def setLabelText(self, text) -> None:
         self.labels.append(text)
 
     def close(self) -> None:
         self.closed = True
+
+    def deleteLater(self) -> None:  # noqa: N802 - Qt spelling
+        self.deleted = True
 
 
 def _install_stubs() -> None:
@@ -54,7 +60,9 @@ def _install_stubs() -> None:
     qtgui = types.ModuleType("PyQt6.QtGui")
     qtgui.QIcon = type("QIcon", (), {})
     qtwidgets = types.ModuleType("PyQt6.QtWidgets")
-    qtwidgets.QApplication = SimpleNamespace(processEvents=lambda: None)
+    qtwidgets.QApplication = SimpleNamespace(
+        processEvents=lambda: EVENTS.append("processEvents")
+    )
     qtwidgets.QMessageBox = _QMessageBox
     qtwidgets.QProgressDialog = _QProgressDialog
     pyqt.QtCore, pyqt.QtGui, pyqt.QtWidgets = qtcore, qtgui, qtwidgets
@@ -91,6 +99,7 @@ class ToolCase(unittest.TestCase):
         SHOWN.clear()
         WARNINGS.clear()
         DIALOGS.clear()
+        EVENTS.clear()
         self.organizer = object()
         self.tool = tools.InstallMe3Tool()
         self.tool.init(self.organizer)
@@ -157,6 +166,26 @@ class DisplayTests(ToolCase):
         self.assertIn("boom", SHOWN[-1][2])
         self.assertTrue(any("boom" in message for message in WARNINGS))
         self.assertTrue(DIALOGS[-1].closed)
+
+
+class BusyDialogTests(ToolCase):
+    def test_the_dialog_is_painted_before_the_blocking_work_starts(self) -> None:
+        with mock.patch.object(tools.me3_host, "ensure", return_value=self.ok_result(False)):
+            self.tool.display()
+        self.assertEqual(EVENTS[:2], ["show", "processEvents"])
+
+    def test_the_dialog_is_scheduled_for_deletion_once_closed(self) -> None:
+        with mock.patch.object(tools.me3_host, "ensure", return_value=self.ok_result(False)):
+            self.tool.display()
+        self.assertTrue(DIALOGS[-1].closed)
+        self.assertTrue(DIALOGS[-1].deleted)
+
+    def test_an_unexpected_failure_logs_the_traceback(self) -> None:
+        with mock.patch.object(tools.me3_host, "ensure", side_effect=RuntimeError("boom")):
+            self.tool.display()
+        logged = "\n".join(WARNINGS)
+        self.assertIn("Traceback (most recent call last)", logged)
+        self.assertIn("RuntimeError: boom", logged)
 
 
 class DescribeTests(ToolCase):
