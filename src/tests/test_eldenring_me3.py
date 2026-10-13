@@ -102,10 +102,33 @@ class RenderTests(Me3Case):
             me3.render([], [Path("/tmp/a\nb.dll")], None)
 
     def test_unusable_savefile_names_are_refused_and_the_key_is_named(self) -> None:
-        for bad in ("", "a/b", "a:b", 'a"b', "a|b", "a\nb"):
+        for bad in ("", "a/b", "a:b", 'a"b', "a|b", "a\nb", "a\x7fb", "a\x85b"):
             with self.assertRaises(ValueError, msg=repr(bad)) as caught:
                 me3.render([], [], bad)
             self.assertIn("savefile", str(caught.exception))
+
+    def test_every_spelling_of_the_vanilla_save_is_refused(self) -> None:
+        # Wine and Windows strip trailing dots and spaces, and the game adds
+        # the extension itself, so all of these land on ER0000.sl2.
+        for bad in (
+            "ER0000", "er0000", "Er0000", "ER0000.sl2", "ER0000.SL2", "ER0000.co2",
+            "ER0000.", "ER0000 ", "ER0000. .", "ER0000.sl2 ", "er0000.co2.",
+        ):
+            with self.assertRaises(ValueError, msg=repr(bad)) as caught:
+                me3.render([], [], bad)
+            self.assertIn("savefile", str(caught.exception))
+
+    def test_names_that_only_resemble_the_vanilla_save_are_accepted(self) -> None:
+        for good in ("ER0000_modded", "ER0001", "ER0000.bak", "xER0000"):
+            self.assertIn(f'savefile = "{good}"', me3.render([], [], good))
+
+    def test_a_path_that_is_not_utf8_is_refused_when_rendering(self) -> None:
+        bad = Path("/tmp/mods/\udcff")
+        with self.assertRaises(ValueError) as caught:
+            me3.render([("Mod", bad)], [], None)
+        self.assertIn("mods", str(caught.exception))
+        with self.assertRaises(ValueError):
+            me3.render([], [bad], None)
 
 
 class EntryArgsTests(Me3Case):

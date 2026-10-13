@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 
 from . import atomic, me3_host
@@ -15,6 +16,10 @@ GAME = "eldenring"
 # in commands/launch.rs: control characters and < > : " / \ | ? *). Refusing here
 # gives an error that names the key, before me3 is ever started.
 _RESERVED_SAVEFILE_CHARS = set('<>:"/\\|?*')
+
+# The vanilla save, ER0000.sl2 (ER0000.co2 for the seamless coop mod).
+_VANILLA_SAVE_STEM = "er0000"
+_SAVE_SUFFIXES = (".sl2", ".co2")
 
 
 def _quote_argument(path: Path) -> str:
@@ -68,6 +73,12 @@ def _toml_path(path: Path) -> str:
     a single quote in it falls back to an escaped basic string.
     """
     text = str(path)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(
+            f"a path that is not valid UTF-8 cannot go into a me3 profile: {text!r}"
+        ) from None
     if not Path(text).is_absolute():
         raise ValueError(
             f"me3 resolves a relative path against the profile's folder, so pass an absolute one: {text}"
@@ -79,12 +90,35 @@ def _toml_path(path: Path) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _is_vanilla_save(name: str) -> bool:
+    # Windows and Wine drop trailing dots and spaces, and the file system is
+    # case-insensitive under Wine, so "er0000. " is the vanilla save too.
+    stem = name.rstrip(". ").casefold()
+    for suffix in _SAVE_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return stem == _VANILLA_SAVE_STEM
+
+
 def _checked_savefile(name: str) -> str:
-    bad = sorted({char for char in name if char in _RESERVED_SAVEFILE_CHARS or ord(char) < 32})
+    # unicodedata "Cc" covers DEL and the C1 range, which me3's is_control also rejects.
+    bad = sorted(
+        {
+            char
+            for char in name
+            if char in _RESERVED_SAVEFILE_CHARS or unicodedata.category(char) == "Cc"
+        }
+    )
     if not name or bad:
         raise ValueError(
             f"savefile {name!r} cannot be used: it is empty or holds characters "
             f"me3 rejects ({bad!r})"
+        )
+    if _is_vanilla_save(name):
+        raise ValueError(
+            f"savefile {name!r} cannot be used: it names the vanilla save "
+            "(ER0000), which a modded session must not write"
         )
     return name
 
