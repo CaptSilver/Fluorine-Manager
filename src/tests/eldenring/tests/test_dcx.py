@@ -5,7 +5,8 @@ import tracemalloc
 
 import pytest
 
-from ermlib.formats import dcx
+from ermlib.errors import ErmError
+from ermlib.formats import dcx, ooz
 
 
 def test_dflt_round_trip():
@@ -146,6 +147,21 @@ def test_read_still_rejects_a_dflt_body_with_a_corrupted_checksum():
     blob = _dflt_with_body(payload, lambda body: body[:-1] + bytes([body[-1] ^ 0xFF]))
     with pytest.raises(dcx.DcxError, match="could not be decompressed"):
         dcx.read(blob)
+
+
+def test_read_reports_a_missing_kraken_library_as_an_erm_error(monkeypatch, tmp_path):
+    """A KRAK container needs libooz.so. If that cannot be loaded the caller
+    must see an ErmError it already handles, not an OSError from ctypes."""
+    blob = bytearray(dcx.write_dflt(b"payload" * 50))
+    blob[0x28:0x2C] = dcx.KRAK
+    # ooz keeps the library it loaded in a module global. Once any earlier test
+    # has loaded libooz, a lookup that never runs would send these zlib bytes
+    # through the Kraken decoder, which fails with an ErmError of its own and
+    # the test would pass without testing the load.
+    monkeypatch.setattr(ooz, "_lib", None)
+    monkeypatch.setenv("FLUORINE_OOZ_LIB", str(tmp_path / "absent" / "libooz.so"))
+    with pytest.raises(ErmError, match="cannot load the Kraken decompressor"):
+        dcx.read(bytes(blob))
 
 
 def test_read_rejects_a_compressed_size_that_overruns_the_buffer():
