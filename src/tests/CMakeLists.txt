@@ -1402,3 +1402,10 @@ add_test(NAME test_erm_suite
 set_tests_properties(test_erm_suite PROPERTIES
     ENVIRONMENT "FLUORINE_OOZ_LIB=$<TARGET_FILE:ooz>;FLUORINE_ER_TESTLIBS=${CMAKE_BINARY_DIR}/eldenring-testlibs")
 add_dependencies(fluorine-tests ooz)
+
+# Elden Ring plugin unit tests, on the bundled Python 3.12 (the vendored erm
+# suite is registered separately as test_erm_suite).
+add_test(
+    NAME test_eldenring_state
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_state.py
+)
