@@ -164,6 +164,45 @@ class CacheTests(TempDirCase):
             state.cached_sha256(cache, file), hashlib.sha256(b"abcd").hexdigest()
         )
 
+    def test_an_entry_without_a_string_hash_is_recomputed(self) -> None:
+        file = self.tmp / "me3"
+        file.write_bytes(b"abc")
+        cache: dict = {}
+        state.cached_sha256(cache, file)
+        entry = cache[str(file)]
+        for damaged in ({k: v for k, v in entry.items() if k != "sha256"},
+                        {**entry, "sha256": 7}, "junk", None):
+            cache[str(file)] = damaged
+            self.assertEqual(
+                state.cached_sha256(cache, file), hashlib.sha256(b"abc").hexdigest()
+            )
+
+    def test_a_same_size_overwrite_with_the_mtime_restored_is_noticed(self) -> None:
+        file = self.tmp / "me3"
+        file.write_bytes(b"abc")
+        original = file.stat()
+        cache: dict = {}
+        state.cached_sha256(cache, file)
+        file.write_bytes(b"abd")
+        os.utime(file, ns=(original.st_atime_ns, original.st_mtime_ns))
+        self.assertEqual(
+            state.cached_sha256(cache, file), hashlib.sha256(b"abd").hexdigest()
+        )
+
+    def test_a_replacement_file_with_the_same_size_and_mtime_is_noticed(self) -> None:
+        file = self.tmp / "me3"
+        file.write_bytes(b"abc")
+        original = file.stat()
+        cache: dict = {}
+        state.cached_sha256(cache, file)
+        other = self.tmp / "other"
+        other.write_bytes(b"abd")
+        os.utime(other, ns=(original.st_atime_ns, original.st_mtime_ns))
+        os.replace(other, file)
+        self.assertEqual(
+            state.cached_sha256(cache, file), hashlib.sha256(b"abd").hexdigest()
+        )
+
     def test_a_missing_file_raises_file_not_found(self) -> None:
         with self.assertRaises(FileNotFoundError):
             state.cached_sha256({}, self.tmp / "nope")

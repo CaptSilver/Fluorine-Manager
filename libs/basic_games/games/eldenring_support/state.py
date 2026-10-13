@@ -66,20 +66,20 @@ def write_json(path, data) -> None:
 
 
 def cached_sha256(cache: dict, path) -> str:
-    """sha256 of `path`, re-read only when its size or mtime moved.
+    """sha256 of `path`, re-read only when its identity or timestamps moved.
 
-    `cache` maps str(path) to {"size", "mtime_ns", "sha256"} and is updated in
-    place; the caller decides when to persist it.
+    `cache` maps str(path) to {"stat": [...], "sha256"} and is updated in
+    place; the caller decides when to persist it. The stat key includes inode,
+    device and ctime so that a same-size replacement with its mtime put back
+    (cp -p, install -p, touch -r) still misses; ctime cannot be set from
+    userspace. An entry that is not exactly that shape is recomputed.
     """
     path = Path(path)
     info = path.stat()
+    key = [info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev, info.st_ctime_ns]
     entry = cache.get(str(path))
-    if (
-        isinstance(entry, dict)
-        and entry.get("size") == info.st_size
-        and entry.get("mtime_ns") == info.st_mtime_ns
-    ):
+    if isinstance(entry, dict) and entry.get("stat") == key and isinstance(entry.get("sha256"), str):
         return entry["sha256"]
     digest = github.sha256_file(path)
-    cache[str(path)] = {"size": info.st_size, "mtime_ns": info.st_mtime_ns, "sha256": digest}
+    cache[str(path)] = {"stat": key, "sha256": digest}
     return digest
