@@ -289,7 +289,10 @@ def read(data):
         return ooz.decompress(body, uncompressed)
     if method == DFLT:
         try:
-            out = zlib.decompress(body)
+            # Bounded: the header's size is untrusted, so inflate at most one
+            # byte past it. Anything longer fails the length check below
+            # without ever materialising a decompression bomb.
+            out = zlib.decompressobj().decompress(body, uncompressed + 1)
         except zlib.error as exc:
             # Keep the module's error contract: callers catch DcxError, and a
             # corrupt body is a malformed container, not a programming fault.

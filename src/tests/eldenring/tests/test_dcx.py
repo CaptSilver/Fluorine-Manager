@@ -1,6 +1,7 @@
 import hashlib
 import os
 import struct
+import tracemalloc
 import zlib
 
 import pytest
@@ -405,3 +406,23 @@ def test_an_empty_launcher_variable_is_not_a_bundle(monkeypatch):
 
 def test_zstd_round_trips_an_empty_payload():
     assert dcx.read(dcx.write_zstd(b"")) == b""
+
+
+def test_read_does_not_inflate_a_dflt_body_past_the_claimed_size():
+    """The header's size field is attacker-controlled, so a small claim over a
+    body that inflates enormously must fail without allocating the inflate."""
+    blob = bytearray(dcx.write_dflt(bytes(8 * 1024 * 1024)))
+    struct.pack_into(">I", blob, 0x1C, 1024)
+    tracemalloc.start()
+    try:
+        with pytest.raises(dcx.DcxError):
+            dcx.read(bytes(blob))
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1024 * 1024, peak
+
+
+def test_the_bundle_uses_only_the_bundled_libzstd(tmp_path, launcher_env):
+    launcher_env(tmp_path)
+    assert dcx._backends() == ((None, dcx._ctypes_libzstd),)
