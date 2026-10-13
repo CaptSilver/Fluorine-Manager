@@ -2,7 +2,6 @@ import hashlib
 import os
 import struct
 import tracemalloc
-import zlib
 
 import pytest
 
@@ -101,6 +100,52 @@ def test_read_rejects_a_corrupt_dflt_body():
     blob[dcx.HEADER_SIZE:dcx.HEADER_SIZE + compressed] = b"\x00" * compressed
     with pytest.raises(dcx.DcxError, match="DFLT body could not be decompressed"):
         dcx.read(bytes(blob))
+
+
+def _dflt_with_body(payload, edit):
+    """A DFLT container whose zlib body has been through `edit`, with the
+    header's compressed size brought in line so the container still parses."""
+    blob = dcx.write_dflt(payload)
+    _uncompressed, compressed = struct.unpack_from(">II", blob, 0x1C)
+    body = edit(blob[dcx.HEADER_SIZE:dcx.HEADER_SIZE + compressed])
+    header = bytearray(blob[:dcx.HEADER_SIZE])
+    struct.pack_into(">I", header, 0x20, len(body))
+    return bytes(header) + body
+
+
+def test_read_rejects_a_dflt_body_that_ends_before_its_checksum():
+    """zlib's decompressor returns what it has when the input runs out, so a body
+    missing its four-byte adler32 trailer comes back as a payload of exactly the
+    claimed length. Nothing has checked it, and a truncated download that
+    happens to keep every data byte would be accepted as intact."""
+    payload = b"payload" * 50
+    blob = _dflt_with_body(payload, lambda body: body[:-4])
+    with pytest.raises(dcx.DcxError, match="checksum"):
+        dcx.read(blob)
+
+
+def test_read_accepts_a_dflt_body_that_keeps_its_checksum():
+    payload = b"payload" * 50
+    assert dcx.read(_dflt_with_body(payload, lambda body: body)) == payload
+
+
+def test_a_dflt_size_claim_below_the_payload_is_reported_as_a_size_problem():
+    # Inflating stops one byte past the claim, before the trailer is reached.
+    # That must not surface as a checksum error: the size is what is wrong.
+    payload = b"payload" * 50
+    blob = bytearray(dcx.write_dflt(payload))
+    struct.pack_into(">I", blob, 0x1C, len(payload) - 1)
+    with pytest.raises(dcx.DcxError, match="header claims"):
+        dcx.read(bytes(blob))
+
+
+def test_read_still_rejects_a_dflt_body_with_a_corrupted_checksum():
+    # Pins behaviour that already held: zlib's own check fails on a trailer byte
+    # that is present but wrong. The eof test must not weaken it.
+    payload = b"payload" * 50
+    blob = _dflt_with_body(payload, lambda body: body[:-1] + bytes([body[-1] ^ 0xFF]))
+    with pytest.raises(dcx.DcxError, match="could not be decompressed"):
+        dcx.read(blob)
 
 
 def test_read_rejects_a_compressed_size_that_overruns_the_buffer():

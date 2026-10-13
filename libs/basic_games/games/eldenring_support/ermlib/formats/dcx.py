@@ -288,11 +288,12 @@ def read(data):
     if method == KRAK:
         return ooz.decompress(body, uncompressed)
     if method == DFLT:
+        inflater = zlib.decompressobj()
         try:
             # Bounded: the header's size is untrusted, so inflate at most one
             # byte past it. Anything longer fails the length check below
             # without ever materialising a decompression bomb.
-            out = zlib.decompressobj().decompress(body, uncompressed + 1)
+            out = inflater.decompress(body, uncompressed + 1)
         except zlib.error as exc:
             # Keep the module's error contract: callers catch DcxError, and a
             # corrupt body is a malformed container, not a programming fault.
@@ -300,6 +301,11 @@ def read(data):
         if len(out) != uncompressed:
             raise DcxError(
                 f"DFLT payload is {len(out)} bytes, header claims {uncompressed}")
+        # A decompressobj returns what it has when its input runs out, so a body
+        # cut off before the adler32 trailer looks like a complete payload.
+        # eof is only set once the trailer has been read and matched.
+        if not inflater.eof:
+            raise DcxError("DFLT body ends before its checksum")
         return out
     if method == ZSTD:
         decompress, _compress, zstd_error = _zstd()
