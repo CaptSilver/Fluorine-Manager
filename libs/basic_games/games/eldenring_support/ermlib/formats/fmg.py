@@ -66,6 +66,8 @@ def read(data):
             raise FmgError(f"FMG range {r} is reversed: first={first}, last={last}")
         for step, text_id in enumerate(range(first, last + 1)):
             slot = index + step
+            if slot < 0:
+                raise FmgError(f"FMG range {r} starts before the offset table")
             if slot >= string_count:
                 raise FmgError(f"FMG range {r} points past the offset table")
             string_off, = struct.unpack_from("<q", data, offsets_off + slot * 8)

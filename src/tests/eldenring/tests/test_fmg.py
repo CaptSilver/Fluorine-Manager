@@ -54,6 +54,18 @@ def test_read_rejects_range_pointing_past_offset_table():
         fmg.read(bytes(blob))
 
 
+@pytest.mark.parametrize("slot", [-1, -100])
+def test_read_rejects_a_range_starting_before_the_offset_table(slot):
+    """A range's first slot is read from the file. A small negative one reads the
+    8 bytes in front of the offset table and returns the wrong string without an
+    error; a large one makes struct.unpack_from answer with its own error. Both
+    must be ours."""
+    blob = bytearray(fmg.write({1: "a", 2: "bb"}))
+    struct.pack_into("<i", blob, fmg.HEADER_SIZE, slot)
+    with pytest.raises(fmg.FmgError, match="before the offset table"):
+        fmg.read(bytes(blob))
+
+
 def test_read_rejects_a_reversed_range():
     """A corrupted range with first > last makes range(first, last + 1) empty,
     so the loop that fills `entries` contributes nothing for that range. A
