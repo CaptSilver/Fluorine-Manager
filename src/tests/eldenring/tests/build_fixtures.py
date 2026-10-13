@@ -1,9 +1,26 @@
-"""Builders the moved test files share: synthetic PARAM, BND4 and regulation.bin
-blobs. Each used to live in the test module that first needed it, which made the
-other test modules import that module just to reach a helper."""
+"""Builders the moved test files share: a build identity, and synthetic PARAM,
+BND4 and regulation.bin blobs. Each used to live in the test module that first
+needed it, which made the other test modules import that module just to reach a
+helper.
+
+BuildId deliberately has no field defaults -- classify() reads the disagreements
+between its three identity sources, and a defaulted field would let production
+build a half-populated identity that looks like agreement. So every construction
+has to spell all five fields, and the convenience of not doing that by hand
+belongs here rather than on the type.
+"""
 import struct
 
 from ermlib.formats import regulation
+from ermlib.gamebuild import BuildId
+
+_BASE = dict(exe="2.7.0.0", app="1.17.0", regulation="11701000",
+             steam_buildid="23850278", regulation_sha="a" * 64)
+
+
+def build_id(**over):
+    return BuildId(**{**_BASE, **over})
+
 
 FORMAT_FLAGS = bytes.fromhex("00850700")
 
