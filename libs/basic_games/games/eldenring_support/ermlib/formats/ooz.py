@@ -11,11 +11,9 @@ from ..errors import ErmError
 
 # DCX's uncompressed-size field is a bare big-endian u32 straight from the
 # file -- up to 4 GB -- with nothing upstream validating it against reality.
-# Upstream ooz's own CLI caps at 1 GB; matched here. The largest uncompressed
-# archive this project's mods produce today is ~17 MB, and the largest
-# installed file is a 92 MB archive, so 1 GB leaves over 10x headroom for
-# real game data while still refusing to allocate a gigabytes-sized buffer
-# for a corrupted or hostile header.
+# Upstream ooz's own CLI caps at 1 GB; matched here. Real game data is far
+# below that, so the cap only ever stops a hostile header from making us
+# allocate gigabytes.
 MAX_UNCOMPRESSED_SIZE = 1024 * 1024 * 1024
 
 _lib = None
