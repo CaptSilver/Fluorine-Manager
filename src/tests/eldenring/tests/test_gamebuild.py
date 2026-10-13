@@ -321,3 +321,22 @@ def test_classify_tampered_when_the_regulation_version_moves_alone():
 
 def test_classify_without_a_stamp_is_unchanged():
     assert gamebuild.classify(None, build_id()) == gamebuild.UNCHANGED
+
+
+def test_the_sha_identify_computes_is_the_one_adopt_baseline_checks(tmp_path, monkeypatch):
+    # Producer and consumer are only ever pinned to test-local values, so both
+    # halves could move to the wrong bytes together and stay green. Join them:
+    # identify() hashes the live regulation, adopt_baseline re-reads the same
+    # file and refuses if the digests disagree.
+    from ermlib import heal
+    from tests.build_fixtures import _regulation_blob
+
+    game = tmp_path / "Game"
+    game.mkdir()
+    (game / "eldenring.exe").write_bytes(_fake_exe(2, 7, 0, 0))
+    (game / "regulation.bin").write_bytes(_regulation_blob("11701000"))
+    monkeypatch.setattr(gamebuild.steam, "read_appmanifest",
+                        lambda root: {"buildid": "23850278"})
+
+    live = gamebuild.identify(game, tmp_path)
+    assert heal.adopt_baseline(game, live, tmp_path / "baselines").exists()
