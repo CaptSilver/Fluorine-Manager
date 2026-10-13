@@ -82,6 +82,15 @@ def binary_path() -> Path:
     return Path.home() / ".local" / "bin" / "me3"
 
 
+def binary_present() -> bool:
+    """Whether the me3 binary is a regular file this user can execute.
+
+    A binary that cannot be executed is as good as absent.
+    """
+    binary = binary_path()
+    return _is_file(binary) and os.access(binary, os.X_OK)
+
+
 def windows_bin_dir() -> Path:
     return _data_home() / "me3" / "windows-bin"
 
@@ -115,8 +124,7 @@ def status(paths: state.InstancePaths | None = None) -> Status:
 def _check(cache: dict) -> Status:
     binary = binary_path()
     shadows = _shadow_dirs(binary)
-    # A binary that cannot be executed is as good as absent.
-    if not _is_file(binary) or not os.access(binary, os.X_OK):
+    if not binary_present():
         return Status(MISSING, None, shadows)
     files = _section(cache, "files")
     if not _matches(files, binary, BINARY_MEMBER):
@@ -251,8 +259,8 @@ def install(
     notify = progress or (lambda message: None)
     _refuse_unsafe_binary(binary_path())
     staging = paths.me3_host_staging
-    shutil.rmtree(staging, ignore_errors=True)  # left behind by an interrupted install
     try:
+        _clear_staging(staging)
         staging.mkdir(parents=True)
     except OSError as exc:
         raise Me3HostError(f"cannot create {staging}: {exc}") from exc
@@ -262,6 +270,22 @@ def install(
         _place(extracted, notify)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def _clear_staging(staging: Path) -> None:
+    """Remove what an interrupted install left at the staging path.
+
+    The plugin owns that path, so a file or symlink there is removed too. A
+    symlink is unlinked, never followed.
+    """
+    try:
+        mode = os.lstat(staging).st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(mode):
+        shutil.rmtree(staging, ignore_errors=True)
+    else:
+        staging.unlink()
 
 
 def _refuse_unsafe_binary(binary: Path) -> None:
@@ -320,9 +344,9 @@ def _extract_members(archive: Path, staging: Path, notify: Progress) -> dict[str
     """Unpack the three pinned members and check each against its hash."""
     notify("Checking the archive")
     out = staging / "extracted"
-    out.mkdir()
     wanted = (BINARY_MEMBER, *WINDOWS_BIN_MEMBERS)
     try:
+        out.mkdir()
         with tarfile.open(archive, "r:gz") as tar:
             everything = tar.getmembers()
             for member in everything:
@@ -345,7 +369,10 @@ def _extract_members(archive: Path, staging: Path, notify: Progress) -> dict[str
 
     extracted: dict[str, Path] = {}
     for name in wanted:
-        actual = github.sha256_file(out / name)
+        try:
+            actual = github.sha256_file(out / name)
+        except OSError as exc:
+            raise Me3HostError(f"cannot read {name} back from {archive.name}: {exc}") from exc
         if actual != PIN.member_sha256[name]:
             raise IntegrityError(
                 f"{name} in {archive.name} has sha256 {actual}, but the pin expects "
@@ -361,7 +388,8 @@ def _place(extracted: dict[str, Path], notify: Progress) -> None:
         for name in WINDOWS_BIN_MEMBERS:
             notify(f"Installing {Path(name).name}")
             atomic.write_bytes_atomic(windows_bin / Path(name).name, extracted[name].read_bytes())
-        # The binary goes last: until it is replaced, status() says off_pin.
+        # The binary goes last so a pinned binary never sits next to Windows
+        # parts that were not replaced yet and could pass for an install.
         notify("Installing me3")
         atomic.write_bytes_atomic(
             binary_path(), extracted[BINARY_MEMBER].read_bytes(), mode=0o755

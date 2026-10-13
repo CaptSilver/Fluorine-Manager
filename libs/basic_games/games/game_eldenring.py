@@ -79,9 +79,9 @@ class EldenRingGame(BasicGame):
                 return []
             # No entry until me3 is installed. The executables list is filled
             # from the plugin at startup, so installing me3 later needs a restart.
-            binary = me3_host.binary_path()
-            if not me3_host._is_file(binary):
+            if not me3_host.binary_present():
                 return []
+            binary = me3_host.binary_path()
             paths = state.InstancePaths(organizer)
             game_dir = Path(self.dataDirectory().absolutePath())
             arguments = me3.entry_args(paths, game_dir)

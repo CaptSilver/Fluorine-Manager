@@ -157,6 +157,41 @@ class LocationTests(HostCase):
             self.assertEqual(me3_host.binary_path(), other / ".local/bin/me3")
 
 
+class BinaryPresentTests(HostCase):
+    def test_a_missing_binary_is_not_present(self) -> None:
+        self.assertFalse(me3_host.binary_present())
+
+    def test_an_executable_regular_file_is_present(self) -> None:
+        self.install_files()
+        self.assertTrue(me3_host.binary_present())
+
+    def test_a_file_without_the_execute_bit_is_not_present(self) -> None:
+        self.install_files()
+        self.binary.chmod(0o644)
+        if os.access(self.binary, os.X_OK):
+            self.skipTest("the execute bit is not enforced for this user")
+        self.assertFalse(me3_host.binary_present())
+
+    def test_a_directory_is_not_present(self) -> None:
+        self.binary.mkdir(parents=True)
+        self.assertFalse(me3_host.binary_present())
+
+    def test_a_symlink_to_an_executable_file_is_present(self) -> None:
+        target = self.tmp / "real-me3"
+        target.write_bytes(b"#!/bin/sh\n")
+        target.chmod(0o755)
+        self.binary.parent.mkdir(parents=True)
+        self.binary.symlink_to(target)
+        self.assertTrue(me3_host.binary_present())
+
+    def test_status_agrees_with_it(self) -> None:
+        self.install_files()
+        self.binary.chmod(0o644)
+        if os.access(self.binary, os.X_OK):
+            self.skipTest("the execute bit is not enforced for this user")
+        self.assertEqual(me3_host.status().kind, me3_host.MISSING)
+
+
 class StatusTests(HostCase):
     def test_missing_when_there_is_no_binary(self) -> None:
         status = me3_host.status(self.paths)
@@ -377,6 +412,15 @@ OLD = {
 
 
 class InstallCase(HostCase):
+    def setUp(self) -> None:
+        super().setUp()
+        # No install test may reach the network, whatever it forgets to patch.
+        patcher = mock.patch.object(
+            me3_host.github, "_urlopen", side_effect=AssertionError("network used")
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def use_archive(self, members: dict[str, bytes] = RELEASE) -> bytes:
         data = build_archive(members)
         self.archive = self.tmp / "me3-linux-amd64.tar.gz"
@@ -485,6 +529,80 @@ class InstallFromArchiveTests(InstallCase):
             me3_host.install(self.paths, self.archive)
         self.assertTrue(self.binary.is_dir())
 
+    def test_a_file_at_the_staging_path_is_replaced(self) -> None:
+        self.use_archive()
+        self.paths.me3_host_staging.parent.mkdir(parents=True)
+        self.paths.me3_host_staging.write_text("not a folder")
+        me3_host.install(self.paths, self.archive)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.OK)
+        self.assertFalse(os.path.lexists(self.paths.me3_host_staging))
+
+    def test_a_symlink_at_the_staging_path_is_removed_and_its_target_left_alone(self) -> None:
+        self.use_archive()
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "keep").write_text("mine")
+        self.paths.me3_host_staging.parent.mkdir(parents=True)
+        self.paths.me3_host_staging.symlink_to(elsewhere, target_is_directory=True)
+        me3_host.install(self.paths, self.archive)
+        self.assertFalse(os.path.lexists(self.paths.me3_host_staging))
+        self.assertEqual((elsewhere / "keep").read_text(), "mine")
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.OK)
+
+    def test_a_staging_path_that_cannot_be_cleared_is_a_readable_error(self) -> None:
+        self.use_archive()
+        self.paths.me3_host_staging.parent.mkdir(parents=True)
+        self.paths.me3_host_staging.write_text("not a folder")
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError("no")):
+            with self.assertRaises(me3_host.Me3HostError):
+                me3_host.install(self.paths, self.archive)
+        self.assertFalse(self.binary.exists())
+
+    def test_a_staging_folder_that_cannot_be_created_is_a_readable_error(self) -> None:
+        self.use_archive()
+        real_mkdir = Path.mkdir
+
+        def fail_for_staging(path, *args, **kwargs):
+            if path == self.paths.me3_host_staging:
+                raise PermissionError("read-only")
+            return real_mkdir(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "mkdir", fail_for_staging):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
+                me3_host.install(self.paths, self.archive)
+        self.assertIn("read-only", str(caught.exception))
+        self.assert_nothing_installed()
+
+    def test_an_extraction_folder_that_cannot_be_created_is_a_readable_error(self) -> None:
+        self.use_archive()
+        real_mkdir = Path.mkdir
+
+        def fail_for_extracted(path, *args, **kwargs):
+            if path.name == "extracted":
+                raise OSError("no space left")
+            return real_mkdir(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "mkdir", fail_for_extracted):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
+                me3_host.install(self.paths, self.archive)
+        self.assertIn("no space left", str(caught.exception))
+        self.assert_nothing_installed()
+
+    def test_a_member_that_cannot_be_read_back_for_hashing_is_a_readable_error(self) -> None:
+        self.use_archive()
+        real_hash = me3_host.github.sha256_file
+
+        def fail_for_members(path):
+            if "extracted" in Path(path).parts:
+                raise OSError("input/output error")
+            return real_hash(path)
+
+        with mock.patch.object(me3_host.github, "sha256_file", fail_for_members):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
+                me3_host.install(self.paths, self.archive)
+        self.assertIn("input/output error", str(caught.exception))
+        self.assert_nothing_installed()
+
     def test_an_interrupted_install_leaves_the_other_files_as_they_were(self) -> None:
         self.use_archive()
         self.install_files(OLD)
@@ -526,22 +644,15 @@ class EnsureTests(InstallCase):
             ],
         }
 
-    def no_network(self):
-        return mock.patch.object(
-            me3_host.github, "_urlopen", side_effect=AssertionError("network used")
-        )
-
     def test_an_install_that_matches_the_pin_downloads_nothing(self) -> None:
         self.install_files()
-        with self.no_network():
-            result = me3_host.ensure(organizer(self.instance))
+        result = me3_host.ensure(organizer(self.instance))
         self.assertFalse(result.installed)
         self.assertTrue(result.status.ok)
 
     def test_a_local_archive_with_the_pinned_hash_installs_without_a_download(self) -> None:
         self.use_archive()
-        with self.no_network():
-            result = me3_host.ensure(organizer(self.instance), archive=self.archive)
+        result = me3_host.ensure(organizer(self.instance), archive=self.archive)
         self.assertTrue(result.installed)
         self.assertTrue(result.status.ok)
 

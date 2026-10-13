@@ -106,6 +106,7 @@ class GameCase(unittest.TestCase):
         binary = self.home / ".local/bin/me3"
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b"#!/bin/sh\n")
+        binary.chmod(0o755)
         return binary
 
 
@@ -152,6 +153,14 @@ class ExecutablesTests(GameCase):
         self.assertEqual(self.game.executables(), [])
 
     def test_no_entry_until_me3_is_installed(self) -> None:
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+        self.assertEqual(self.game.executables(), [])
+
+    def test_no_entry_for_a_me3_that_cannot_be_executed(self) -> None:
+        self.put_me3().chmod(0o644)
+        if os.access(self.home / ".local/bin/me3", os.X_OK):
+            self.skipTest("the execute bit is not enforced for this user")
         self.game.setGamePath(self.install)
         self.game.init(self.organizer)
         self.assertEqual(self.game.executables(), [])
