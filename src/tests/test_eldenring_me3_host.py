@@ -156,7 +156,51 @@ class StatusTests(HostCase):
         self.install_files({**FILES, "bin/me3": FILES["bin/me3"] + b"# rebuilt\n"})
         status = me3_host.status(self.paths)
         self.assertEqual(status.kind, me3_host.OFF_PIN)
-        self.assertEqual(status.version, "me3 0.13.0")
+        self.assertIsNone(status.version)
+
+    def test_an_unverified_binary_is_never_executed(self) -> None:
+        self.install_files({**FILES, "bin/me3": FILES["bin/me3"] + b"# rebuilt\n"})
+        with mock.patch.object(me3_host.subprocess, "run") as run:
+            me3_host.status(self.paths)
+        run.assert_not_called()
+
+    def test_a_symlink_to_the_pinned_bytes_is_ok(self) -> None:
+        self.install_files()
+        real = self.tmp / "real-me3"
+        self.binary.rename(real)
+        self.binary.symlink_to(real)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.OK)
+
+    def test_a_symlink_to_other_bytes_is_off_pin(self) -> None:
+        self.install_files()
+        real = self.tmp / "real-me3"
+        real.write_bytes(b"#!/bin/sh\necho other\n")
+        real.chmod(0o755)
+        self.binary.unlink()
+        self.binary.symlink_to(real)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.OFF_PIN)
+
+    def test_an_unsearchable_parent_directory_is_missing_not_an_error(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        self.install_files()
+        parent = self.binary.parent
+        parent.chmod(0)
+        self.addCleanup(parent.chmod, 0o755)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.MISSING)
+
+    def test_an_unsearchable_windows_bin_dir_is_a_missing_component(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        self.install_files()
+        directory = me3_host.windows_bin_dir()
+        directory.chmod(0)
+        self.addCleanup(directory.chmod, 0o755)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.WINDOWS_BIN_MISSING)
+
+    def test_an_unsearchable_shadow_parent_does_not_raise(self) -> None:
+        with mock.patch.object(Path, "stat", side_effect=PermissionError("denied")):
+            self.assertEqual(me3_host.status().kind, me3_host.MISSING)
 
     def test_the_printed_version_never_decides_the_status(self) -> None:
         liar = {**FILES, "bin/me3": b"#!/bin/sh\necho 'me3 9.9.9'\n"}
@@ -234,12 +278,14 @@ class CacheTests(HostCase):
     def test_a_changed_binary_is_noticed_and_probed_again(self) -> None:
         self.install_files()
         me3_host.status(self.paths)
-        self.binary.write_bytes(FILES["bin/me3"] + b"# changed\n")
+        newer = {**FILES, "bin/me3": b"#!/bin/sh\necho 'me3 0.14.0'\n"}
+        self.binary.write_bytes(newer["bin/me3"])
         os.utime(self.binary, ns=(5, 5))
+        self.use_pin(pin_for(newer))
         real_run = subprocess.run
         with mock.patch.object(me3_host.subprocess, "run", wraps=real_run) as run:
             status = me3_host.status(self.paths)
-        self.assertEqual(status.kind, me3_host.OFF_PIN)
+        self.assertEqual((status.kind, status.version), (me3_host.OK, "me3 0.14.0"))
         self.assertEqual(run.call_count, 1)
 
     def test_the_cache_lives_under_the_instance_and_is_rewritten_only_when_it_changed(self) -> None:
@@ -276,11 +322,11 @@ class VersionProbeTests(HostCase):
             status = me3_host.status(self.paths)
         self.assertEqual((status.kind, status.version), (me3_host.OK, None))
 
-    def test_a_binary_that_cannot_be_executed_is_ignored(self) -> None:
+    def test_a_pinned_binary_that_cannot_be_executed_counts_as_missing(self) -> None:
         self.install_files()
         self.binary.chmod(0o644)
         status = me3_host.status(self.paths)
-        self.assertEqual((status.kind, status.version), (me3_host.OK, None))
+        self.assertEqual((status.kind, status.version), (me3_host.MISSING, None))
 
     def test_the_probe_has_a_timeout(self) -> None:
         self.install_files()
