@@ -35,6 +35,12 @@ class AtomicWriteTests(TempDirCase):
         atomic.write_bytes_atomic(target, b"data")
         self.assertEqual(target.read_bytes(), b"data")
 
+    def test_a_successful_write_leaves_only_the_target_in_its_folder(self) -> None:
+        target = self.tmp / "folder" / "current.me3"
+        atomic.write_bytes_atomic(target, b"one")
+        atomic.write_bytes_atomic(target, b"two")
+        self.assertEqual([p.name for p in target.parent.iterdir()], ["current.me3"])
+
     def test_replaces_an_existing_file(self) -> None:
         target = self.tmp / "current.me3"
         target.write_bytes(b"old")
@@ -226,8 +232,8 @@ class LoaderTests(unittest.TestCase):
     def test_the_loader_needs_none_of_the_native_library_variables(self) -> None:
         # test_erm_suite is given FLUORINE_OOZ_LIB and FLUORINE_ER_TESTLIBS; the
         # unit tests are not, so importing ermlib must work without them. A
-        # child process, because loading the package twice in one process would
-        # split the one-copy-of-ermlib rule.
+        # child process, so the check starts from an interpreter that has not
+        # already loaded the package with those variables set.
         dropped = {"FLUORINE_OOZ_LIB", "FLUORINE_ER_TESTLIBS", "MO2_BASE_DIR", "MO2_LIBS_DIR"}
         env = {key: value for key, value in os.environ.items() if key not in dropped}
         env["PYTHONPATH"] = str(Path(__file__).parent)

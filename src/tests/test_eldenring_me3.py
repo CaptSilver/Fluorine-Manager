@@ -31,7 +31,8 @@ def split_like_fluorine(line: str, scratch: Path) -> list[str]:
     script.write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n")
     process = QProcess()
     process.startCommand(f'"{sys.executable}" "{script}" {line}')
-    assert process.waitForFinished(30000), "the argv probe did not run to completion"
+    if not process.waitForFinished(30000):
+        raise RuntimeError("the argv probe did not run to completion")
     return json.loads(bytes(process.readAllStandardOutput()).decode())
 
 
@@ -64,11 +65,22 @@ class RenderTests(Me3Case):
     def test_savefile_is_a_top_level_key_and_not_part_of_a_table(self) -> None:
         # A key written after a [[table]] header belongs to that table; me3
         # would ignore it and a modded session would write ER0000.sl2.
-        text = me3.render([("Mod", self.tmp / "m")], [self.tmp / "a.dll"], "ER0000_modded")
-        parsed = self.parse(text)
-        self.assertEqual(parsed["savefile"], "ER0000_modded")
-        self.assertNotIn("savefile", parsed["supports"][0])
-        self.assertLess(text.index("savefile"), text.index("[["))
+        cases = {
+            "neither": ([], []),
+            "packages only": ([("Mod", self.tmp / "m")], []),
+            "natives only": ([], [self.tmp / "a.dll"]),
+            "both": ([("Mod", self.tmp / "m")], [self.tmp / "a.dll"]),
+        }
+        for label, (packages, natives) in cases.items():
+            with self.subTest(label):
+                text = me3.render(packages, natives, "ER0000_modded")
+                parsed = self.parse(text)
+                self.assertEqual(parsed["savefile"], "ER0000_modded")
+                for table in ("supports", "natives", "packages"):
+                    for entry in parsed.get(table, []):
+                        self.assertNotIn("savefile", entry)
+                if packages or natives:
+                    self.assertLess(text.index("savefile"), text.index("[["))
 
     def test_there_is_no_savefile_line_when_none_is_given(self) -> None:
         self.assertNotIn("savefile", me3.render([], [], None))
@@ -100,6 +112,14 @@ class RenderTests(Me3Case):
     def test_a_control_character_in_a_path_is_refused(self) -> None:
         with self.assertRaises(ValueError):
             me3.render([], [Path("/tmp/a\nb.dll")], None)
+        with self.assertRaises(ValueError):
+            me3.render([("Mod", Path("/tmp/mods/a\nb"))], [], None)
+
+    def test_a_del_character_in_a_path_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            me3.render([], [Path("/tmp/a\x7fb.dll")], None)
+        with self.assertRaises(ValueError):
+            me3.render([("Mod", Path("/tmp/mods/a\x7fb"))], [], None)
 
     def test_unusable_savefile_names_are_refused_and_the_key_is_named(self) -> None:
         for bad in ("", "a/b", "a:b", 'a"b', "a|b", "a\nb", "a\x7fb", "a\x85b"):
