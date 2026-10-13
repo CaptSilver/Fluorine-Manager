@@ -1,3 +1,5 @@
+import hashlib
+import os
 import struct
 import zlib
 
@@ -318,6 +320,88 @@ def test_the_compressed_frame_matches_the_pinned_digest():
     If it fires, the options are to match zstd versions across the party or to
     distribute one built file instead of building it on each machine.
     """
-    import hashlib
     frame = dcx.write_zstd(_PINNED_PAYLOAD)[dcx.HEADER_SIZE:]
     assert hashlib.sha256(frame).hexdigest() == _PINNED_FRAME_SHA256
+
+
+def _mapped_files():
+    """Every file this process has mapped, from /proc/self/maps. The kernel
+    prints resolved paths, so symlinks never show up here."""
+    with open("/proc/self/maps") as maps:
+        return {fields[5].strip() for fields in (line.split(None, 5) for line in maps)
+                if len(fields) == 6}
+
+
+@pytest.fixture
+def bundled_libs():
+    """The lib/ of the bundle-shaped tree CMake stages under
+    FLUORINE_ER_TESTLIBS, holding a copy of the build container's libzstd.
+    Skips only when the variable is unset (a dev box). Under ctest it is always
+    set, and a missing library then is a broken build, so that fails."""
+    root = os.environ.get("FLUORINE_ER_TESTLIBS")
+    if not root:
+        pytest.skip("FLUORINE_ER_TESTLIBS is not set")
+    libs = os.path.join(root, "lib")
+    assert os.path.isfile(os.path.join(libs, dcx.BUNDLED_LIBZSTD)), libs
+    return libs
+
+
+@pytest.fixture
+def launcher_env(monkeypatch):
+    """Set the variables the packaged launcher exports; MO2_LIBS_DIR is left
+    unset when `libs` is None."""
+    def set_env(libs):
+        monkeypatch.setenv("MO2_BASE_DIR", "/opt/fluorine")
+        if libs is None:
+            monkeypatch.delenv("MO2_LIBS_DIR", raising=False)
+        else:
+            monkeypatch.setenv("MO2_LIBS_DIR", str(libs))
+    return set_env
+
+
+def test_the_bundled_libzstd_is_the_one_loaded(bundled_libs, launcher_env):
+    """Not vacuous: ctest sets no MO2_BASE_DIR, so this case enters bundle mode
+    itself, then checks which file the dynamic loader actually mapped. The
+    CDLL object only remembers the string it was given."""
+    launcher_env(bundled_libs)
+    dcx._zstd()
+    expected = os.path.realpath(os.path.join(bundled_libs, dcx.BUNDLED_LIBZSTD))
+    assert expected in _mapped_files()
+
+
+def test_the_bundled_libzstd_writes_the_pinned_frame(bundled_libs, launcher_env):
+    """The lockstep property itself: the library Fluorine ships, not merely
+    some libzstd, emits the bytes every co-op partner's regulation.bin needs."""
+    launcher_env(bundled_libs)
+    frame = dcx.write_zstd(_PINNED_PAYLOAD)[dcx.HEADER_SIZE:]
+    assert hashlib.sha256(frame).hexdigest() == _PINNED_FRAME_SHA256
+    assert dcx.read(dcx.write_zstd(_PINNED_PAYLOAD)) == _PINNED_PAYLOAD
+
+
+def test_the_bundle_never_falls_back_to_another_libzstd(tmp_path, launcher_env):
+    """A lib/ without libzstd.so.1 must stop the merge. Quietly using the
+    host's copy, the stdlib module or a pip package would build a regulation
+    that may differ from the one the other players build."""
+    launcher_env(tmp_path)
+    with pytest.raises(dcx.DcxError, match="libzstd.so.1"):
+        dcx.write_zstd(b"payload" * 100)
+    blob = dcx.write_dflt(b"payload")
+    assert dcx.read(blob) == b"payload"  # the other codecs do not need it
+
+
+def test_the_bundle_needs_to_know_where_its_libraries_are(launcher_env):
+    launcher_env(None)
+    with pytest.raises(dcx.DcxError, match="MO2_LIBS_DIR"):
+        dcx.write_zstd(b"payload" * 100)
+
+
+def test_an_empty_launcher_variable_is_not_a_bundle(monkeypatch):
+    """The dev-box backend order (stdlib module first) applies unless the
+    launcher really exported MO2_BASE_DIR."""
+    monkeypatch.setenv("MO2_BASE_DIR", "")
+    monkeypatch.delenv("MO2_LIBS_DIR", raising=False)
+    assert dcx._backends() is dcx._BACKENDS
+
+
+def test_zstd_round_trips_an_empty_payload():
+    assert dcx.read(dcx.write_zstd(b"")) == b""

@@ -14,6 +14,7 @@ current build.
 import ctypes
 import ctypes.util
 import importlib
+import os
 import platform
 import struct
 import zlib
@@ -106,8 +107,51 @@ class _ZstdBuffer(ctypes.Structure):
                 ("pos", ctypes.c_size_t)]
 
 
+BUNDLED_LIBZSTD = "libzstd.so.1"
+
+
+def _in_bundle():
+    """True under the Fluorine launcher, which exports MO2_BASE_DIR."""
+    return bool(os.environ.get("MO2_BASE_DIR"))
+
+
+def _open_libzstd():
+    """Load libzstd, from the bundle when there is one.
+
+    Inside the bundle the only candidate is <MO2_LIBS_DIR>/libzstd.so.1, by
+    absolute path. A failure there is a DcxError, not an ImportError, so the
+    backend loop in _zstd() stops instead of moving on: find_library() asks
+    ldconfig for the host's copy, and zstd output differs between library
+    versions. Co-op partners compare the regulation.bin each machine builds,
+    so one of them quietly compressing with another libzstd would show up as a
+    failure to connect.
+    """
+    if not _in_bundle():
+        name = ctypes.util.find_library("zstd") or "libzstd.so.1"
+        try:
+            lib = ctypes.CDLL(name)
+            lib.ZSTD_versionNumber()
+        except (OSError, AttributeError) as exc:
+            raise ImportError(f"libzstd not usable via ctypes ({exc})") from exc
+        return lib
+    libs_dir = os.environ.get("MO2_LIBS_DIR")
+    if not libs_dir:
+        raise DcxError(
+            "MO2_BASE_DIR is set but MO2_LIBS_DIR is not, so the libzstd "
+            "shipped with Fluorine cannot be located")
+    path = os.path.join(libs_dir, BUNDLED_LIBZSTD)
+    try:
+        lib = ctypes.CDLL(path)
+        lib.ZSTD_versionNumber()
+    except (OSError, AttributeError) as exc:
+        raise DcxError(
+            f"the libzstd shipped with Fluorine could not be loaded from "
+            f"{path}: {exc}") from exc
+    return lib
+
+
 def _ctypes_libzstd(_unused=None):
-    """The system libzstd through ctypes — no Python package required.
+    """libzstd through ctypes — no Python package required.
 
     This is the one backend that needs nothing installed: anything that ships
     the zstd tool ships the shared library, which on SteamOS pacman itself
@@ -117,12 +161,7 @@ def _ctypes_libzstd(_unused=None):
     Output is byte-identical to the Python bindings, which matters because a
     regulation.bin is built on each machine and co-op compares the file.
     """
-    name = ctypes.util.find_library("zstd") or "libzstd.so.1"
-    try:
-        lib = ctypes.CDLL(name)
-        lib.ZSTD_versionNumber()
-    except (OSError, AttributeError) as exc:
-        raise ImportError(f"libzstd not usable via ctypes ({exc})") from exc
+    lib = _open_libzstd()
 
     lib.ZSTD_createCCtx.restype = ctypes.c_void_p
     lib.ZSTD_freeCCtx.argtypes = [ctypes.c_void_p]
@@ -194,6 +233,15 @@ _BACKENDS = (("compression.zstd", _stdlib_zstd), (None, _ctypes_libzstd),
              ("pyzstd", _pyzstd), ("zstandard", _zstandard))
 
 
+def _backends():
+    """The backends _zstd() tries. Inside the bundle that is the bundled
+    libzstd alone: the stdlib module and the pip packages carry their own
+    libzstd, whose output may differ from the one Fluorine ships. Read from
+    the environment on each call rather than at import, so there is no state
+    to reset between a bundled run and a dev-box run."""
+    return ((None, _ctypes_libzstd),) if _in_bundle() else _BACKENDS
+
+
 def _zstd():
     """(decompress, compress, error_type) from the first available zstd backend.
 
@@ -201,7 +249,7 @@ def _zstd():
     importing it at module scope took all of erm down on an older interpreter,
     including every command that has nothing to do with ZSTD.
     """
-    for name, adapt in _BACKENDS:
+    for name, adapt in _backends():
         try:
             return adapt(importlib.import_module(name) if name else None)
         except ImportError:
