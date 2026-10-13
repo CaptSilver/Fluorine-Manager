@@ -237,6 +237,7 @@ add_subdirectory(libs/bsatk)      # static lib, needs dds-header + boost + zlib 
 add_subdirectory(libs/libbsarch)  # shared + static, needs dds-header
 add_subdirectory(libs/7zip)        # builds 7z.so from source (Linux only)
 add_subdirectory(libs/archive)    # shared lib, needs dl
+add_subdirectory(libs/ooz)        # shared lib, libc only
 
 add_subdirectory(libs/uibase)     # shared lib, needs Qt6 + spdlog
 

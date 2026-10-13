@@ -290,6 +290,8 @@ fi
 cp -f build/libs/uibase/src/libuibase.so "${OUT_DIR}/lib/"
 cp -f build/libs/libbsarch/liblibbsarch.so "${OUT_DIR}/lib/"
 cp -f build/libs/archive/src/libarchive.so "${OUT_DIR}/lib/"
+cp -f build/libs/ooz/libooz.so "${OUT_DIR}/lib/"
+cp -f libs/ooz/README.md "${OUT_DIR}/licenses/ooz-README.md"
 cp -f build/libs/plugin_python/src/runner/librunner.so "${OUT_DIR}/lib/"
 if [ -f "build/libs/bsa_ffi/cargo/release/libbsa_ffi.so" ]; then
     cp -f build/libs/bsa_ffi/cargo/release/libbsa_ffi.so "${OUT_DIR}/lib/"
