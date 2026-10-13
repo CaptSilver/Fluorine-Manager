@@ -1,0 +1,325 @@
+import os
+import struct
+import types
+from pathlib import Path
+
+import pytest
+
+from ermlib.formats import param
+from ermlib.formats.param import ParamError
+from tests.build_fixtures import make_param
+
+
+def test_read_exposes_ids_stride_and_row_data():
+    blob = make_param([10, 20, 30])
+    p = param.read(blob)
+    assert [r.id for r in p.rows] == [10, 20, 30]
+    assert p.stride == 8
+    assert p.rows[1].data == bytes([20]) * 8
+    assert p.param_type == b"TEST_PARAM_ST"
+
+
+def test_round_trip_is_byte_identical():
+    blob = make_param([1, 2, 3, 900])
+    assert param.write(param.read(blob)) == blob
+
+
+def test_round_trip_of_a_single_row_param():
+    # The 11 single-row params have no offset gap to derive a stride from, so
+    # they exercise the fallback path rather than the delta scan.
+    blob = make_param([7], stride=64)
+    p = param.read(blob)
+    assert p.stride == 64
+    assert param.write(p) == blob
+
+
+def test_inserting_a_row_grows_the_file_by_stride_plus_table_entry():
+    # The arithmetic oracle: one row costs its data plus its 24-byte table slot.
+    blob = make_param([10, 30])
+    p = param.read(blob)
+    grown = param.replace_rows(p, list(p.rows) + [param.Row(20, bytes([20]) * 8, p.rows[0].name_off)])
+    out = param.write(grown)
+    assert len(out) == len(blob) + p.stride + 24
+
+
+def test_replace_rows_keeps_ids_sorted_ascending():
+    blob = make_param([10, 30])
+    p = param.read(blob)
+    grown = param.replace_rows(p, list(p.rows) + [param.Row(20, b"\x20" * 8, p.rows[0].name_off)])
+    assert [r.id for r in param.read(param.write(grown)).rows] == [10, 20, 30]
+
+
+def test_replace_rows_rewrites_offsets_so_the_result_reparses():
+    blob = make_param([1, 2])
+    p = param.read(blob)
+    new = param.replace_rows(p, list(p.rows) + [param.Row(3, b"\xaa" * 8, p.rows[0].name_off)])
+    reparsed = param.read(param.write(new))
+    assert [r.id for r in reparsed.rows] == [1, 2, 3]
+    assert reparsed.rows[2].data == b"\xaa" * 8
+    assert reparsed.param_type == b"TEST_PARAM_ST"
+
+
+def test_row_count_and_offsets_stay_consistent_after_a_write():
+    blob = make_param([5, 6])
+    p = param.read(blob)
+    new = param.replace_rows(p, list(p.rows) + [param.Row(7, b"\x07" * 8, p.rows[0].name_off)])
+    out = param.write(new)
+    strings_off, = struct.unpack_from("<I", out, 0x00)
+    row_count, = struct.unpack_from("<H", out, 0x0A)
+    data_off, = struct.unpack_from("<q", out, 0x30)
+    assert row_count == 3
+    assert data_off == 0x40 + 3 * 24
+    assert strings_off == data_off + 3 * 8
+
+
+def test_rejects_rows_of_differing_length():
+    blob = make_param([1, 2])
+    p = param.read(blob)
+    with pytest.raises(ParamError, match="stride"):
+        param.write(param.replace_rows(p, [param.Row(1, b"short", p.rows[0].name_off)]))
+
+
+def test_write_tolerates_the_duplicate_ids_real_params_ship():
+    """RandomAppearParam ships 5,322 rows for 5,296 unique ids. Refusing to
+    write duplicates would make that file unrepresentable; the ambiguity only
+    matters when patching, which is where it's rejected."""
+    blob = make_param([1, 2, 2, 3])
+    assert param.write(param.read(blob)) == blob
+
+
+def test_patch_refuses_to_insert_an_id_that_already_exists():
+    p = param.read(make_param([1, 2]))
+    with pytest.raises(ParamError, match="already exist"):
+        param.patch_rows(p, insert={2: b"\x02" * 8})
+
+
+def test_patch_refuses_to_overwrite_an_id_that_is_absent():
+    # Guards the "base file is not what the patch was built against" case: if
+    # the row we meant to replace isn't there, silently inserting it would
+    # apply the patch to a file it was never validated against.
+    p = param.read(make_param([1, 2]))
+    with pytest.raises(ParamError, match="not in this param"):
+        param.patch_rows(p, overwrite={99: b"\x99" * 8})
+
+
+def test_patch_refuses_a_param_with_ambiguous_duplicate_ids():
+    p = param.read(make_param([1, 2, 2]))
+    with pytest.raises(ParamError, match="duplicate"):
+        param.patch_rows(p, insert={5: b"\x05" * 8})
+
+
+def test_patch_overwrites_and_inserts_in_one_pass():
+    p = param.read(make_param([10, 30]))
+    out = param.read(param.write(param.patch_rows(
+        p, overwrite={10: b"\xee" * 8}, insert={20: b"\xdd" * 8})))
+    assert out.row_ids() == [10, 20, 30]
+    assert out.rows[0].data == b"\xee" * 8
+    assert out.rows[1].data == b"\xdd" * 8
+    assert out.rows[2].data == bytes([30]) * 8      # untouched
+
+
+def test_patch_leaves_every_other_row_byte_identical():
+    # The whole point of a narrow patch: nothing outside the named ids moves.
+    p = param.read(make_param([1, 2, 3, 4, 5]))
+    patched = param.read(param.write(param.patch_rows(p, insert={6: b"\x06" * 8})))
+    before = {r.id: r.data for r in p.rows}
+    after = {r.id: r.data for r in patched.rows}
+    assert all(after[i] == before[i] for i in before)
+
+
+def test_rejects_a_ragged_stride():
+    """A param whose consecutive row offsets disagree isn't fixed-stride, and
+    treating it as one would slice rows out of the middle of their neighbours."""
+    blob = bytearray(make_param([1, 2, 3]))
+    # push row 2's data offset 4 bytes late without moving anything else
+    off_pos = 0x40 + 1 * 24 + 8
+    cur, = struct.unpack_from("<q", blob, off_pos)
+    struct.pack_into("<q", blob, off_pos, cur + 4)
+    with pytest.raises(ParamError, match="stride"):
+        param.read(bytes(blob))
+
+
+def test_a_zero_name_offset_is_preserved_not_relocated():
+    """0 means "this row has no name" and shipped params use it. Treating it as
+    an address and adding the strings-block shift turns it into a pointer at
+    whatever now sits at that offset."""
+    blob = bytearray(make_param([1, 2]))
+    struct.pack_into("<q", blob, 0x40 + 16, 0)          # row 1: no name
+    p = param.read(bytes(blob))
+    assert p.rows[0].name_off == 0
+    out = param.read(param.write(param.patch_rows(p, insert={3: b"\x03" * 8})))
+    assert out.rows[0].name_off == 0
+
+
+def test_refuses_to_move_a_name_offset_that_sits_before_the_strings_block():
+    # Such an offset belongs to a region whose displacement we never measured,
+    # so relocating it on a row-count change would be a guess.
+    blob = bytearray(make_param([1, 2]))
+    struct.pack_into("<q", blob, 0x40 + 16, 8)
+    p = param.read(bytes(blob))
+    assert param.write(p) == bytes(blob)                # unchanged count is fine
+    with pytest.raises(ParamError, match="before the strings block"):
+        param.write(param.patch_rows(p, insert={3: b"\x03" * 8}))
+
+
+def test_rejects_a_truncated_param():
+    blob = make_param([1, 2, 3])
+    with pytest.raises(ParamError):
+        param.read(blob[:0x30])
+
+
+def test_round_trip_preserves_the_bytes_between_the_last_row_and_the_strings():
+    """40 of the params in a real regulation keep the head of their type name
+    there, so a writer that dropped or zero-filled the region would strip those
+    bytes out of every one of them."""
+    blob = make_param([1, 2], tail=b"ASSET_MA")
+    p = param.read(blob)
+    assert p.tail == b"ASSET_MA"
+    assert param.write(p) == blob
+
+
+def test_write_refuses_to_move_a_param_type_that_starts_before_the_strings():
+    """50 shipped params keep their type name straddling the strings boundary.
+    How far the leading part would move is never measured, so a row-count change
+    that shifts the block has to be refused instead of guessed at."""
+    blob = bytearray(make_param([1, 2], tail=b"TYPE"))
+    strings_off, = struct.unpack_from("<I", blob, 0x00)
+    struct.pack_into("<q", blob, 0x10, strings_off - 4)
+    p = param.read(bytes(blob))
+    assert param.write(p) == bytes(blob)        # an unchanged row count is fine
+    with pytest.raises(ParamError, match="param type string sits before"):
+        param.write(param.patch_rows(p, insert={3: b"\x03" * 8}))
+
+
+def test_rejects_a_row_offset_that_lands_before_the_row_data_section():
+    """A row-data offset below data_off slices out of the header or, when it is
+    negative, out of the file's tail — Python counts a negative index from the
+    end instead of raising, so the ascending and overrun checks both pass and
+    the caller gets fabricated row bytes stamped into a merged regulation."""
+    blob = bytearray(make_param([1, 2]))
+    for i, off in enumerate((-32, -24)):
+        struct.pack_into("<q", blob, 0x40 + i * 24 + 8, off)
+    with pytest.raises(ParamError, match="precedes the row-data section"):
+        param.read(bytes(blob))
+
+
+def test_rejects_duplicate_row_offsets_that_derive_a_zero_stride():
+    """Two rows pointing at the same offset are ascending (sorted() permits
+    equals) and sit inside the file, but the only gap between them is 0, so
+    every row would read back as empty bytes."""
+    blob = bytearray(make_param([1, 2]))
+    first, = struct.unpack_from("<q", blob, 0x40 + 8)
+    struct.pack_into("<q", blob, 0x40 + 24 + 8, first)
+    with pytest.raises(ParamError, match="stride"):
+        param.read(bytes(blob))
+
+
+def test_rejects_a_single_row_whose_offset_sits_past_the_strings_block():
+    """With one row the stride is the distance to the strings block, so an
+    offset past it derives a negative width — which slips under the overrun
+    check by construction and hands back an empty row."""
+    blob = bytearray(make_param([7], stride=64))
+    strings_off, = struct.unpack_from("<I", blob, 0x00)
+    struct.pack_into("<q", blob, 0x40 + 8, strings_off + 8)
+    with pytest.raises(ParamError, match="stride"):
+        param.read(bytes(blob))
+
+
+# --- integration: real game data, skipped when it isn't on this machine ---
+
+def test_the_regulation_key_is_the_one_the_retail_game_ships():
+    """The fixture below is the only thing that decrypts a real regulation.bin,
+    and it skips on a machine without the game, so nothing else would notice a
+    mistyped digit in a constant that never legitimately changes."""
+    import hashlib
+
+    from ermlib.formats import regulation
+    assert hashlib.sha256(regulation.KEY).hexdigest() == (
+        "cb349d15a6492969e3c801dbf4d60c721e9c58abd4b40cfc5b87aff253d68c72")
+
+
+def _regulation_params(path):
+    """Go through regulation.entries rather than re-deriving the decrypt here:
+    a private copy of the key and the unwrap steps agrees with itself whatever
+    the shipping module says, which leaves regulation.KEY -- the key behind
+    every merge, heal and rebase -- with nothing testing it."""
+    from ermlib.formats import regulation
+    return regulation.entries(path.read_bytes())
+
+
+@pytest.fixture(scope="module")
+def clevers_regulation():
+    """The params of a real regulation.bin: the one in the Game/ directory
+    FLUORINE_ER_GAME_DIR names. None is kept in the repo, so without the
+    variable these cases skip."""
+    game = os.environ.get("FLUORINE_ER_GAME_DIR")
+    if not game:
+        pytest.skip("FLUORINE_ER_GAME_DIR is not set")
+    try:
+        return _regulation_params(Path(game) / "regulation.bin")
+    except OSError as exc:
+        pytest.skip(f"FLUORINE_ER_GAME_DIR holds no readable regulation.bin: {exc}")
+
+
+def test_every_readable_param_in_a_real_regulation_round_trips(clevers_regulation):
+    """The cheapest guard on the offset-reflow logic. A param that reads but
+    writes back differently means the header re-stamp or the strings shift is
+    wrong, and nothing else in the suite would notice."""
+    checked, failed = [], []
+    for entry in clevers_regulation:
+        try:
+            parsed = param.read(entry.data)
+        except ParamError:
+            continue            # a layout this reader refuses is not a round-trip claim
+        checked.append(entry.id)
+        if param.write(parsed) != entry.data:
+            failed.append(entry.id)
+    assert checked, "no params were readable at all — the container layer is broken"
+    assert not failed, f"params did not round-trip byte-identically: {failed}"
+
+
+def _speffect_entry(entries):
+    """The SP_EFFECT_PARAM_ST entry. A current regulation holds a few DLC params
+    in layouts this reader refuses (the round-trip case above passes them over),
+    so they are passed over here too instead of ending the search."""
+    for entry in entries:
+        try:
+            if param.read(entry.data).param_type == b"SP_EFFECT_PARAM_ST":
+                return entry
+        except ParamError:
+            continue
+    pytest.fail("the regulation holds no readable SP_EFFECT_PARAM_ST")
+
+
+def test_the_speffect_search_passes_over_a_param_the_reader_refuses():
+    refused = types.SimpleNamespace(data=b"not a param")
+    wanted = types.SimpleNamespace(
+        data=make_param([1], param_type=b"SP_EFFECT_PARAM_ST"))
+    assert _speffect_entry([refused, wanted]) is wanted
+
+
+def test_patching_speffect_rows_leaves_every_other_row_untouched(clevers_regulation):
+    """The invariant the whole narrow-patch design exists to protect: inserting
+    rows must not disturb a single byte of anything else, and in particular must
+    not revert an authored row back to vanilla."""
+    speffect = _speffect_entry(clevers_regulation)
+    base = param.read(speffect.data)
+    blob = b"\xa5" * base.stride
+    new_ids = [i for i in (990001, 990002) if i not in set(base.row_ids())]
+    patched = param.read(param.write(param.patch_rows(
+        base, insert={i: blob for i in new_ids})))
+
+    before = {r.id: r.data for r in base.rows}
+    after = {r.id: r.data for r in patched.rows}
+    assert len(patched.rows) == len(base.rows) + len(new_ids)
+    assert all(after[i] == before[i] for i in before)
+    assert all(after[i] == blob for i in new_ids)
+    assert patched.row_ids() == sorted(patched.row_ids())
+
+
+def test_a_row_insert_costs_exactly_its_data_plus_its_table_entry(clevers_regulation):
+    speffect = _speffect_entry(clevers_regulation)
+    base = param.read(speffect.data)
+    ids = [i for i in (990001, 990002) if i not in set(base.row_ids())]
+    out = param.write(param.patch_rows(base, insert={i: b"\x00" * base.stride for i in ids}))
+    assert len(out) - len(speffect.data) == len(ids) * (base.stride + 24)

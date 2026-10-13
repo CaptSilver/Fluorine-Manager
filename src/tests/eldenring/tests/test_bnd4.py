@@ -1,0 +1,431 @@
+import os
+import struct
+import sys
+from pathlib import Path
+
+import pytest
+
+from ermlib.formats import bnd4, dcx
+from tests.build_fixtures import _synthetic_bnd4
+
+SAMPLES_ENV = "FLUORINE_ER_KRAKEN_SAMPLES"
+
+
+def _sample_candidates():
+    """Kraken-compressed archives under the directory SAMPLES_ENV names, which
+    holds chr/c0000.behbnd.dcx and msg/engus/{item,menu}_dlc02.msgbnd.dcx. No
+    game data is kept in the repo, so with the variable unset there are none."""
+    root = os.environ.get(SAMPLES_ENV)
+    if not root:
+        return []
+    root = Path(root)
+    return [
+        root / "chr/c0000.behbnd.dcx",
+        root / "msg/engus/item_dlc02.msgbnd.dcx",
+        root / "msg/engus/menu_dlc02.msgbnd.dcx",
+    ]
+
+
+REAL_ARCHIVE_CANDIDATES = _sample_candidates()
+
+
+def _no_kraken_reason():
+    """Why there is nothing to test against, in terms a maintainer can act on.
+
+    Built from REAL_ARCHIVE_CANDIDATES rather than written out beside it, so
+    reordering the candidates cannot leave the message pointing at files the
+    resolver never opens. A candidate that is present but not KRAK gets named
+    with the method it does carry -- "nothing on disk" and "erm rewrote this one
+    as DFLT when it merged the path" are different problems with different
+    fixes.
+    """
+    present = []
+    for candidate in REAL_ARCHIVE_CANDIDATES:
+        try:
+            method = candidate.read_bytes()[0x28:0x2C]
+        except OSError:
+            continue
+        present.append(f"{candidate} is DCX {method!r}")
+    if not REAL_ARCHIVE_CANDIDATES:
+        return (f"No Kraken archive to test against: {SAMPLES_ENV} is not set. "
+                "Point it at a directory holding chr/c0000.behbnd.dcx and "
+                "msg/engus/item_dlc02.msgbnd.dcx.")
+    reason = ("No Kraken archive found. Checked: "
+              + ", ".join(str(p) for p in REAL_ARCHIVE_CANDIDATES))
+    if present:
+        reason += ". Present but unusable: " + ", ".join(present)
+    return reason
+
+
+def _resolve_real_archive():
+    """Find a real Kraken-compressed BND4 to test rebuild against.
+
+    Existence alone is not enough to pick one. Declaring a merge for a path
+    moves that archive into the merged package and rewrites it as DFLT, so a
+    resolver that took the first file it found would silently hand back a
+    zlib archive erm wrote itself and turn this into a self-round-trip that
+    proves nothing. Select on the property the test actually needs.
+
+    Candidates lead with an archive no merge consumes; the msgbnd paths stay as
+    fallbacks for a checkout where Clever's chr/ isn't installed.
+
+    Returns Path to the archive if found, else None.
+    """
+    for candidate in REAL_ARCHIVE_CANDIDATES:
+        try:
+            if candidate.read_bytes()[0x28:0x2C] == dcx.KRAK:
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def test_read_returns_entries_in_order():
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB")])
+    entries = bnd4.read(raw)
+    assert [(e.id, e.name, e.data) for e in entries] == [
+        (10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB")]
+
+
+def test_rebuild_with_no_changes_is_byte_identical():
+    """rebuild(base, {}) short-circuits to a pass-through (see its docstring),
+    so this only proves that early return hands back the same bytes -- it
+    never touches the clone-and-relayout logic. That logic is covered
+    separately by feeding every entry its own bytes as a replacement."""
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB")])
+    assert bnd4.rebuild(raw, {}) == raw
+
+
+def test_rebuild_with_identical_replacements_is_byte_identical():
+    """The strongest guarantee this module offers: replacing every entry with
+    its own existing bytes forces the full clone-and-relayout path -- offsets,
+    sizes, the leading gap, interior padding -- and the result must still
+    match the input exactly, since nothing semantically changed. Unlike
+    rebuild(base, {}), this doesn't take the early-return shortcut."""
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB"), (30, "c.fmg", b"C")])
+    same = {e.id: e.data for e in bnd4.read(raw)}
+    assert bnd4.rebuild(raw, same) == raw
+
+
+def test_rebuild_preserves_the_hash_table():
+    """Vanilla populates a hash-bucket table at 0x38. Zeroing it passes every
+    test that re-reads by id and then faults inside the game's loader, so assert
+    the bytes survive a rebuild that changes entry sizes."""
+    marker = b"\xDE\xAD\xBE\xEF" * 4
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA")], hash_table=marker)
+    rebuilt = bnd4.rebuild(raw, {10: b"much longer replacement data"})
+    hash_off, = struct.unpack_from("<q", raw, 0x38)
+    assert rebuilt[hash_off:hash_off + len(marker)] == marker
+
+
+def test_rebuild_replaces_entry_data():
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB")])
+    rebuilt = bnd4.rebuild(raw, {20: b"replaced with something longer"})
+    by_id = {e.id: e.data for e in bnd4.read(rebuilt)}
+    assert by_id == {10: b"AAA", 20: b"replaced with something longer"}
+
+
+def test_rebuild_has_no_trailing_padding_after_the_last_entry():
+    """Padding aligns the *next* entry's start to 0x10; there's no next entry
+    after the last one, and real archives carry none there either. Only
+    test_identity_rebuild_of_a_real_msgbnd catches a regression to
+    unconditional padding, and that test is skipped wherever the real mod
+    isn't installed -- pin the same guarantee on a synthetic fixture so it
+    runs everywhere. Replacement length (1) is deliberately not a multiple of
+    0x10, so reverting to always-pad would append 15 stray bytes."""
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBBB")])
+    rebuilt = bnd4.rebuild(raw, {20: b"X"})
+    last_header = 0x40 + 1 * 0x24  # the second (last) entry's header
+    last_offset, = struct.unpack_from("<I", rebuilt, last_header + 0x18)
+    last_size, = struct.unpack_from("<q", rebuilt, last_header + 0x10)
+    assert len(rebuilt) == last_offset + last_size
+
+
+def test_rebuild_keeps_the_header_region_identical():
+    """Everything before the data section is cloned, so name offsets and the
+    hash table stay valid without recomputing any of them."""
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA")])
+    rebuilt = bnd4.rebuild(raw, {10: b"different length entirely"})
+    data_off, = struct.unpack_from("<q", raw, 0x28)
+    # Entry headers hold sizes and offsets that legitimately change; everything
+    # from the name blob onward must not.
+    names_off = 0x40 + 1 * 0x24
+    assert rebuilt[names_off:data_off] == raw[names_off:data_off]
+
+
+def test_rebuild_rejects_an_unknown_entry_id():
+    """Replacing an id the archive doesn't hold means the caller's assumptions
+    are wrong. Silently ignoring it would drop the merge on the floor."""
+    raw = _synthetic_bnd4([(10, "a.fmg", b"AAA")])
+    with pytest.raises(bnd4.Bnd4Error):
+        bnd4.rebuild(raw, {999: b"nope"})
+
+
+def test_read_rejects_a_non_bnd4():
+    with pytest.raises(bnd4.Bnd4Error):
+        bnd4.read(b"NOTBND4" + b"\x00" * 128)
+
+
+def test_read_rejects_a_bnd4_with_only_the_magic_corrupted():
+    """test_read_rejects_a_non_bnd4 is caught by coincidence: an all-zero
+    buffer trips the unrelated data_offset check, not the magic check itself.
+    Corrupt only the magic bytes of an otherwise-valid archive so the magic
+    check is the only guard that can catch it -- without it, this parses
+    silently in full."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    raw[0:4] = b"DCX\x00"
+    with pytest.raises(bnd4.Bnd4Error):
+        bnd4.read(bytes(raw))
+
+
+# --- Hardening: BND4 archives are arbitrary third-party mod files. Every guard
+# below constructs the specific malformed input it defends against, and would
+# fail (wrong exception type, wrong data, or a hang) if the guard were removed.
+
+
+def test_read_rejects_a_negative_entry_count():
+    """A negative count makes range(count) empty, which would silently return
+    zero entries for a nonempty file instead of raising."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<i", raw, 0x0C, -1)
+    with pytest.raises(bnd4.Bnd4Error, match="negative"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_a_zero_entry_header_size_when_entries_exist():
+    """A header size of 0 with count > 0 would let range(count) still land on
+    a fixed header table size, so an absurd count (e.g. 10**9) would sail past
+    the table-fits-the-file check and hang the read loop instead of raising."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<i", raw, 0x0C, 10**9)
+    struct.pack_into("<q", raw, 0x20, 0)
+    with pytest.raises(bnd4.Bnd4Error):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_an_entry_header_table_that_overruns_the_file():
+    """A valid header size times an absurd count must be caught as not fitting
+    the file, rather than iterating and reading past the buffer."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<i", raw, 0x0C, 10**6)
+    with pytest.raises(bnd4.Bnd4Error, match="doesn't fit"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_a_data_offset_that_overlaps_the_entry_headers():
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<q", raw, 0x28, 0)  # inside the header table
+    with pytest.raises(bnd4.Bnd4Error, match="overlaps"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_a_data_offset_that_exceeds_the_file():
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<q", raw, 0x28, len(raw) + 1000)
+    with pytest.raises(bnd4.Bnd4Error, match="exceeds"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_an_entry_header_size_smaller_than_its_fields():
+    """A header size smaller than the fixed fields read per entry can let the
+    header table appear to 'fit' by count*header_size, while the actual field
+    reads for later entries still fall outside their own header, or even
+    outside the buffer. Must be caught before the per-entry loop runs, not
+    discovered by a bare struct.error once it does."""
+    data = bytearray(0x50)
+    data[0:4] = b"BND4"
+    struct.pack_into("<i", data, 0x0C, 1)       # count = 1
+    struct.pack_into("<q", data, 0x20, 4)       # header_size = 4, too small for 0x24 of fields
+    struct.pack_into("<q", data, 0x28, 0x48)    # data_offset within [headers_end, len(data)]
+    with pytest.raises(bnd4.Bnd4Error, match="smaller than"):
+        bnd4.read(bytes(data))
+
+
+def test_read_rejects_a_negative_entry_size():
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<q", raw, 0x40 + 0x10, -1)
+    with pytest.raises(bnd4.Bnd4Error, match="negative"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_entry_data_that_runs_past_the_buffer():
+    """Python slicing doesn't raise on an out-of-range stop index, so without
+    this check a corrupted size/offset would hand back truncated data instead
+    of failing."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<q", raw, 0x40 + 0x10, len(raw) + 1000)
+    with pytest.raises(bnd4.Bnd4Error):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_a_negative_name_offset():
+    """A negative name offset is silently reinterpreted as an index counted
+    from the end of the buffer, reading the wrong (or coincidentally
+    null-terminated) bytes instead of raising."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<i", raw, 0x40 + 0x20, -10)
+    with pytest.raises(bnd4.Bnd4Error, match="name offset"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_an_unterminated_entry_name():
+    """If the buffer ends mid-name, the null-terminator scan in _read_utf16z
+    must stop at the end of the buffer and raise instead of reading past it."""
+    data = bytearray(0x66)
+    data[0:4] = b"BND4"
+    struct.pack_into("<i", data, 0x0C, 1)        # count = 1
+    struct.pack_into("<q", data, 0x20, 0x24)     # header_size = 0x24
+    struct.pack_into("<q", data, 0x28, 0x64)     # data_offset: right after the header table
+    struct.pack_into("<q", data, 0x40 + 0x10, 0)     # size = 0
+    struct.pack_into("<I", data, 0x40 + 0x18, 0x64)  # offset = data_offset
+    struct.pack_into("<i", data, 0x40 + 0x1C, 1)     # id = 1
+    struct.pack_into("<i", data, 0x40 + 0x20, 0x64)  # name_offset: last two bytes of the buffer
+    data[0x64:0x66] = "A".encode("utf-16-le")    # one char, no null terminator, buffer ends here
+    with pytest.raises(bnd4.Bnd4Error, match="unterminated"):
+        bnd4.read(bytes(data))
+
+
+def test_read_rejects_a_name_offset_past_the_end_of_the_buffer():
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    struct.pack_into("<i", raw, 0x40 + 0x20, len(raw) + 1000)
+    with pytest.raises(bnd4.Bnd4Error, match="name offset"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_an_entry_data_offset_before_the_data_section():
+    """Forcing an entry's offset to 0 walks it off the front of the data
+    section entirely: nothing before this check stops it, and the entry
+    silently returns the file's own magic bytes as its "data" instead of
+    raising."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB")]))
+    struct.pack_into("<I", raw, 0x40 + 0x24 + 0x18, 0)  # entry 1's offset -> 0
+    with pytest.raises(bnd4.Bnd4Error, match="precedes"):
+        bnd4.read(bytes(raw))
+
+
+def test_read_rejects_overlapping_entry_data_regions():
+    """Forcing entry B's offset to land inside entry A's data region returns
+    blended bytes as B's "data" instead of raising -- once two entries'
+    regions overlap, at least one of them isn't the bytes its own header
+    claims."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAAA"), (20, "b.fmg", b"BBBB")]))
+    data_off, = struct.unpack_from("<q", raw, 0x28)
+    struct.pack_into("<I", raw, 0x40 + 0x24 + 0x18, data_off + 2)  # B starts inside A's span
+    with pytest.raises(bnd4.Bnd4Error, match="overlap"):
+        bnd4.read(bytes(raw))
+
+
+def test_rebuild_preserves_an_unaligned_leading_gap_before_the_first_entry():
+    """Real archives can leave a few bytes between the declared data section
+    and where the first entry actually starts (data_offset isn't always
+    itself 16-byte aligned) -- discovered via the real-file identity check
+    below, which the aligned-by-construction fixture can't reproduce on its
+    own. Anchor on the first entry's own recorded offset and prove those
+    bytes survive a rebuild that touches another entry."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA"), (20, "b.fmg", b"BBBB")]))
+    data_offset, = struct.unpack_from("<q", raw, 0x28)
+    gap = b"\x11" * 8  # non-zero, so an accidental zero-fill wouldn't pass silently
+    raw = raw[:data_offset] + gap + raw[data_offset:]
+    for i in range(2):
+        base = 0x40 + i * 0x24
+        off, = struct.unpack_from("<I", raw, base + 0x18)
+        struct.pack_into("<I", raw, base + 0x18, off + len(gap))
+    raw = bytes(raw)
+
+    rebuilt = bnd4.rebuild(raw, {20: b"replaced with something longer"})
+    by_id = {e.id: e.data for e in bnd4.read(rebuilt)}
+    assert by_id == {10: b"AAA", 20: b"replaced with something longer"}
+    first_off, = struct.unpack_from("<I", rebuilt, 0x40 + 0x18)
+    assert rebuilt[data_offset:first_off] == gap
+
+
+def test_rebuild_propagates_reads_guard_for_a_first_entry_offset_before_the_data_section():
+    """rebuild used to carry its own check for this case, but it was dead code:
+    rebuild calls read(base) first, and read's own per-entry check already
+    rejects an offset preceding data_offset for every entry, entry 0 included
+    -- by the time rebuild would reach its old check, read() has already
+    raised. This test now proves rebuild still fails on this input (it must,
+    or a corrupted first entry could slice a negative-length, silently-empty
+    gap into the output) via that read() guard, not a duplicate of it."""
+    raw = bytearray(_synthetic_bnd4([(10, "a.fmg", b"AAA")]))
+    data_offset, = struct.unpack_from("<q", raw, 0x28)
+    struct.pack_into("<I", raw, 0x40 + 0x18, data_offset - 4)
+    with pytest.raises(bnd4.Bnd4Error, match="precedes"):
+        bnd4.rebuild(bytes(raw), {10: b"different length entirely"})
+
+
+def test_identity_rebuild_of_a_real_msgbnd():
+    """A real archive exercises the populated hash table and the true entry
+    layout, neither of which the synthetic fixture fully reproduces.
+
+    This is also the whole project's only real coverage of the vendored
+    Kraken decompressor -- the C++ code and the GPL relicense that allowed
+    vendoring it. _resolve_real_archive's fallback candidates can land on a
+    DFLT archive (one erm itself wrote), which would let this test keep
+    passing while silently testing zlib instead of Kraken. Assert KRAK
+    explicitly so that degrades loudly instead of quietly."""
+    archive = _resolve_real_archive()
+    if not archive:
+        pytest.skip(_no_kraken_reason())
+    raw_bytes = archive.read_bytes()
+    method = raw_bytes[0x28:0x2C]
+    assert method == dcx.KRAK, (
+        f"resolved archive {archive} is DCX method {method!r}, not KRAK -- "
+        "a degraded fallback to a zlib self-round-trip must fail here, not "
+        "pass while testing nothing"
+    )
+    raw = dcx.read(raw_bytes)
+    assert bnd4.rebuild(raw, {}) == raw
+
+
+def test_the_skip_reason_names_the_archives_the_resolver_opens(monkeypatch):
+    """When nothing on disk resolves, this reason is the only guidance a
+    maintainer gets about the project's one piece of real Kraken coverage, so
+    it has to name the paths the resolver actually opens. Hand-copying the list
+    beside the resolver is how it came to advertise a _merged/ archive that is
+    deliberately not a candidate -- a merged archive is rewritten DFLT, which is
+    the self-round-trip the KRAK assert exists to reject."""
+    monkeypatch.setattr(sys.modules[__name__], "_resolve_real_archive", lambda: None)
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        test_identity_rebuild_of_a_real_msgbnd()
+    reason = str(excinfo.value)
+    for candidate in REAL_ARCHIVE_CANDIDATES:
+        assert str(candidate) in reason, f"{candidate} is checked but unnamed"
+    assert "_merged/" not in reason, "names an archive the resolver never opens"
+
+
+def test_the_resolver_reads_the_candidates_the_reason_advertises(monkeypatch, tmp_path):
+    """The constant is the single source for both the search and the message.
+    Pinned so it cannot decay into a decorative list the resolver ignores."""
+    kraken = tmp_path / "kraken.dcx"
+    kraken.write_bytes(b"\x00" * 0x28 + dcx.KRAK + b"\x00" * 16)
+    monkeypatch.setattr(sys.modules[__name__], "REAL_ARCHIVE_CANDIDATES",
+                        [tmp_path / "absent.dcx", kraken])
+    assert _resolve_real_archive() == kraken
+    assert str(kraken) in _no_kraken_reason()
+
+
+def test_a_present_but_non_kraken_candidate_is_reported_as_present(monkeypatch, tmp_path):
+    """A candidate that is on disk but DFLT means erm rewrote it when it merged
+    the path -- a different problem from "nothing is installed", and a different
+    fix, so the reason has to tell the two apart."""
+    dflt = tmp_path / "rewritten.dcx"
+    dflt.write_bytes(b"\x00" * 0x28 + dcx.DFLT + b"\x00" * 16)
+    monkeypatch.setattr(sys.modules[__name__], "REAL_ARCHIVE_CANDIDATES",
+                        [tmp_path / "absent.dcx", dflt])
+    assert _resolve_real_archive() is None
+    reason = _no_kraken_reason()
+    assert f"{dflt} is DCX {dcx.DFLT!r}" in reason
+    assert str(tmp_path / "absent.dcx") not in reason.split("Present but unusable")[1]
+
+
+def test_the_skip_reason_names_the_variable_when_no_samples_are_configured(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "REAL_ARCHIVE_CANDIDATES", [])
+    assert SAMPLES_ENV in _no_kraken_reason()
+
+
+def test_samples_are_looked_up_under_the_directory_the_variable_names(monkeypatch, tmp_path):
+    monkeypatch.setenv(SAMPLES_ENV, str(tmp_path))
+    assert _sample_candidates()[0] == tmp_path / "chr/c0000.behbnd.dcx"
+    monkeypatch.delenv(SAMPLES_ENV)
+    assert _sample_candidates() == []
