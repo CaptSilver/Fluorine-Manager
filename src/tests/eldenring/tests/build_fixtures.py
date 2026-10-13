@@ -1,5 +1,5 @@
 """Builders the moved test files share: a build identity, and synthetic PARAM,
-BND4 and regulation.bin blobs. Each used to live in the test module that first
+BND4, regulation.bin and save-container blobs. Each used to live in the test module that first
 needed it, which made the other test modules import that module just to reach a
 helper.
 
@@ -9,6 +9,7 @@ build a half-populated identity that looks like agreement. So every construction
 has to spell all five fields, and the convenience of not doing that by hand
 belongs here rather than on the type.
 """
+import hashlib
 import struct
 
 from ermlib.formats import regulation
@@ -129,3 +130,32 @@ def _regulation_blob(version):
     payload[0:4] = b"BND4"
     payload[0x18:0x20] = version.encode()
     return regulation.pack(bytes(payload), bytes(16))
+
+
+def build_bnd4(bodies, break_md5=()):
+    """Assemble a well-formed BND4 container around `bodies`.
+
+    Shared with the audit tests: the point of these cases is that the container
+    parses cleanly (header, 0x20-stride entry table, valid names, valid
+    per-entry MD5) and only the save-shaped assumptions on top of it are wrong.
+    `break_md5` names entry indexes whose stored digest should not match.
+    """
+    count = len(bodies)
+    names_off = 0x40 + count * 0x20
+    names, name_offs = b"", []
+    for i in range(count):
+        name_offs.append(names_off + len(names))
+        names += f"USER_DATA{i:03d}".encode("utf-16-le") + b"\x00\x00"
+    data_off = names_off + len(names)
+    table, blobs = b"", b""
+    for i, body in enumerate(bodies):
+        digest = hashlib.md5(body).digest()
+        if i in break_md5:
+            digest = bytes(b ^ 0xFF for b in digest)
+        blob = digest + body
+        table += (b"\x00" * 8 + struct.pack("<q", len(blob))
+                  + struct.pack("<I", data_off + len(blobs))
+                  + struct.pack("<I", name_offs[i]) + b"\x00" * 8)
+        blobs += blob
+    header = b"BND4" + b"\x00" * 8 + struct.pack("<I", count)
+    return header.ljust(0x40, b"\x00") + table + names + blobs
