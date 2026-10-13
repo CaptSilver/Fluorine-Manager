@@ -110,7 +110,15 @@ def test_lzna_and_bitknit_streams_are_refused(built_library, decoder_type):
     """libooz refuses the LZNA and BitKnit decoders: they do no bounds
     checking, and archives come from mod downloads. Nothing FromSoftware ships
     uses them, so refusing costs nothing."""
-    payload = bytes(range(200))
-    stream = b"\x8c" + bytes([decoder_type]) + (len(payload) - 1).to_bytes(3, "big") + payload
+    # A memset quantum: header, then one repeated byte. Types 5 and 11 parse a
+    # 2-byte quantum header, not Kraken's 3-byte one, so this shape is what
+    # reaches the LZNA/BitKnit decoders if the refusal is missing.
+    def memset_stream(decoder):
+        return b"\x8c" + bytes([decoder]) + b"\x7f\xff\x41"
+
+    # Control: the equivalent Kraken memset block (3-byte quantum header)
+    # decodes fine, so the failure below comes from the refusal and not from
+    # a harness problem.
+    assert ooz.decompress(fill_block(0x41), 100) == b"A" * 100
     with pytest.raises(ooz.OozError, match="decode failed"):
-        ooz.decompress(stream, len(payload))
+        ooz.decompress(memset_stream(decoder_type), 100)
