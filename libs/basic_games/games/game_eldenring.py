@@ -92,5 +92,5 @@ class EldenRingGame(BasicGame):
         except _PATH_ERRORS as err:
             # ValueError: a double quote in a path, which the argument line
             # cannot carry.
-            qWarning(f"Elden Ring: no me3 entry: {err}")
+            qWarning(f"Elden Ring: no me3 entry: {type(err).__name__}: {err}")
             return []

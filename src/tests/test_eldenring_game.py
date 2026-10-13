@@ -20,19 +20,29 @@ SAVE_FOLDER = "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/
 
 
 class _ExecutableInfo:
+    """Like the real binding, the with* methods return a modified copy."""
+
     def __init__(self, title, binary) -> None:
         self.title = title
         self.binary = binary
         self.arguments: list[str] = []
         self.working_directory = None
 
+    def _copy(self) -> "_ExecutableInfo":
+        clone = _ExecutableInfo(self.title, self.binary)
+        clone.arguments = list(self.arguments)
+        clone.working_directory = self.working_directory
+        return clone
+
     def withArgument(self, argument):  # noqa: N802 - mobase spelling
-        self.arguments.append(argument)
-        return self
+        clone = self._copy()
+        clone.arguments.append(argument)
+        return clone
 
     def withWorkingDirectory(self, directory):  # noqa: N802
-        self.working_directory = directory
-        return self
+        clone = self._copy()
+        clone.working_directory = directory
+        return clone
 
 
 class _BasicGame:
@@ -190,6 +200,29 @@ class ExecutablesTests(GameCase):
         with mock.patch.object(GAME, "qWarning") as warn:
             self.assertEqual(self.game.executables(), [])
         warn.assert_called_once()
+
+    def test_a_failing_path_check_gives_no_entry_one_warning_and_a_save_folder(self) -> None:
+        self.put_me3()
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+        with mock.patch.object(GAME.me3_host, "binary_present", side_effect=RuntimeError("deleted")), \
+                mock.patch.object(GAME, "qWarning") as warn:
+            self.assertEqual(self.game.executables(), [])
+        warn.assert_called_once()
+        self.assertIn("RuntimeError", warn.call_args.args[0])
+        self.assertIn("deleted", warn.call_args.args[0])
+        self.assertIsInstance(self.game.savesDirectory(), QDir)
+
+    def test_an_unreadable_game_folder_gives_no_entry_one_warning_and_a_save_folder(self) -> None:
+        self.put_me3()
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+        with mock.patch.object(self.game, "gameDirectory", side_effect=OSError("unreadable")), \
+                mock.patch.object(GAME, "qWarning") as warn:
+            self.assertEqual(self.game.executables(), [])
+            self.assertIsInstance(self.game.savesDirectory(), QDir)
+        warn.assert_called_once()
+        self.assertIn("OSError", warn.call_args.args[0])
 
 
 if __name__ == "__main__":
