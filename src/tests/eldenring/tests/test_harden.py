@@ -72,7 +72,16 @@ def test_is_hardened_true_after_swap_false_after_restore(game):
     assert harden.is_hardened(game) is False
 
 
-def test_set_immutable_raises_ermerror_on_nonzero_rc(monkeypatch, tmp_path):
+@pytest.fixture
+def chattr_path(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(shutil, "which",
+                        lambda name, *a, **k: "/usr/bin/chattr" if name == "chattr" else None)
+    return "/usr/bin/chattr"
+
+
+def test_set_immutable_raises_ermerror_on_nonzero_rc(monkeypatch, tmp_path, chattr_path):
     import subprocess
 
     class FakeResult:
@@ -107,7 +116,7 @@ def test_unharden_restore_wraps_oserror_as_patherror(game, monkeypatch):
         harden.unharden_restore(game)
 
 
-def test_set_immutable_runs_chattr_through_pkexec(monkeypatch, tmp_path):
+def test_set_immutable_runs_absolute_chattr_through_pkexec(monkeypatch, tmp_path, chattr_path):
     import subprocess
 
     calls = []
@@ -120,23 +129,36 @@ def test_set_immutable_runs_chattr_through_pkexec(monkeypatch, tmp_path):
     target = tmp_path / "spg.exe"
     harden.set_immutable(target, True)
     harden.set_immutable(target, False)
-    assert calls == [["pkexec", "chattr", "+i", str(target)],
-                     ["pkexec", "chattr", "-i", str(target)]]
+    assert calls == [["pkexec", chattr_path, "+i", str(target)],
+                     ["pkexec", chattr_path, "-i", str(target)]]
 
 
-def test_set_immutable_raises_ermerror_on_missing_pkexec(monkeypatch, tmp_path):
+def test_set_immutable_reports_missing_chattr_without_running_pkexec(monkeypatch, tmp_path):
+    import shutil
+    import subprocess
+
+    ran = []
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a))
+    with pytest.raises(ErmError, match="chattr not found") as caught:
+        harden.set_immutable(tmp_path / "x", True)
+    assert "e2fsprogs" in str(caught.value)
+    assert ran == []
+
+
+def test_set_immutable_reports_missing_pkexec(monkeypatch, tmp_path, chattr_path):
     import subprocess
 
     def _raise(*a, **k):
-        raise FileNotFoundError("pkexec not found")
+        raise FileNotFoundError("pkexec")
 
     monkeypatch.setattr(subprocess, "run", _raise)
-    with pytest.raises(ErmError, match="pkexec/chattr not available"):
+    with pytest.raises(ErmError, match="pkexec not available") as caught:
         harden.set_immutable(tmp_path / "x", True)
+    assert "polkit" in str(caught.value)
 
 
-@pytest.mark.parametrize("code", [126, 127])
-def test_set_immutable_names_pkexecs_exit_codes_in_its_error(monkeypatch, tmp_path, code):
+def _error_for_exit_code(monkeypatch, tmp_path, code):
     import subprocess
 
     class FakeResult:
@@ -145,6 +167,27 @@ def test_set_immutable_names_pkexecs_exit_codes_in_its_error(monkeypatch, tmp_pa
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeResult())
     with pytest.raises(ErmError) as caught:
         harden.set_immutable(tmp_path / "x", True)
-    message = str(caught.value)
-    assert f"rc {code}" in message
-    assert f"{code} when" in message
+    return str(caught.value)
+
+
+def test_set_immutable_126_means_dialog_dismissed(monkeypatch, tmp_path, chattr_path):
+    message = _error_for_exit_code(monkeypatch, tmp_path, 126)
+    assert "dismissed" in message
+    assert "not authorized" not in message
+    assert "filesystem" not in message
+
+
+def test_set_immutable_127_means_not_authorized(monkeypatch, tmp_path, chattr_path):
+    message = _error_for_exit_code(monkeypatch, tmp_path, 127)
+    assert "not authorized" in message
+    assert "polkit agent" in message
+    assert "dismissed" not in message
+    assert "filesystem" not in message
+
+
+def test_set_immutable_other_exit_code_means_chattr_failed(monkeypatch, tmp_path, chattr_path):
+    message = _error_for_exit_code(monkeypatch, tmp_path, 1)
+    assert "chattr +i failed (rc 1)" in message
+    assert "filesystem" in message
+    assert "dismissed" not in message
+    assert "not authorized" not in message

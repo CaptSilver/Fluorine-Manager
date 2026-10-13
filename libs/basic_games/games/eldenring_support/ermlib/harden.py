@@ -54,18 +54,36 @@ def unharden_restore(game):
 
 
 def set_immutable(path, on):
-    """Privileged: pkexec chattr +i/-i. pkexec shows its own polkit prompt, so
-    nothing is captured or piped. Raises ErmError on failure. Monkeypatched in
-    tests; never calls real pkexec there."""
+    """Privileged: pkexec chattr +i/-i. The password prompt comes from the
+    polkit agent, so nothing is piped to pkexec. Raises ErmError on failure.
+    Monkeypatched in tests; never calls real pkexec there.
+
+    chattr is resolved to an absolute path first: pkexec exits 127 both when
+    it cannot find the program and when authorization fails, so a missing
+    chattr would otherwise be reported as an authorization problem."""
     flag = "+i" if on else "-i"
+    chattr = shutil.which("chattr")
+    if chattr is None:
+        raise ErmError(
+            "chattr not found — it is the filesystem attribute tool, "
+            "packaged as e2fsprogs"
+        )
     try:
-        r = subprocess.run(["pkexec", "chattr", flag, str(path)])
+        r = subprocess.run(["pkexec", chattr, flag, str(path)])
     except FileNotFoundError as exc:
-        raise ErmError(f"pkexec/chattr not available: {exc}") from exc
+        raise ErmError(f"pkexec not available (is polkit installed?): {exc}") from exc
+    if r.returncode == 126:
+        raise ErmError(
+            "pkexec authentication dialog was dismissed (rc 126) — "
+            "approve the prompt to change the immutable attribute"
+        )
+    if r.returncode == 127:
+        raise ErmError(
+            "pkexec not authorized (rc 127) — no polkit agent reachable, "
+            "authorization was refused, or the program could not be run"
+        )
     if r.returncode != 0:
         raise ErmError(
-            f"chattr {flag} failed (rc {r.returncode}) — filesystem may not "
-            "support immutable, or the prompt was not completed (pkexec exits "
-            "126 when the authentication dialog was dismissed and 127 when "
-            "authorization could not be obtained)"
+            f"chattr {flag} failed (rc {r.returncode}) — the filesystem may "
+            "not support the immutable attribute"
         )
