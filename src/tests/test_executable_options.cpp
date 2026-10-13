@@ -1,6 +1,18 @@
 #include "executableslist.h"
 #include "launchenvironment.h"
 
+#include <iplugingame.h>
+#include <log.h>
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QIcon>
+#include <QTemporaryDir>
+
+#include <memory>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 TEST(ExecutableOptions, SteamDefaultsOnForNewAndPluginExecutables)
@@ -120,4 +132,104 @@ TEST(ExecutableOptions, TrayBehaviorDoesNotChangePinOrShortcutIcon)
   EXPECT_TRUE(program.minimizeToSystemTray());
   EXPECT_FALSE(program.usesOwnIcon());
   EXPECT_FALSE(program.isShownOnToolbar());
+}
+
+namespace
+{
+
+// Just enough of a game plugin for ExecutablesList::resetFromPlugin: one
+// executable that exists on disk and a settable isNativeLinux().
+class FakeGame : public MOBase::IPluginGame
+{
+public:
+  FakeGame(bool nativeLinux, QString binary)
+      : m_nativeLinux(nativeLinux), m_binary(std::move(binary))
+  {}
+
+  // IPlugin
+  bool init(MOBase::IOrganizer*) override { return true; }
+  QString name() const override { return QStringLiteral("Fake Game"); }
+  QString author() const override { return QStringLiteral("tests"); }
+  QString description() const override { return QStringLiteral("test double"); }
+  MOBase::VersionInfo version() const override { return MOBase::VersionInfo(1, 0, 0); }
+  QList<MOBase::PluginSetting> settings() const override { return {}; }
+
+  // IPluginGame
+  QString gameName() const override { return QStringLiteral("Fake Game"); }
+  void detectGame() override {}
+  void initializeProfile(const QDir&, ProfileSettings) const override {}
+  std::vector<std::shared_ptr<const MOBase::ISaveGame>>
+  listSaves(QDir) const override
+  {
+    return {};
+  }
+  bool isInstalled() const override { return true; }
+  bool isNativeLinux() const override { return m_nativeLinux; }
+  QIcon gameIcon() const override { return {}; }
+  QDir gameDirectory() const override { return QFileInfo(m_binary).dir(); }
+  QDir dataDirectory() const override { return gameDirectory(); }
+  void setGamePath(const QString&) override {}
+  QDir documentsDirectory() const override { return gameDirectory(); }
+  QDir savesDirectory() const override { return gameDirectory(); }
+  QList<MOBase::ExecutableInfo> executables() const override
+  {
+    return {MOBase::ExecutableInfo(QStringLiteral("Fake Entry"), QFileInfo(m_binary))};
+  }
+  QList<MOBase::ExecutableForcedLoadSetting> executableForcedLoads() const override
+  {
+    return {};
+  }
+  void setGameVariant(const QString&) override {}
+  QString binaryName() const override { return QFileInfo(m_binary).fileName(); }
+  QString gameShortName() const override { return QStringLiteral("fake"); }
+  int nexusGameID() const override { return 0; }
+  bool looksValid(QDir const&) const override { return true; }
+  QString gameVersion() const override { return QStringLiteral("1.0"); }
+  QString getLauncherName() const override { return {}; }
+
+private:
+  bool m_nativeLinux;
+  QString m_binary;
+};
+
+}  // namespace
+
+class PluginExecutables : public ::testing::Test
+{
+protected:
+  static void SetUpTestSuite()
+  {
+    // resetFromPlugin logs, and the default logger must exist for that.
+    MOBase::log::LoggerConfiguration configuration;
+    configuration.name = "test_executable_options";
+    MOBase::log::createDefault(configuration);
+  }
+
+  void SetUp() override
+  {
+    ASSERT_TRUE(m_dir.isValid());
+    m_binary = m_dir.filePath(QStringLiteral("game.exe"));
+    // ExecutableInfo::isValid() is "the binary exists".
+    QFile file(m_binary);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+  }
+
+  QTemporaryDir m_dir;
+  QString m_binary;
+};
+
+TEST_F(PluginExecutables, NativeLinuxGameGetsPluginEntriesWithoutProton)
+{
+  const FakeGame game(true, m_binary);
+  ExecutablesList list;
+  list.resetFromPlugin(&game);
+  EXPECT_FALSE(list.get(QStringLiteral("Fake Entry")).useProton());
+}
+
+TEST_F(PluginExecutables, OtherGamesGetPluginEntriesWithProton)
+{
+  const FakeGame game(false, m_binary);
+  ExecutablesList list;
+  list.resetFromPlugin(&game);
+  EXPECT_TRUE(list.get(QStringLiteral("Fake Entry")).useProton());
 }
