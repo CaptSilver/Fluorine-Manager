@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import os
+import shutil
 import stat
 import subprocess
+import tarfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
-from . import state
-from .ermlib.errors import ErmError
+from . import atomic, state
+from .ermlib import github
+from .ermlib.errors import ErmError, IntegrityError
 
 # me3's own layout, the one the release's install-user.sh produces: the binary
 # in ~/.local/bin, and the two Windows parts it injects into the game under
@@ -196,3 +202,169 @@ def _run_version(binary: Path) -> str | None:
 def _shadow_dirs(binary: Path) -> tuple[str, ...]:
     candidates = (binary.parent / "win64", Path("/usr/lib64/me3/x86_64-windows"))
     return tuple(str(path) for path in candidates if _is_dir(path))
+
+
+Progress = Callable[[str], None]
+
+# Everything that can go wrong between us and GitHub besides a hash mismatch.
+_FETCH_ERRORS = (OSError, ValueError, KeyError, http.client.HTTPException)
+
+
+@dataclass(frozen=True)
+class EnsureResult:
+    installed: bool
+    status: Status
+
+
+def ensure(organizer, archive: Path | str | None = None, progress: Progress | None = None) -> EnsureResult:
+    """Adopt a matching install, else install the pinned release.
+
+    An install made by install-user.sh or by erm that matches the pin is taken
+    as it is. `archive` is a local copy of the release tarball; without one the
+    release is downloaded.
+    """
+    paths = state.InstancePaths(organizer)
+    current = status(paths)
+    if current.ok:
+        return EnsureResult(installed=False, status=current)
+    install(paths, archive, progress)
+    final = status(paths)
+    if not final.ok:
+        raise Me3HostError(
+            f"me3 reports {final.kind} right after installing; the files on disk do not match the pin"
+        )
+    return EnsureResult(installed=True, status=final)
+
+
+def install(
+    paths: state.InstancePaths,
+    archive: Path | str | None = None,
+    progress: Progress | None = None,
+) -> None:
+    """Put the pinned release's three files where me3 expects them.
+
+    Runs synchronously; the caller shows the progress. Every file is hashed
+    against the pin before the first one is copied, and each is then placed by
+    write-to-temp-and-replace, so an interruption leaves a file as it was or as
+    it will be, never half-written.
+    """
+    notify = progress or (lambda message: None)
+    _refuse_unsafe_binary(binary_path())
+    staging = paths.me3_host_staging
+    shutil.rmtree(staging, ignore_errors=True)  # left behind by an interrupted install
+    try:
+        staging.mkdir(parents=True)
+    except OSError as exc:
+        raise Me3HostError(f"cannot create {staging}: {exc}") from exc
+    try:
+        source = _obtain_archive(archive, staging, notify)
+        extracted = _extract_members(source, staging, notify)
+        _place(extracted, notify)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def _refuse_unsafe_binary(binary: Path) -> None:
+    """Replacing a regular file is fine; a symlink or anything else is the user's."""
+    try:
+        mode = os.lstat(binary).st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except (OSError, ValueError) as exc:
+        raise Me3HostError(f"cannot inspect {binary}: {exc}") from exc
+    if not stat.S_ISREG(mode):
+        raise Me3HostError(
+            f"{binary} is a symlink or not a regular file. Move it away and run the "
+            "tool again; it will not be overwritten."
+        )
+
+
+def _obtain_archive(archive, staging: Path, notify: Progress) -> Path:
+    if archive is not None:
+        archive = Path(archive)
+        try:
+            actual = github.sha256_file(archive)
+        except OSError as exc:
+            raise Me3HostError(f"cannot read {archive}: {exc}") from exc
+        if actual != PIN.archive_sha256:
+            raise IntegrityError(
+                f"{archive} has sha256 {actual}, but the pinned me3 {PIN.version} "
+                f"archive has {PIN.archive_sha256}"
+            )
+        return archive
+
+    notify(f"Looking up me3 {PIN.version} on GitHub")
+    try:
+        release = github.release_by_tag(PIN.repo_id, PIN.tag)
+    except _FETCH_ERRORS as exc:
+        raise Me3HostError(f"could not reach GitHub to look up me3 {PIN.tag}: {exc}") from exc
+    asset = github.pick_asset(release, suffix=".tar.gz", name_hint="me3-linux-amd64")
+    if asset["name"] != PIN.asset:
+        raise Me3HostError(f"release {PIN.tag} offers {asset['name']}, not {PIN.asset}")
+    reported = asset.get("digest") or ""
+    if reported.startswith("sha256:") and reported[len("sha256:"):] != PIN.archive_sha256:
+        raise IntegrityError(
+            f"GitHub reports sha256 {reported[len('sha256:'):]} for {asset['name']}, "
+            f"but the pin is {PIN.archive_sha256}"
+        )
+    notify(f"Downloading {asset['name']}")
+    target = staging / asset["name"]
+    try:
+        github.download_stream(asset["url"], target, sha256=PIN.archive_sha256)
+    except _FETCH_ERRORS as exc:
+        raise Me3HostError(f"could not download {asset['name']}: {exc}") from exc
+    return target
+
+
+def _extract_members(archive: Path, staging: Path, notify: Progress) -> dict[str, Path]:
+    """Unpack the three pinned members and check each against its hash."""
+    notify("Checking the archive")
+    out = staging / "extracted"
+    out.mkdir()
+    wanted = (BINARY_MEMBER, *WINDOWS_BIN_MEMBERS)
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            everything = tar.getmembers()
+            for member in everything:
+                # The whole archive is vetted, not just what is installed.
+                tarfile.data_filter(member, str(out))
+            # The release spells its members './bin/me3'.
+            by_name = {os.path.normpath(member.name): member for member in everything}
+            for name in wanted:
+                member = by_name.get(name)
+                if member is None or not member.isfile():
+                    raise Me3HostError(
+                        f"{archive.name} has no {name}. That is the native Linux build's "
+                        "layout, so this may be the Windows archive."
+                    )
+                tar.extract(member, out, filter="data")
+    except tarfile.FilterError as exc:
+        raise Me3HostError(f"{archive.name} has an unsafe member and was not unpacked: {exc}") from exc
+    except (tarfile.TarError, EOFError, OSError, zlib.error) as exc:
+        raise Me3HostError(f"cannot read {archive.name} as a gzip tar archive: {exc}") from exc
+
+    extracted: dict[str, Path] = {}
+    for name in wanted:
+        actual = github.sha256_file(out / name)
+        if actual != PIN.member_sha256[name]:
+            raise IntegrityError(
+                f"{name} in {archive.name} has sha256 {actual}, but the pin expects "
+                f"{PIN.member_sha256[name]}"
+            )
+        extracted[name] = out / name
+    return extracted
+
+
+def _place(extracted: dict[str, Path], notify: Progress) -> None:
+    windows_bin = windows_bin_dir()
+    try:
+        for name in WINDOWS_BIN_MEMBERS:
+            notify(f"Installing {Path(name).name}")
+            atomic.write_bytes_atomic(windows_bin / Path(name).name, extracted[name].read_bytes())
+        # The binary goes last: until it is replaced, status() says off_pin.
+        notify("Installing me3")
+        atomic.write_bytes_atomic(
+            binary_path(), extracted[BINARY_MEMBER].read_bytes(), mode=0o755
+        )
+    except OSError as exc:
+        raise Me3HostError(f"could not write the me3 files: {exc}") from exc

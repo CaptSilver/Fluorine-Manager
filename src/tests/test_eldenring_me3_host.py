@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import shutil
+import stat
 import subprocess
+import tarfile
 import tempfile
 import types
 import unittest
+import urllib.error
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
@@ -16,6 +20,7 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_me3_host_tests")
 me3_host = support.module(PACKAGE, "me3_host")
 state = support.module(PACKAGE, "state")
+IntegrityError = support.module(PACKAGE, "ermlib.errors").IntegrityError
 
 FILES = {
     "bin/me3": b"#!/bin/sh\necho 'me3 0.13.0'\n",
@@ -38,6 +43,27 @@ def pin_for(files: dict[str, bytes], archive_sha256: str | None = None):
 
 def organizer(base) -> types.SimpleNamespace:
     return types.SimpleNamespace(basePath=lambda: str(base))
+
+
+# What the real release carries besides the three files we install.
+RELEASE = {
+    **FILES,
+    "bin/win64/me3.exe": b"windows cli, never installed",
+    "dist/me3.png": b"icon, never installed",
+    "eldenring-default.me3": b'profileVersion = "v1"\n',
+}
+
+
+def build_archive(members: dict[str, bytes]) -> bytes:
+    """A release-shaped tarball. Members are spelled './bin/me3', like the real one."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name if name.startswith("..") else "./" + name)
+            info.size = len(data)
+            info.mode = 0o755 if name.startswith("bin/") else 0o644
+            tar.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
 
 
 class HostCase(unittest.TestCase):
@@ -335,6 +361,282 @@ class VersionProbeTests(HostCase):
             me3_host.status(self.paths)
         timeout = run.call_args.kwargs["timeout"]
         self.assertTrue(0 < timeout <= 30)
+
+
+OLD = {
+    "bin/me3": b"#!/bin/sh\necho old\n",
+    "bin/win64/me3-launcher.exe": b"old launcher",
+    "bin/win64/me3_mod_host.dll": b"old host",
+}
+
+
+class InstallCase(HostCase):
+    def use_archive(self, members: dict[str, bytes] = RELEASE) -> bytes:
+        data = build_archive(members)
+        self.archive = self.tmp / "me3-linux-amd64.tar.gz"
+        self.archive.write_bytes(data)
+        self.use_pin(pin_for(FILES, archive_sha256=sha(data)))
+        return data
+
+    def assert_nothing_installed(self) -> None:
+        self.assertFalse(self.binary.exists())
+        self.assertFalse(me3_host.windows_bin_dir().exists())
+        self.assertFalse(self.paths.me3_host_staging.exists())
+
+
+class InstallFromArchiveTests(InstallCase):
+    def test_a_fresh_home_gets_exactly_the_three_files(self) -> None:
+        self.use_archive()
+        me3_host.install(self.paths, self.archive)
+        written = sorted(
+            str(path.relative_to(self.home)) for path in self.home.rglob("*") if path.is_file()
+        )
+        self.assertEqual(
+            written,
+            [
+                ".local/bin/me3",
+                ".local/share/me3/windows-bin/me3-launcher.exe",
+                ".local/share/me3/windows-bin/me3_mod_host.dll",
+            ],
+        )
+        self.assertEqual(self.binary.read_bytes(), FILES["bin/me3"])
+        self.assertEqual(stat.S_IMODE(self.binary.stat().st_mode), 0o755)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.OK)
+        self.assertFalse(self.paths.me3_host_staging.exists())
+
+    def test_a_stale_staging_folder_is_cleared(self) -> None:
+        self.use_archive()
+        self.paths.me3_host_staging.mkdir(parents=True)
+        (self.paths.me3_host_staging / "junk").write_text("x")
+        me3_host.install(self.paths, self.archive)
+        self.assertFalse(self.paths.me3_host_staging.exists())
+
+    def test_a_member_whose_hash_differs_aborts_before_any_copy(self) -> None:
+        data = build_archive(RELEASE)
+        self.archive = self.tmp / "me3.tar.gz"
+        self.archive.write_bytes(data)
+        wrong = pin_for(FILES, archive_sha256=sha(data))
+        wrong = replace(
+            wrong,
+            member_sha256={**wrong.member_sha256, "bin/win64/me3_mod_host.dll": sha(b"another")},
+        )
+        self.use_pin(wrong)
+        with self.assertRaises(IntegrityError):
+            me3_host.install(self.paths, self.archive)
+        self.assert_nothing_installed()
+
+    def test_an_archive_with_another_hash_is_refused(self) -> None:
+        self.use_archive()
+        self.archive.write_bytes(b"not the release")
+        with self.assertRaises(IntegrityError):
+            me3_host.install(self.paths, self.archive)
+        self.assert_nothing_installed()
+
+    def test_a_traversal_member_is_refused_and_nothing_is_installed(self) -> None:
+        self.use_archive({**RELEASE, "../evil": b"x"})
+        with self.assertRaises(me3_host.Me3HostError) as caught:
+            me3_host.install(self.paths, self.archive)
+        self.assertIn("unsafe", str(caught.exception))
+        self.assertFalse((self.tmp / "evil").exists())
+        self.assert_nothing_installed()
+
+    def test_a_truncated_archive_is_a_readable_error(self) -> None:
+        data = build_archive(RELEASE)[:200]
+        self.archive = self.tmp / "me3.tar.gz"
+        self.archive.write_bytes(data)
+        self.use_pin(pin_for(FILES, archive_sha256=sha(data)))
+        with self.assertRaises(me3_host.Me3HostError):
+            me3_host.install(self.paths, self.archive)
+        self.assert_nothing_installed()
+
+    def test_a_missing_member_is_named(self) -> None:
+        members = {k: v for k, v in RELEASE.items() if k != "bin/win64/me3_mod_host.dll"}
+        data = build_archive(members)
+        self.archive = self.tmp / "me3.tar.gz"
+        self.archive.write_bytes(data)
+        self.use_pin(pin_for(FILES, archive_sha256=sha(data)))
+        with self.assertRaises(me3_host.Me3HostError) as caught:
+            me3_host.install(self.paths, self.archive)
+        self.assertIn("bin/win64/me3_mod_host.dll", str(caught.exception))
+        self.assert_nothing_installed()
+
+    def test_a_symlink_at_the_binary_path_is_refused_untouched(self) -> None:
+        self.use_archive()
+        target = self.tmp / "elsewhere"
+        target.write_bytes(b"mine")
+        self.binary.parent.mkdir(parents=True)
+        self.binary.symlink_to(target)
+        with self.assertRaises(me3_host.Me3HostError) as caught:
+            me3_host.install(self.paths, self.archive)
+        self.assertIn(str(self.binary), str(caught.exception))
+        self.assertTrue(self.binary.is_symlink())
+        self.assertEqual(target.read_bytes(), b"mine")
+
+    def test_a_directory_at_the_binary_path_is_refused(self) -> None:
+        self.use_archive()
+        self.binary.mkdir(parents=True)
+        with self.assertRaises(me3_host.Me3HostError):
+            me3_host.install(self.paths, self.archive)
+        self.assertTrue(self.binary.is_dir())
+
+    def test_an_interrupted_install_leaves_the_other_files_as_they_were(self) -> None:
+        self.use_archive()
+        self.install_files(OLD)
+        real_replace = os.replace
+        replaced: list[str] = []
+
+        def flaky(source, destination):
+            replaced.append(Path(destination).name)
+            if len(replaced) == 2:
+                raise OSError("disk full")
+            return real_replace(source, destination)
+
+        with mock.patch("os.replace", flaky):
+            with self.assertRaises(me3_host.Me3HostError):
+                me3_host.install(self.paths, self.archive)
+        self.assertEqual(replaced[0], "me3-launcher.exe")
+        self.assertEqual(self.launcher.read_bytes(), FILES["bin/win64/me3-launcher.exe"])
+        self.assertEqual(self.host_dll.read_bytes(), OLD["bin/win64/me3_mod_host.dll"])
+        self.assertEqual(self.binary.read_bytes(), OLD["bin/me3"])
+        temps = [
+            path.name
+            for folder in (self.binary.parent, me3_host.windows_bin_dir())
+            for path in folder.iterdir()
+            if path.name.endswith(".tmp")
+        ]
+        self.assertEqual(temps, [])
+
+
+class EnsureTests(InstallCase):
+    def release(self, digest: str | None) -> dict:
+        return {
+            "tag": "v0.13.0",
+            "assets": [
+                {
+                    "name": "me3-linux-amd64.tar.gz",
+                    "url": "https://example.invalid/me3.tar.gz",
+                    "digest": digest,
+                }
+            ],
+        }
+
+    def no_network(self):
+        return mock.patch.object(
+            me3_host.github, "_urlopen", side_effect=AssertionError("network used")
+        )
+
+    def test_an_install_that_matches_the_pin_downloads_nothing(self) -> None:
+        self.install_files()
+        with self.no_network():
+            result = me3_host.ensure(organizer(self.instance))
+        self.assertFalse(result.installed)
+        self.assertTrue(result.status.ok)
+
+    def test_a_local_archive_with_the_pinned_hash_installs_without_a_download(self) -> None:
+        self.use_archive()
+        with self.no_network():
+            result = me3_host.ensure(organizer(self.instance), archive=self.archive)
+        self.assertTrue(result.installed)
+        self.assertTrue(result.status.ok)
+
+    def test_a_local_archive_with_another_hash_is_refused(self) -> None:
+        self.use_archive()
+        other = self.tmp / "other.tar.gz"
+        other.write_bytes(build_archive({"x": b"y"}))
+        with self.assertRaises(IntegrityError):
+            me3_host.ensure(organizer(self.instance), archive=other)
+        self.assert_nothing_installed()
+
+    def test_an_archive_that_does_not_exist_is_a_readable_error(self) -> None:
+        with self.assertRaises(me3_host.Me3HostError):
+            me3_host.ensure(organizer(self.instance), archive=self.tmp / "missing.tar.gz")
+
+    def test_the_release_is_looked_up_by_id_and_tag_and_downloaded_with_the_pinned_hash(self) -> None:
+        data = self.use_archive()
+        downloads: list[tuple[str, str | None]] = []
+
+        def fake_download(url, destination, sha256=None):
+            downloads.append((url, sha256))
+            Path(destination).write_bytes(data)
+            return sha256
+
+        release = self.release("sha256:" + me3_host.PIN.archive_sha256)
+        with mock.patch.object(me3_host.github, "release_by_tag", return_value=release) as lookup, \
+                mock.patch.object(me3_host.github, "download_stream", fake_download):
+            result = me3_host.ensure(organizer(self.instance))
+        lookup.assert_called_once_with(540883721, "v0.13.0")
+        self.assertEqual(
+            downloads, [("https://example.invalid/me3.tar.gz", me3_host.PIN.archive_sha256)]
+        )
+        self.assertTrue(result.installed)
+        self.assertTrue(result.status.ok)
+
+    def test_a_release_without_a_digest_still_downloads_against_the_pinned_hash(self) -> None:
+        data = self.use_archive()
+
+        def fake_download(url, destination, sha256=None):
+            Path(destination).write_bytes(data)
+            return sha256
+
+        with mock.patch.object(me3_host.github, "release_by_tag", return_value=self.release(None)), \
+                mock.patch.object(me3_host.github, "download_stream", fake_download):
+            self.assertTrue(me3_host.ensure(organizer(self.instance)).installed)
+
+    def test_a_digest_that_disagrees_with_the_pin_stops_before_the_download(self) -> None:
+        self.use_archive()
+        release = self.release("sha256:" + "0" * 64)
+        with mock.patch.object(me3_host.github, "release_by_tag", return_value=release), \
+                mock.patch.object(me3_host.github, "download_stream") as download:
+            with self.assertRaises(IntegrityError) as caught:
+                me3_host.ensure(organizer(self.instance))
+        download.assert_not_called()
+        self.assertIn("0" * 64, str(caught.exception))
+        self.assertIn(me3_host.PIN.archive_sha256, str(caught.exception))
+        self.assert_nothing_installed()
+
+    def test_the_wrong_asset_is_refused(self) -> None:
+        self.use_archive()
+        release = {
+            "tag": "v0.13.0",
+            "assets": [{"name": "other.tar.gz", "url": "https://example.invalid/o", "digest": None}],
+        }
+        with mock.patch.object(me3_host.github, "release_by_tag", return_value=release):
+            with self.assertRaises(me3_host.Me3HostError):
+                me3_host.ensure(organizer(self.instance))
+        self.assert_nothing_installed()
+
+    def test_offline_and_rate_limited_give_a_readable_error_and_change_nothing(self) -> None:
+        self.use_archive()
+        failures = (
+            urllib.error.URLError("Name or service not known"),
+            urllib.error.HTTPError("https://api.github.com/x", 403, "rate limit exceeded", {}, None),
+        )
+        for failure in failures:
+            with mock.patch.object(me3_host.github, "release_by_tag", side_effect=failure):
+                with self.assertRaises(me3_host.Me3HostError) as caught:
+                    me3_host.ensure(organizer(self.instance))
+            self.assertIn("GitHub", str(caught.exception))
+        self.assert_nothing_installed()
+
+    def test_a_download_that_fails_midway_leaves_nothing_installed(self) -> None:
+        self.use_archive()
+        release = self.release("sha256:" + me3_host.PIN.archive_sha256)
+        with mock.patch.object(me3_host.github, "release_by_tag", return_value=release), \
+                mock.patch.object(
+                    me3_host.github,
+                    "download_stream",
+                    side_effect=urllib.error.URLError("connection reset"),
+                ):
+            with self.assertRaises(me3_host.Me3HostError):
+                me3_host.ensure(organizer(self.instance))
+        self.assert_nothing_installed()
+
+    def test_progress_messages_arrive_in_order(self) -> None:
+        self.use_archive()
+        messages: list[str] = []
+        me3_host.ensure(organizer(self.instance), archive=self.archive, progress=messages.append)
+        self.assertEqual(messages[0], "Checking the archive")
+        self.assertEqual(messages[-1], "Installing me3")
 
 
 if __name__ == "__main__":
