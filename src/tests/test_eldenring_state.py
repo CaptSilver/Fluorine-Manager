@@ -158,7 +158,8 @@ class CacheTests(TempDirCase):
         self.assertEqual(
             state.cached_sha256(cache, file), hashlib.sha256(b"abd").hexdigest()
         )
-        file.write_bytes(b"abcd")          # new size
+        file.write_bytes(b"abcd")          # new size alone ...
+        os.utime(file, ns=(1, 1))          # ... with the mtime put back
         self.assertEqual(
             state.cached_sha256(cache, file), hashlib.sha256(b"abcd").hexdigest()
         )
@@ -169,6 +170,15 @@ class CacheTests(TempDirCase):
 
 
 class LoaderTests(unittest.TestCase):
+    def test_a_second_load_under_another_name_reuses_the_first_copy(self) -> None:
+        errors = sys.modules["ermlib.errors"]
+        first_state = support.module(PACKAGE, "state")
+        second = support.load_support("_eldenring_state_tests_again")
+        self.assertIs(sys.modules["ermlib.errors"], errors)
+        self.assertIs(support.module(second, "state"), first_state)
+        self.assertIs(sys.modules["_eldenring_state_tests_again.state"], first_state)
+        self.assertIs(sys.modules["_eldenring_state_tests_again.ermlib.errors"], errors)
+
     def test_the_loader_needs_none_of_the_native_library_variables(self) -> None:
         # test_erm_suite is given FLUORINE_OOZ_LIB and FLUORINE_ER_TESTLIBS; the
         # unit tests are not, so importing ermlib must work without them. A
