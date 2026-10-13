@@ -55,7 +55,8 @@ def read_cache(path) -> dict:
     """
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
+        # RecursionError: json.loads on a file that is nothing but brackets.
         return {}
     return data if isinstance(data, dict) else {}
 

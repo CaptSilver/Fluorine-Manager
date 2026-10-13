@@ -329,6 +329,12 @@ class CacheTests(HostCase):
         self.paths.me3_host_state.write_text('{"files": 3, "version": ["x"]}')
         self.assertEqual(me3_host.status(self.paths).kind, me3_host.OK)
 
+    def test_a_deeply_nested_cache_file_does_not_break_status(self) -> None:
+        self.install_files()
+        self.paths.me3_host_state.parent.mkdir(parents=True)
+        self.paths.me3_host_state.write_text("[" * 100000 + "]" * 100000)
+        self.assertEqual(me3_host.status(self.paths).kind, me3_host.OK)
+
     def test_status_without_paths_works_and_writes_nothing(self) -> None:
         self.install_files()
         self.assertEqual(me3_host.status().kind, me3_host.OK)

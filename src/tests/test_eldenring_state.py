@@ -118,6 +118,11 @@ class CacheTests(TempDirCase):
         wrong.write_text("[1, 2]")
         self.assertEqual(state.read_cache(wrong), {})
 
+    def test_a_deeply_nested_file_is_an_empty_cache_not_a_recursion_error(self) -> None:
+        deep = self.tmp / "deep.json"
+        deep.write_text("[" * 100000 + "]" * 100000)
+        self.assertEqual(state.read_cache(deep), {})
+
     def test_write_json_round_trips_with_sorted_keys(self) -> None:
         target = self.tmp / "sub" / "cache.json"
         state.write_json(target, {"b": 1, "a": [1, 2]})
