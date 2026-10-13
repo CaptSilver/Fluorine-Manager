@@ -11,7 +11,6 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_saves_tests")
 saves = support.module(PACKAGE, "saves")
-ermlib_paths = support.module(PACKAGE, "ermlib.paths")
 
 STEAM_ID = "76561198000000000"
 SAVE_FOLDER = "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing"
@@ -89,9 +88,14 @@ class SaveDirTests(TempDirCase):
         self.assertEqual(saves.save_dir(self.library), self.base)
 
     def test_a_steamid_folder_holding_only_the_modded_save_is_found(self) -> None:
+        # The empty folder sorts first, so it is what the fallback would return:
+        # getting the other one back means the modded save was recognised.
+        (self.base / "1111").mkdir(parents=True)
         folder = self.base / STEAM_ID
-        folder.mkdir(parents=True)
-        (folder / ermlib_paths.MODDED_SAVE_NAME).write_bytes(b"save")
+        folder.mkdir()
+        # Spelled out because it is what the game writes, not what a constant
+        # says: reading the name from MODDED_SAVE_NAME could not fail.
+        (folder / "ER0000_modded").write_bytes(b"save")
         self.assertEqual(saves.save_dir(self.library), folder)
 
     def test_an_empty_steamid_folder_is_still_the_answer(self) -> None:

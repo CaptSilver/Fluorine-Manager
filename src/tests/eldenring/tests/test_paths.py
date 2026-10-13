@@ -14,10 +14,11 @@ from ermlib.paths import (
     reshade_active,
 )
 
-# What a me3 launch with `savefile = "ER0000_modded"` is expected to write. The
-# listing of the save folder after an in-game run is the authority; a different
-# name there means changing this and paths.MODDED_SAVE_NAME together.
-EXPECTED_MODDED_SAVE = "ER0000_modded.sl2"
+# What a me3 launch with `savefile = "ER0000_modded"` writes: the name as given,
+# no extension, with a .bak beside it. Read from a listing of the save folder
+# after an in-game launch; a different name there means changing this and
+# paths.MODDED_SAVE_NAME together.
+EXPECTED_MODDED_SAVE = "ER0000_modded"
 
 
 def _save_root(library):

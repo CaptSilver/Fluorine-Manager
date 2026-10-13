@@ -6,8 +6,9 @@ APPID = "1245620"
 
 # The file a me3 launch writes when its profile sets `savefile = "ER0000_modded"`,
 # which keeps modded progress out of the ER0000.sl2 that Steam Play loads and
-# Steam Cloud syncs.
-MODDED_SAVE_NAME = "ER0000_modded.sl2"
+# Steam Cloud syncs. The game adds no extension (it keeps an ER0000_modded.bak
+# beside it), so none is added here.
+MODDED_SAVE_NAME = "ER0000_modded"
 
 # Any of these marks a <steamid>/ folder as the Elden Ring save folder: Steam's
 # own save, Seamless Co-op's, and the modded one. A prefix that only ever ran

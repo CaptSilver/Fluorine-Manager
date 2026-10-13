@@ -136,9 +136,13 @@ class SaveDirectoryTests(GameCase):
         self.assert_both(self.library / SAVE_FOLDER)
 
     def test_a_save_folder_that_exists_is_found(self) -> None:
+        # The empty folder sorts first, so it is what the fallback would return:
+        # finding the other one means the modded save was recognised. The name is
+        # spelled out because it is what the game writes, not what a constant says.
+        (self.library / SAVE_FOLDER / "1111").mkdir(parents=True)
         folder = self.library / SAVE_FOLDER / "76561198000000000"
-        folder.mkdir(parents=True)
-        (folder / "ER0000_modded.sl2").write_bytes(b"save")
+        folder.mkdir()
+        (folder / "ER0000_modded").write_bytes(b"save")
         self.game.setGamePath(self.install)
         self.assert_both(folder)
 
