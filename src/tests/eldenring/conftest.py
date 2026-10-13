@@ -40,6 +40,16 @@ def real_save_bytes():
         pytest.skip(f"FLUORINE_ER_TEST_SAVE is unreadable: {exc}")
 
 
+@pytest.fixture
+def tmp_game(tmp_path):
+    """A throwaway fake Game/ dir for the cases that swap or inspect the launcher."""
+    game = tmp_path / "Game"
+    game.mkdir()
+    (game / "eldenring.exe").write_bytes(b"\x00")
+    (game / "start_protected_game.exe").write_bytes(b"\x00" * 16)
+    return game
+
+
 @pytest.fixture(autouse=True)
 def _isolated_build_cache(tmp_path, monkeypatch):
     """Keep the build-stamp cache out of the working directory while tests run."""
