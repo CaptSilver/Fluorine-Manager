@@ -54,6 +54,10 @@ class LibraryRootTests(TempDirCase):
         with mock.patch.object(Path, "is_file", side_effect=PermissionError("denied")):
             self.assertIsNone(saves.library_root(install))
 
+    def test_input_that_is_not_a_path_gives_none_and_does_not_raise(self) -> None:
+        for odd in (None, 5, "/lib/steamapps/common/x\0y"):
+            self.assertIsNone(saves.library_root(odd), repr(odd))
+
     def test_anything_else_gives_none_and_does_not_raise(self) -> None:
         for odd in (
             "",
@@ -123,6 +127,18 @@ class DefaultLibraryTests(TempDirCase):
         home.mkdir()
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
             self.assertEqual(saves.save_dir(None), self.expected(home))
+
+    def test_an_unreadable_steam_folder_still_gives_a_path(self) -> None:
+        with mock.patch.object(Path, "is_dir", side_effect=PermissionError("denied")):
+            self.assertIsInstance(saves.save_dir(None), Path)
+
+    def test_an_unknown_home_directory_still_gives_a_path(self) -> None:
+        with mock.patch.object(Path, "home", side_effect=RuntimeError("no home")), \
+                mock.patch("os.path.expanduser", side_effect=RuntimeError("no home")):
+            self.assertIsInstance(saves.save_dir(None), Path)
+
+    def test_a_library_path_with_a_nul_byte_still_gives_a_path(self) -> None:
+        self.assertIsInstance(saves.save_dir(Path("/x\0y")), Path)
 
 
 if __name__ == "__main__":

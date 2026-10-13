@@ -20,23 +20,36 @@ def library_root(install_dir) -> Path | None:
     steamapps/common/<x> would otherwise point the save lookup (and later the
     build identity) at a compatdata that does not belong to it.
     """
-    path = Path(install_dir)
-    if path.parent.name != "common" or path.parent.parent.name != "steamapps":
-        return None
-    library = path.parent.parent.parent
     try:
+        path = Path(install_dir)
+        if path.parent.name != "common" or path.parent.parent.name != "steamapps":
+            return None
+        library = path.parent.parent.parent
         manifest = library / "steamapps" / f"appmanifest_{paths.APPID}.acf"
         return library if manifest.is_file() else None
-    except OSError:
-        # Unreadable steamapps/: the callers run unguarded inside the core.
+    except (OSError, TypeError, ValueError):
+        # Unreadable steamapps/ or a value Path() rejects: the callers run
+        # unguarded inside the core.
         return None
+
+
+# Used only when the home directory cannot be determined at all (HOME unset
+# and no passwd entry). Absolute and nonexistent, so nothing is ever read from
+# or written under the working directory.
+_LAST_RESORT_ROOT = Path("/nonexistent-home/.local/share/Steam")
 
 
 def _default_steam_root() -> Path:
     try:
         return paths.find_steam_root()
-    except PathError:
+    except (PathError, OSError, RuntimeError, ValueError):
+        # OSError: is_dir() on an unreadable parent. RuntimeError: expanduser()
+        # with no determinable home.
+        pass
+    try:
         return Path.home() / ".local" / "share" / "Steam"
+    except (OSError, RuntimeError):
+        return _LAST_RESORT_ROOT
 
 
 def save_dir(library: Path | None) -> Path:
@@ -49,11 +62,11 @@ def save_dir(library: Path | None) -> Path:
     root = Path(library) if library is not None else _default_steam_root()
     try:
         return paths.find_save_dir(root)
-    except (PathError, OSError):
+    except (PathError, OSError, ValueError):
         pass
     base = root / "steamapps" / "compatdata" / paths.APPID / _SAVE_FOLDER
     try:
         folders = sorted(child for child in base.iterdir() if child.is_dir())
-    except OSError:
+    except (OSError, ValueError):
         folders = []
     return folders[0] if folders else base
