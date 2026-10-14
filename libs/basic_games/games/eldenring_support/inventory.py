@@ -1,0 +1,428 @@
+"""What Game/ held when it was vanilla, and the checks that hold it to that.
+
+Decision 10 wants Game/ vanilla at every launch, and neither erm nor Fluorine
+has a definition of vanilla: erm's doctor only knew a blocklist of names, and
+Steam's depot manifests are a format the plugin does not parse. So the plugin
+records one, <instance>/eldenring/vanilla-inventory.json, adopted at a moment
+the user confirmed (adopt), checked at every launch and after every session
+(check), and moved forward across a Steam update without trusting anything that
+could carry code (diff, apply_diff).
+
+Nothing in here writes Game/, and only adopt, apply_diff, re_adopt, repin and
+refresh return a new Inventory for the caller to write. The diagnose pass and
+the post-session sweep call check and throw the refreshed mtimes away.
+
+Every walk uses lstat and never follows a link, because Wine follows one and
+loads a dinput8.dll -> ~/x.dll just as it would a regular file. A link is
+either an allowlisted ReShade link pinned in `links` or a finding.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable, Collection, Iterable
+
+from . import deploy, doctor, hardening, state
+from .doctor import RUNTIME_NOISE, is_noise  # noqa: F401 - the noise list is documented here
+from .ermlib import github
+from .ermlib import paths as ermpaths
+from .ermlib.errors import ErmError
+
+# Files up to this size get a sha256 at adoption; the archives above it
+# (Data0.bdt and its siblings) are held to their size alone. A same-size edit
+# to a multi-gigabyte depot archive is not a plausible ban vector, and
+# regulation.bin, the loose file that is, has its own sha.
+HASH_CAP = 256 * 1024 * 1024
+
+# What ReShade's installer puts in Game/, each of which has to be a link whose
+# target lies under ~/.local/share/reshade/. Anything else ReShade writes there
+# (a preset, a screenshots folder) is a stray until this list grows.
+RESHADE_FILES = ("dxgi.dll", "d3dcompiler_47.dll", "ReShade.ini", "ReShade_shaders")
+# Written beside the links by ReShade itself while it is active. ReShade.log is
+# already covered by the *.log noise pattern.
+RESHADE_WRITTEN = ("ReShade2.ini",)
+
+PROGRAM_EXTENSIONS = (".dll", ".exe")
+
+
+class InventoryError(ErmError):
+    """The inventory cannot be recorded or moved forward as asked."""
+
+
+@dataclass(frozen=True)
+class FileEntry:
+    size: int
+    mtime_ns: int
+    sha256: str | None
+
+
+@dataclass(frozen=True)
+class LinkEntry:
+    target: str
+    sha256: str | None
+
+
+@dataclass
+class Inventory:
+    steam_buildid: str
+    adopted: str
+    regulation_sha: str
+    regulation: str
+    files: dict[str, FileEntry] = field(default_factory=dict)
+    links: dict[str, LinkEntry] = field(default_factory=dict)
+
+
+# -- reading and writing ------------------------------------------------------
+
+_FIELDS = {"steam_buildid", "adopted", "regulation_sha", "regulation", "files", "links"}
+
+
+def _is_sha(value: object) -> bool:
+    return value is None or (isinstance(value, str) and len(value) == 64)
+
+
+def _int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def read(paths: state.InstancePaths) -> Inventory | None:
+    """The recorded inventory, None when there is none. A damaged one raises StateError.
+
+    Not a cache: an inventory that cannot be read must stop the launch rather
+    than read as "nothing recorded", which would offer to adopt over it.
+    """
+    data = state.read_json_object(paths.vanilla_inventory)
+    if data is None:
+        return None
+    where = paths.vanilla_inventory
+    if set(data) != _FIELDS:
+        raise state.StateError(f"{where} is damaged: it has to hold exactly {', '.join(sorted(_FIELDS))}")
+    for name in ("steam_buildid", "adopted", "regulation_sha", "regulation"):
+        if not isinstance(data[name], str):
+            raise state.StateError(f"{where} is damaged: {name} is not text")
+    if not isinstance(data["files"], dict) or not isinstance(data["links"], dict):
+        raise state.StateError(f"{where} is damaged: files and links have to be objects")
+    files, links = {}, {}
+    for rel, entry in data["files"].items():
+        ok = isinstance(entry, list) and len(entry) == 3 and _int(entry[0]) and _int(entry[1]) and _is_sha(entry[2])
+        if not ok or not _rel_ok(rel):
+            raise state.StateError(f"{where} is damaged: the entry for {rel!r} is not [size, mtime_ns, sha256]")
+        files[rel] = FileEntry(*entry)
+    for rel, entry in data["links"].items():
+        ok = isinstance(entry, list) and len(entry) == 2 and isinstance(entry[0], str) and _is_sha(entry[1])
+        if not ok or not _rel_ok(rel):
+            raise state.StateError(f"{where} is damaged: the link {rel!r} is not [target, sha256]")
+        links[rel] = LinkEntry(*entry)
+    return Inventory(
+        data["steam_buildid"], data["adopted"], data["regulation_sha"], data["regulation"], files, links
+    )
+
+
+def _rel_ok(rel: object) -> bool:
+    return (
+        isinstance(rel, str)
+        and rel != ""
+        and ermpaths.is_safe_relpath(rel)
+        and not rel.startswith("/")
+        and all(part not in ("", ".") for part in rel.split("/"))
+    )
+
+
+def write(paths: state.InstancePaths, inventory: Inventory) -> None:
+    state.write_json(
+        paths.vanilla_inventory,
+        {
+            "steam_buildid": inventory.steam_buildid,
+            "adopted": inventory.adopted,
+            "regulation_sha": inventory.regulation_sha,
+            "regulation": inventory.regulation,
+            "files": {rel: [e.size, e.mtime_ns, e.sha256] for rel, e in sorted(inventory.files.items())},
+            "links": {rel: [e.target, e.sha256] for rel, e in sorted(inventory.links.items())},
+        },
+    )
+
+
+def build_changed(inventory: Inventory, buildid: str) -> bool:
+    """Whether Steam's build id is not the one the inventory was recorded at."""
+    return buildid != inventory.steam_buildid
+
+
+# -- walking Game/ ------------------------------------------------------------
+
+
+@dataclass
+class Tree:
+    """What is in Game/: regular files with their stat, links with their target text."""
+
+    files: dict[str, os.stat_result] = field(default_factory=dict)
+    links: dict[str, str] = field(default_factory=dict)
+    unreadable: list[str] = field(default_factory=list)
+
+
+def walk(game_dir) -> Tree:
+    """Every regular file and every link under `game_dir`, never following a link.
+
+    A folder that cannot be listed (or Game/ itself missing) is in `unreadable`:
+    what is inside it cannot be shown to be vanilla. Other kinds of file
+    (sockets, pipes) are not loaded by Wine and are left out.
+    """
+    base = Path(game_dir)
+    tree = Tree()
+
+    def failed(error: OSError) -> None:
+        tree.unreadable.append(_rel(base, error.filename) if error.filename else ".")
+
+    for folder, dirs, names in os.walk(base, onerror=failed):
+        dirs.sort()
+        kept = []
+        for name in dirs:
+            path = os.path.join(folder, name)
+            if os.path.islink(path):
+                tree.links[_rel(base, path)] = _readlink(path)
+            else:
+                kept.append(name)
+        dirs[:] = kept
+        for name in sorted(names):
+            path = os.path.join(folder, name)
+            try:
+                info = os.lstat(path)
+            except FileNotFoundError:
+                continue  # gone between the listing and the stat: Steam or the game is at work
+            except OSError:
+                tree.unreadable.append(_rel(base, path))
+                continue
+            if stat.S_ISLNK(info.st_mode):
+                tree.links[_rel(base, path)] = _readlink(path)
+            elif stat.S_ISREG(info.st_mode):
+                tree.files[_rel(base, path)] = info
+    return tree
+
+
+def _rel(base: Path, path) -> str:
+    try:
+        return Path(path).relative_to(base).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _readlink(path: str) -> str:
+    try:
+        return os.readlink(path)
+    except OSError:
+        return ""
+
+
+# -- what counts -------------------------------------------------------------
+
+
+def reshade_active(game_dir) -> bool:
+    """paths.reshade_active, which re-raises EACCES on the bundled Python, made safe."""
+    try:
+        return ermpaths.reshade_active(game_dir)
+    except (OSError, ValueError):
+        return False
+
+
+def reshade_home() -> Path | None:
+    try:
+        return Path.home() / ".local" / "share" / "reshade"
+    except (RuntimeError, OSError):
+        return None
+
+
+def desired_shas(wanted: deploy.Desired) -> dict[str, str]:
+    """Game-relative path -> sha256 of the config file a native wants deployed there."""
+    return {rel: item.sha256 for rel, item in wanted.files.items()}
+
+
+@dataclass
+class Context:
+    """What is not the inventory's business, as of now."""
+
+    manifest: deploy.Manifest
+    desired: dict[str, str]
+    reshade: bool
+    owned: frozenset[str]
+
+
+def context(game_dir, manifest: deploy.Manifest, desired: dict[str, str] | None = None) -> Context:
+    return Context(manifest, dict(desired or {}), reshade_active(game_dir), frozenset(manifest.dirs))
+
+
+def excluded(rel: str, ctx: Context) -> bool:
+    """Whether the regular file `rel` is never in the inventory and never a stray."""
+    # Exact names: Wine ignores case, so a Regulation.bin or a START_PROTECTED_GAME.EXE
+    # beside the real file is a second file it might load, and that is a stray.
+    if rel == "regulation.bin":
+        return True  # held to regulation_sha instead: it is the loose file mods overwrite
+    if rel in (hardening.LAUNCHER, hardening.BACKUP):
+        return True  # the harden pair, judged by hardening.state from its bytes
+    if rel in ctx.manifest.files:
+        return True  # deploy.verify's, whatever its bytes
+    if ctx.reshade and rel in RESHADE_WRITTEN:
+        return True
+    if is_noise(rel):
+        return True
+    parts = rel.split("/")
+    # The log.txt a LukeYui-style DLL writes beside its config file is owned by
+    # the folder the plugin created for it. Anything else in there is not.
+    return len(parts) > 2 and "/".join(parts[:2]) in ctx.owned and deploy.is_noise(parts[-1])
+
+
+def _is_reshade_name(rel: str) -> bool:
+    return rel in RESHADE_FILES
+
+
+def reshade_link_ok(game_dir, rel: str, ctx: Context) -> bool:
+    """Whether the link `rel` is one of ReShade's: active, the right name, pointing into its folder."""
+    home = reshade_home()
+    if not ctx.reshade or home is None or not _is_reshade_name(rel):
+        return False
+    resolved = Path(os.path.realpath(Path(game_dir) / rel))
+    return resolved.is_relative_to(os.path.realpath(home))
+
+
+def _hash(path, size: int, cache: dict | None) -> str | None:
+    if size > HASH_CAP:
+        return None
+    return github.sha256_file(path) if cache is None else state.cached_sha256(cache, path)
+
+
+def _link_entry(game_dir, rel: str, target: str, cache: dict | None) -> LinkEntry:
+    """The pin of an allowlisted link: where it points and the bytes it points at."""
+    resolved = os.path.realpath(Path(game_dir) / rel)
+    try:
+        info = os.stat(resolved)
+    except OSError:
+        return LinkEntry(target, None)
+    return LinkEntry(target, _hash(resolved, info.st_size, cache) if stat.S_ISREG(info.st_mode) else None)
+
+
+def _file_entry(game_dir, rel: str, info: os.stat_result, cache: dict | None) -> FileEntry:
+    return FileEntry(info.st_size, info.st_mtime_ns, _hash(Path(game_dir) / rel, info.st_size, cache))
+
+
+# -- adopting -----------------------------------------------------------------
+
+
+@dataclass
+class Candidates:
+    """What an adoption could record, for the dialog that asks the user first."""
+
+    files: list[str] = field(default_factory=list)
+    links: list[str] = field(default_factory=list)
+    symlinks: list[tuple[str, str]] = field(default_factory=list)
+    unreadable: list[str] = field(default_factory=list)
+
+    def listing(self) -> list[str]:
+        """Every path in the order the dialog shows them: programs and top-level folders first."""
+        return ordered_for_dialog(self.files + self.links)
+
+
+def ordered_for_dialog(rels: Iterable[str]) -> list[str]:
+    """Programs first, then the first path of each top-level folder, then the rest.
+
+    A file a mod swapped in is a .dll or .exe or a new folder; those are what a
+    person scanning the list for a stray needs to see before they scroll.
+    """
+    rels = sorted(set(rels))
+    programs = [rel for rel in rels if rel.lower().endswith(PROGRAM_EXTENSIONS)]
+    seen_folders: set[str] = set()
+    firsts = []
+    for rel in rels:
+        top = rel.split("/")[0]
+        if "/" in rel and top.lower() not in seen_folders:
+            seen_folders.add(top.lower())
+            firsts.append(rel)
+    head = programs + [rel for rel in firsts if rel not in programs]
+    return head + [rel for rel in rels if rel not in head]
+
+
+def candidates(game_dir, manifest: deploy.Manifest) -> Candidates:
+    """Every path an adoption could record: the plain files and the allowlisted links."""
+    ctx = context(game_dir, manifest)
+    tree = walk(game_dir)
+    found = Candidates(unreadable=list(tree.unreadable))
+    found.files = sorted(rel for rel in tree.files if not excluded(rel, ctx))
+    for rel, target in sorted(tree.links.items()):
+        if reshade_link_ok(game_dir, rel, ctx):
+            found.links.append(rel)
+        else:
+            found.symlinks.append((rel, target))
+    return found
+
+
+def _blocked(game_dir, rels: Iterable[str]) -> list[str]:
+    """The `rels` that are, or lie under, a path doctor.scan_game_dir names."""
+    hits = [Path(hit).relative_to(game_dir).as_posix().lower() for hit in doctor.scan_game_dir(game_dir)]
+    return sorted(
+        rel for rel in rels if any(rel.lower() == hit or rel.lower().startswith(hit + "/") for hit in hits)
+    )
+
+
+def _refuse_unadoptable(game_dir, found: Candidates, manifest: deploy.Manifest, allow_deployed: bool) -> None:
+    if found.unreadable:
+        raise InventoryError("These folders in Game/ cannot be read: " + ", ".join(found.unreadable))
+    if found.symlinks:
+        listed = ", ".join(f"{rel} -> {target}" for rel, target in found.symlinks)
+        raise InventoryError(
+            f"Game/ holds links that are not ReShade's: {listed}. Wine follows a link, so "
+            "none of them can be called vanilla."
+        )
+    if manifest.files and not allow_deployed:
+        raise InventoryError(
+            "Config files are deployed into Game/mods/, and a deployed file is never vanilla. "
+            "Undeploy them first."
+        )
+
+
+def adopt(
+    paths: state.InstancePaths,
+    game_dir,
+    manifest: deploy.Manifest,
+    live,
+    accepted: Collection[str],
+    *,
+    cache: dict | None = None,
+    notify: Callable[[str], None] | None = None,
+) -> Inventory:
+    """Record exactly the `accepted` paths of Game/ as vanilla, and write the inventory.
+
+    `accepted` always comes from a caller that showed the user the list
+    (candidates().listing()). Refused: a path that is not a candidate, a path
+    doctor.scan_game_dir names (a known mod artifact is never adopted), any link
+    that is not ReShade's anywhere under Game/, a folder that cannot be read,
+    and a non-empty deploy manifest. `live` is the gamebuild.BuildId whose
+    steam_buildid, regulation and regulation_sha are recorded beside the files.
+    """
+    found = candidates(game_dir, manifest)
+    _refuse_unadoptable(game_dir, found, manifest, allow_deployed=False)
+    allowed = set(found.files) | set(found.links)
+    unknown = sorted(set(accepted) - allowed)
+    if unknown:
+        raise InventoryError("These are not files Game/ can have as vanilla: " + ", ".join(unknown))
+    blocked = _blocked(game_dir, accepted)
+    if blocked:
+        raise InventoryError(
+            "These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked)
+        )
+    tree = walk(game_dir)
+    notify = notify or (lambda message: None)
+    inventory = Inventory(
+        live.steam_buildid,
+        datetime.now(timezone.utc).isoformat(),
+        live.regulation_sha,
+        live.regulation,
+    )
+    for rel in sorted(accepted):
+        notify(f"Recording {rel}")
+        if rel in tree.links:
+            inventory.links[rel] = _link_entry(game_dir, rel, tree.links[rel], cache)
+        else:
+            inventory.files[rel] = _file_entry(game_dir, rel, tree.files[rel], cache)
+    write(paths, inventory)
+    return inventory
