@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import archives, atomic, generated, kinds, session, state
+from . import archives, atomic, generated, importsave, kinds, session, state
 from .ermlib import gamebuild, manifest, me3pkg
 from .ermlib import paths as ermpaths
 from .ermlib import saves as ermsaves
@@ -605,6 +605,10 @@ def _run(
     stamp = stamp or session.now_stamp()
 
     _backup_saves(paths, Path(save_dir), stamp, report)
+    if importsave.flag(organizer, Path(save_dir), stamp):
+        report.info(
+            "ER0000.sl2 is held for review: the import asks about it and is not marked done until that is settled"
+        )
     _carry_build_knowledge(erm_dir, installed, paths, report)
 
     try:

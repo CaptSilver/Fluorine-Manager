@@ -15,6 +15,7 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_importer_tests")
 importer = support.module(PACKAGE, "importer")
 kinds = support.module(PACKAGE, "kinds")
+importsave = support.module(PACKAGE, "importsave")
 generated = support.module(PACKAGE, "generated")
 state = support.module(PACKAGE, "state")
 errors = support.module(PACKAGE, "ermlib.errors")
@@ -861,6 +862,35 @@ class PasswordTests(ImporterCase):
         (self.erm / "secrets.env").unlink()
         self.run_import()
         self.assertIsNone(self.organizer.pluginSetting(kinds.PLUGIN, "coop_password"))
+
+
+class SaveFlagTests(ImporterCase):
+    def flag(self):
+        return self.organizer.persistent(kinds.PLUGIN, "save_unreviewed")
+
+    def test_a_vanilla_save_raises_the_flag_with_the_stamp_and_the_report_says_so(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla")
+        report = self.run_import()
+        self.assertEqual(self.flag(), "20261014T010203000001Z")
+        self.assertTrue(any("ER0000.sl2 is held for review" in text for _, text in report.lines))
+
+    def test_no_vanilla_save_raises_nothing(self) -> None:
+        (self.save_dir / "ER0000.co2").write_bytes(b"coop")
+        self.run_import()
+        self.assertFalse(self.flag())
+
+    def test_a_question_that_was_answered_is_not_raised_again(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla")
+        self.run_import()
+        importsave.settle(self.organizer, "keep:no:clean")
+        self.run_import(stamp="20261014T999999000001Z")
+        self.assertFalse(self.flag())
+
+    def test_a_flag_that_is_up_keeps_its_first_stamp(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla")
+        self.run_import()
+        self.run_import(stamp="20261014T999999000001Z")
+        self.assertEqual(self.flag(), "20261014T010203000001Z")
 
 
 class NothingElseIsTouchedTests(ImporterCase):
