@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, coop_settings, deploy, doctor, environment, fsprobe, gate, generated, hardening, inventory, kinds, me3_host,
-    mods, pe, prepare, procs, qtui, saves, session, state,
+    archives, coop_settings, deploy, doctor, environment, fsprobe, gate, generated, hardening, inventory, kinds, listfile,
+    me3_host, mods, pe, prepare, procs, qtui, saves, session, state,
 )
 from .ermlib import gamebuild, steam
 from .ermlib import paths as ermpaths
@@ -82,6 +82,7 @@ KEYS: tuple[str, ...] = (
     "ME3_CONFIG_STEAM_DIR",
     "STEAM_LAUNCH_OPTION",
     "ENTRY_SETTINGS_UNREADABLE",
+    "ACTIVE_LIST_MISMATCH",
 )
 
 TITLES: dict[str, str] = {
@@ -133,6 +134,7 @@ TITLES: dict[str, str] = {
     "ME3_CONFIG_STEAM_DIR": "A me3 config file moves the Steam folder",
     "STEAM_LAUNCH_OPTION": "Steam has a launch option set for Elden Ring",
     "ENTRY_SETTINGS_UNREADABLE": "The instance's settings file cannot be read",
+    "ACTIVE_LIST_MISMATCH": "This setup is not the one the active list describes",
 }
 
 # The guided fixes that need no tool of the plugin's own. The diagnose plugin
@@ -254,7 +256,10 @@ class Diagnosis:
         found: list[Problem] = []
         with archives.hash_cache(paths) as cache:
             context = self._context(paths, cache)
-            for group in (self._folder_rows, self._deploy_rows, self._session_rows, self._mod_rows, self._me3_rows):
+            for group in (
+                self._folder_rows, self._deploy_rows, self._session_rows, self._mod_rows, self._me3_rows,
+                self._list_rows,
+            ):
                 try:
                     found += group(context)
                 except Exception as exc:  # a broken check must not take the others down
@@ -685,6 +690,37 @@ class Diagnosis:
                 )
             ]
         return []
+
+    # -- the active list ------------------------------------------------------------
+
+    def _list_rows(self, context: Context) -> list[Problem]:
+        """The profile's active list against this setup.
+
+        Compared without the merge outputs: this pass never builds the generated
+        mod, and outputs read from a stale build would only repeat what the next
+        launch fixes by merging. The launch compares them after it has merged.
+        """
+        try:
+            doc = state.read_profile_rules(self._organizer.profilePath())["active_list"]
+        except state.StateError:
+            return []  # the rules row says the file is damaged
+        if doc is None:
+            return []
+        try:
+            found = listfile.verify(
+                self._organizer, doc, live=self._identify(context) or listfile.build_of(doc), cache=context.cache,
+                codecs=generated.codecs, host_status=lambda: me3_host.status(context.paths), check_outputs=False,
+            )
+        except listfile.ListFormatError as exc:
+            return [Problem("ACTIVE_LIST_MISMATCH", f"The profile's active list cannot be used: {exc}")]
+        if not found:
+            return []
+        blocked = listfile.blocking(found)
+        lead = (
+            "A launch is refused until this setup is the one the profile's active list describes:"
+            if blocked else "Nothing blocks a launch:"
+        )
+        return [Problem("ACTIVE_LIST_MISMATCH", f"{lead}\n{listfile.describe(found)}", informational=not blocked)]
 
     # -- me3 and what a launch inherits ---------------------------------------------
 

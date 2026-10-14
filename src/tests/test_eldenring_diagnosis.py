@@ -21,6 +21,7 @@ hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
 me3_host = support.module(PACKAGE, "me3_host")
 kinds = support.module(PACKAGE, "kinds")
+listfile = support.module(PACKAGE, "listfile")
 procs = support.module(PACKAGE, "procs")
 session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
@@ -956,6 +957,91 @@ class FailureTests(DiagnosisCase):
         with mock.patch.object(diagnosis.archives.state, "write_json", side_effect=OSError("disk full")):
             with self.assertLogs(diagnosis.archives.log, "WARNING"):
                 self.assertEqual(self.problems(), [])
+
+
+class ActiveListRowTests(DiagnosisCase):
+    """The profile's active list against this setup, as the Problems list shows it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.codecs = mock.patch.object(diagnosis.generated, "codecs", return_value={"zstd": 1}).start()
+        self.doc = {
+            "format": 1, "name": "seamless-full", "exported": "2026-10-12T20:11:03Z",
+            "game_build": {"exe": LIVE.exe, "app": LIVE.app, "regulation": LIVE.regulation, "regulation_sha": LIVE.regulation_sha},
+            "me3_version": me3_host.PIN.version, "me3_sha256": me3_host.PIN.archive_sha256,
+            "codecs": {"zstd": 1}, "randomizer_seed": "",
+            "rules": {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {}},
+            "merged_regulation_sha256": None, "outputs": {"regulation.bin": "f" * 64}, "mods": [],
+        }
+
+    def activate(self, doc=None, **rules) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [], "renames": [], "active_list": self.doc if doc is None else doc, **rules},
+        )
+
+    def test_the_key_is_appended_after_the_earlier_ones(self) -> None:
+        self.assertGreater(diagnosis.number("ACTIVE_LIST_MISMATCH"), diagnosis.number("ENTRY_SETTINGS_UNREADABLE"))
+
+    def test_a_profile_without_an_active_list_has_no_row(self) -> None:
+        self.assertEqual(self.problems(), [])
+
+    def test_a_setup_that_is_the_list_has_no_row(self) -> None:
+        self.activate()
+        self.assertEqual(self.problems(), [])
+
+    def test_blocking_findings_are_one_row_that_lists_them_and_has_no_fix(self) -> None:
+        self.modlist.add("unlisted", files={"msg/u.dcx": b"u"})
+        self.activate(randomizer_seed="mine")
+        problem = self.one("ACTIVE_LIST_MISMATCH")
+        self.assertFalse(problem.informational)
+        self.assertIsNone(problem.fix)
+        self.assertIn("[extra_enabled] unlisted", problem.text)
+        self.assertIn("[seed_differs]", problem.text)
+
+    def test_only_informational_findings_make_an_informational_row(self) -> None:
+        self.modlist.add("mine", files={"regulation.bin": b"hand made"})
+        entry = {
+            "name": "mine", "kind": "package", "enabled": True, "subdir": None, "manual": False, "source": "local",
+            "archive": None, "sha256": None,
+            "content_sha256": listfile.content_sha256(
+                self.organizer.modsPath_ / "mine", "package", install_files=None, view=None, cache={}
+            ),
+        }
+        self.doc["mods"] = [entry]
+        self.activate()
+        problem = self.one("ACTIVE_LIST_MISMATCH")
+        self.assertTrue(problem.informational)
+        self.assertIn("unpinned_local", problem.text)
+
+    def test_a_list_that_cannot_be_used_is_a_row_saying_so(self) -> None:
+        self.activate({"format": 9})
+        self.assertIn("cannot be used", self.one("ACTIVE_LIST_MISMATCH").text)
+
+    def test_damaged_rules_are_left_to_their_own_row(self) -> None:
+        state.profile_rules(self.organizer.profilePath()).write_text("{nope")
+        self.assertEqual(self.keys(), ["RULES_DAMAGED"])
+
+    def test_the_merge_outputs_are_not_compared_here_because_this_pass_never_builds(self) -> None:
+        self.activate()
+        state.write_json(self.paths.generated_state, {"fingerprint": "f", "outputs": {"regulation.bin": "0" * 64}})
+        self.assertNotIn("ACTIVE_LIST_MISMATCH", self.keys())
+
+    def test_an_installed_me3_that_is_not_the_pin_is_reported_with_the_list(self) -> None:
+        self.activate()
+        self.me3_status.return_value = me3_host.Status(me3_host.OFF_PIN, "me3 0.13.0")
+        self.assertIn("[me3_differs]", self.one("ACTIVE_LIST_MISMATCH").text)
+
+    def test_a_build_that_cannot_be_identified_leaves_the_build_to_the_launch(self) -> None:
+        self.identify.side_effect = gamebuild.GameBuildError("no buildid")
+        self.activate()
+        self.assertNotIn("ACTIVE_LIST_MISMATCH", self.keys())
+
+    def test_the_pass_changes_nothing_in_the_profile(self) -> None:
+        self.activate(randomizer_seed="mine")
+        before = state.profile_rules(self.organizer.profilePath()).read_bytes()
+        self.problems()
+        self.assertEqual(state.profile_rules(self.organizer.profilePath()).read_bytes(), before)
 
 
 if __name__ == "__main__":
