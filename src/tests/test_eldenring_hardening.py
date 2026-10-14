@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tempfile
 import types
@@ -410,6 +411,63 @@ class UnhardenTests(HardeningCase):
             self.do(hardening.unharden)
         self.assertEqual(self.events, ["unlock"])
         self.assertTrue((self.game / "start_protected_game.exe.erm-backup").exists())
+
+
+class ChoicesTests(unittest.TestCase):
+    def test_a_launcher_that_was_never_hardened_offers_harden_only(self) -> None:
+        self.assertEqual(hardening.choices(hardening.VANILLA, False), [hardening.ACT_HARDEN])
+
+    def test_a_hardened_launcher_offers_unharden(self) -> None:
+        self.assertEqual(hardening.choices(hardening.HARDENED, True), [hardening.ACT_UNHARDEN])
+
+    def test_a_swapped_stale_or_restored_launcher_offers_reharden_and_unharden(self) -> None:
+        for current in (hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED):
+            with self.subTest(current):
+                self.assertEqual(
+                    hardening.choices(current, True), [hardening.ACT_REHARDEN, hardening.ACT_UNHARDEN]
+                )
+
+    def test_a_missing_launcher_beside_a_backup_file_offers_unharden(self) -> None:
+        self.assertEqual(hardening.choices(hardening.ABSENT, True), [hardening.ACT_UNHARDEN])
+
+    def test_without_a_backup_file_nothing_is_offered_in_any_state_but_vanilla(self) -> None:
+        for current in (
+            hardening.HARDENED, hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED, hardening.ABSENT
+        ):
+            with self.subTest(current):
+                self.assertEqual(hardening.choices(current, False), [])
+
+
+class BackupThatIsALinkTests(HardeningCase):
+    """state() reads a link where the backup belongs as stale; neither action may follow it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        elsewhere = self.tmp / "elsewhere.exe"
+        elsewhere.write_bytes(EAC)
+        os.symlink(elsewhere, self.game / "start_protected_game.exe.erm-backup")
+        self.put("start_protected_game.exe", OLDER_GAME)
+        self.assertEqual(hardening.state(self.game), hardening.STALE)
+
+    def assert_untouched(self) -> None:
+        self.assertEqual(self.events, [])
+        self.assertEqual((self.game / "start_protected_game.exe").read_bytes(), OLDER_GAME)
+        self.assertTrue((self.game / "start_protected_game.exe.erm-backup").is_symlink())
+        self.assertFalse(os.path.lexists(self.paths.quarantine_game))
+
+    def test_reharden_refuses_before_unlocking_quarantining_or_swapping(self) -> None:
+        self.locked = True
+        with self.assertRaises(hardening.HardenError) as caught:
+            self.do(hardening.reharden)
+        self.assertIn("not a regular file", str(caught.exception))
+        self.assert_untouched()
+
+    def test_unharden_refuses_before_unlocking_or_restoring(self) -> None:
+        self.locked = True
+        with self.assertRaises(hardening.HardenError) as caught:
+            self.do(hardening.unharden)
+        self.assertIn("not a regular file", str(caught.exception))
+        self.assert_untouched()
 
 
 class RunningGameTests(HardeningCase):

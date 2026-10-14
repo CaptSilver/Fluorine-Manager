@@ -143,6 +143,29 @@ def describe(launcher: str) -> str:
     return _DESCRIPTIONS[launcher]
 
 
+ACT_HARDEN = "Harden"
+ACT_REHARDEN = "Re-harden"
+ACT_UNHARDEN = "Unharden"
+
+
+def choices(current: str, has_backup: bool) -> list[str]:
+    """The actions that make sense for a launcher in state `current`.
+
+    `has_backup` says the backup of the real launcher is a regular file. Past
+    the first Harden every action leans on that backup, and a stale launcher
+    can be reported with a backup that is a link or a folder, so none is offered
+    then: the caller shows the description and the user verifies the game files
+    in Steam.
+    """
+    if current == VANILLA:
+        return [ACT_HARDEN]
+    if not has_backup:
+        return []
+    if current in (SWAPPED_UNLOCKED, STALE, RESTORED):
+        return [ACT_REHARDEN, ACT_UNHARDEN]
+    return [ACT_UNHARDEN]
+
+
 @dataclass(frozen=True)
 class Problem:
     key: str
@@ -285,6 +308,18 @@ def _keep_launcher(game_dir: Path, paths, stamp: str | None, lines: list[str]) -
     lines.append(f"Kept the old start_protected_game.exe at {kept}.")
 
 
+def _require_backup_file(game_dir: Path) -> None:
+    """Refuse unless the backup of the real launcher is a regular file.
+
+    A link or a folder there would be followed by the swap and the restore,
+    which then copy or move something other than the backup.
+    """
+    if fsprobe.kind(game_dir / BACKUP) != fsprobe.FILE:
+        raise HardenError(
+            f"{BACKUP} is not a regular file, so the launcher was left as it is. Verify the game files in Steam."
+        )
+
+
 def harden(game_dir, paths, *, running: Callable[[], list] | None = None, cache: dict | None = None) -> Outcome:
     """The first hardening: back the real launcher up once, swap in the game, lock it.
 
@@ -330,6 +365,7 @@ def reharden(
             "Re-harden fixes a launcher that is swapped but unlocked, restored by Steam or stale. "
             f"This one is {current}."
         )
+    _require_backup_file(game_dir)
     lines: list[str] = []
     _unlock(game_dir, lines)
     if current == STALE:
@@ -354,6 +390,7 @@ def unharden(
     _refuse_while_running(running)
     if fsprobe.kind(game_dir / BACKUP) is None:
         raise HardenError("The launcher is not hardened: there is no backup of the real one to restore.")
+    _require_backup_file(game_dir)
     current = state(game_dir, cache)
     if deployed:
         raise DeployedFilesError(deployed)

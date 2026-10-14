@@ -606,20 +606,14 @@ class SaveToolsTool(EldenRingTool):
             self._info("\n\n".join(done))
 
 
-HARDEN = "Harden"
-REHARDEN = "Re-harden"
-UNHARDEN = "Unharden"
+HARDEN = hardening.ACT_HARDEN
+REHARDEN = hardening.ACT_REHARDEN
+UNHARDEN = hardening.ACT_UNHARDEN
 
 
 def launcher_choices(current: str, has_backup: bool) -> list[str]:
     """The actions that make sense for a launcher in state `current`."""
-    if current == hardening.VANILLA:
-        return [HARDEN]
-    if current == hardening.HARDENED:
-        return [UNHARDEN]
-    if current in (hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED):
-        return [REHARDEN, UNHARDEN]
-    return [UNHARDEN] if has_backup else []
+    return hardening.choices(current, has_backup)
 
 
 def describe_launcher(current: str, deployed: int, choices: list[str]) -> str:

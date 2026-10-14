@@ -1674,6 +1674,16 @@ class HardenToolTests(HardenToolCase):
                 self.harden_by_hand(locked=locked, launcher=launcher)
                 self.assertEqual(self.drive(pick=None).call_args.args[3], expected)
 
+    def test_a_stale_launcher_beside_a_backup_that_is_a_link_gets_a_message_and_no_choice(self) -> None:
+        elsewhere = self.tmp / "elsewhere.exe"
+        elsewhere.write_bytes(EAC)
+        (self.game_dir / "start_protected_game.exe").write_bytes(b"MZ older")
+        (self.game_dir / "start_protected_game.exe.erm-backup").symlink_to(elsewhere)
+        choose = self.drive()
+        choose.assert_not_called()
+        self.assertIn("neither a copy of eldenring.exe nor of the backup", self.shown()[0])
+        self.assertEqual(self.launcher_bytes(), b"MZ older")
+
     def test_a_launcher_that_is_missing_gets_a_message_and_no_choice(self) -> None:
         (self.game_dir / "start_protected_game.exe").unlink()
         choose = self.drive()
