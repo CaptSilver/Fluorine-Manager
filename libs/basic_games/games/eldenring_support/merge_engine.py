@@ -457,6 +457,29 @@ def _identical(providers: list[Provider]) -> bool:
     return all(github.sha256_file(provider.path) == digest for provider in providers[1:])
 
 
+def _reason(exc: Exception) -> str:
+    return str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
+
+
+def _fold(blobs, vanilla, name, strategy, path_notes, lead_is_game):
+    """`blobs[0]` merged with each later blob in turn; `lead_is_game` says blobs[0] is the game's own file.
+
+    The strategy gets the vanilla when there is one and collects what it could
+    not carry over into `path_notes` when that is a list.
+    """
+    out = blobs[0]
+    for step, extra in enumerate(blobs[1:]):
+        args = (out, extra) if vanilla is None else (out, extra, vanilla)
+        kwargs = {"notes": path_notes} if path_notes is not None else {}
+        # Only the first step leads with the game's file; after it `out` is a merge
+        # of mods, and a strategy that treats its base as the game's file would
+        # read one mod's row as the game's.
+        if step == 0 and lead_is_game and name in merge.TAKES_GAME_BASE:
+            kwargs["base_is_game"] = True
+        out = strategy(*args, **kwargs)
+    return out
+
+
 def _declared(key, rule, providers, lead, vanilla_loader, strategies, notes):
     """One declared merge. The entry decides how, and tolerates the mod set having moved since it was written."""
     strategy = strategies.get(rule["strategy"])
@@ -486,19 +509,10 @@ def _declared(key, rule, providers, lead, vanilla_loader, strategies, notes):
         blobs = [lead] + blobs
     vanilla = _load_vanilla(key, rule, vanilla_loader) if rule["strategy"] in merge.NEEDS_VANILLA else None
     path_notes = [] if rule["strategy"] in merge.NEEDS_NOTES else None
-    out = blobs[0]
     try:
-        for step, extra in enumerate(blobs[1:]):
-            args = (out, extra) if vanilla is None else (out, extra, vanilla)
-            kwargs = {"notes": path_notes} if path_notes is not None else {}
-            # Only the first step leads with the base the caller supplied; after
-            # it `out` is a merge of mods, and a strategy that treats its base as
-            # the game's file would read one mod's row as the game's.
-            if step == 0 and lead is not None and rule["strategy"] in merge.TAKES_GAME_BASE:
-                kwargs["base_is_game"] = True
-            out = strategy(*args, **kwargs)
+        out = _fold(blobs, vanilla, rule["strategy"], strategy, path_notes, lead is not None)
     except Exception as exc:  # a mod's file can be malformed in any way; the entry's merge stops with the reason
-        reason = str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
+        reason = _reason(exc)
         raise ConflictError(
             f"{key}: the [[merges]] entry's {rule['strategy']} merge of {', '.join(names)} failed: {reason}. "
             "Fix the mods, or delete the entry: without it the engine merges this file itself and, "
@@ -520,17 +534,10 @@ def _auto_fold(key, name, providers, strategies, auto):
     blobs = [(provider.mod, provider.path.read_bytes()) for provider in reversed(providers)]
     auto.check_inputs(key, blobs, game)
     three_way = name in merge.NEEDS_VANILLA
-    path_notes: list = []
-    out = game
-    for step, (_mod, blob) in enumerate(blobs):
-        args = (out, blob, game) if three_way else (out, blob)
-        kwargs = {"notes": path_notes} if name in merge.NEEDS_NOTES else {}
-        # The game's copy leads the first step only; after it `out` is a merge of mods.
-        if step == 0 and name in merge.TAKES_GAME_BASE:
-            kwargs["base_is_game"] = True
-        out = strategy(*args, **kwargs)
+    path_notes: list = [] if name in merge.NEEDS_NOTES else None
+    out = _fold([game] + [blob for _mod, blob in blobs], game if three_way else None, name, strategy, path_notes, True)
     auto.check_output(key, out, blobs, game)
-    return out, path_notes
+    return out, path_notes or []
 
 
 def _automatic(key, providers, strategies, auto, notes):
@@ -549,7 +556,7 @@ def _automatic(key, providers, strategies, auto, notes):
         try:
             merged, path_notes = _auto_fold(key, name, providers, strategies, auto)
         except Exception as exc:  # a mod's file can be malformed in any way; the reason goes in the warning
-            reason = str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
+            reason = _reason(exc)
         else:
             if notes is not None:
                 notes.extend((key, note) for note in path_notes)

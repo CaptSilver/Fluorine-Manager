@@ -751,6 +751,46 @@ class GameBaseTests(unittest.TestCase):
         self.assertIn("Data0.bdt", str(caught.exception))
 
 
+class FoldTests(unittest.TestCase):
+    def test_two_way_fold_chains_left_to_right(self):
+        out = merge_engine._fold([b"a", b"b", b"c"], None, "concat", CONCAT["concat"], None, False)
+        self.assertEqual(out, b"a|b|c")
+
+    def test_three_way_fold_passes_vanilla_and_notes(self):
+        seen = []
+
+        def strat(out, extra, vanilla, notes=None, base_is_game=False):
+            seen.append((vanilla, base_is_game))
+            notes.append("n")
+            return out + extra
+
+        notes: list = []
+        out = merge_engine._fold([b"a", b"b", b"c"], b"v", "param-rows", strat, notes, True)
+        self.assertEqual(out, b"abc")
+        self.assertEqual(notes, ["n", "n"])
+        self.assertEqual(seen, [(b"v", True), (b"v", False)])
+
+    def test_base_is_game_only_for_strategies_that_take_it(self):
+        def strat(out, extra, vanilla, notes=None):
+            return out + extra
+
+        self.assertEqual(merge_engine._fold([b"a", b"b"], b"v", "esd-3way", strat, [], True), b"ab")
+
+    def test_base_is_not_game_without_lead(self):
+        seen = []
+
+        def strat(out, extra, vanilla, notes=None, base_is_game=False):
+            seen.append(base_is_game)
+            return out
+
+        merge_engine._fold([b"a", b"b"], b"v", "param-rows", strat, [], False)
+        self.assertEqual(seen, [False])
+
+    def test_reason_names_the_exception_type_unless_it_is_ours(self):
+        self.assertEqual(merge_engine._reason(merge.MergeError("both changed")), "both changed")
+        self.assertEqual(merge_engine._reason(IndexError("x")), "IndexError: x")
+
+
 class ResolverTests(EngineCase):
     LIVE = types.SimpleNamespace(regulation="11711000", regulation_sha="s" * 64)
 
