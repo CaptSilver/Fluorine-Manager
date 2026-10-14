@@ -47,19 +47,24 @@ def pe_dll_ok(path) -> PeCheck:
     with the OS message, because the bundled Python re-raises EACCES from the
     path predicates.
     """
+    # One descriptor for everything: a path checked and then reopened could be a
+    # different file by the time it is read. O_NONBLOCK so a FIFO swapped in
+    # for the DLL cannot hang the open.
     try:
-        # One stat for both answers: a second call through os.path.isfile
-        # could see a different file.
-        info = os.stat(path)
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
     except (OSError, ValueError) as exc:
         return _fail(f"cannot be read: {exc}")
-    size = info.st_size
-    if not stat.S_ISREG(info.st_mode):
-        return _fail("is not a regular file")
-    if size == 0:
-        return _fail("is empty")
     try:
-        with open(path, "rb") as handle:
+        info = os.fstat(fd)
+        size = info.st_size
+        if not stat.S_ISREG(info.st_mode):
+            return _fail("is not a regular file")
+        if size == 0:
+            return _fail("is empty")
+        # open() takes over the descriptor and closes it with the handle.
+        handle = open(fd, "rb")
+        fd = -1
+        with handle:
             dos = handle.read(DOS_HEADER_SIZE)
             if dos[:2] != b"MZ" or len(dos) < DOS_HEADER_SIZE:
                 return _fail("does not start with the MZ header of a Windows program")
@@ -71,8 +76,11 @@ def pe_dll_ok(path) -> PeCheck:
             header = handle.read(len(PE_SIGNATURE) + FILE_HEADER_SIZE + MAGIC_SIZE)
     except (OSError, ValueError) as exc:
         return _fail(f"cannot be read: {exc}")
+    finally:
+        if fd >= 0:
+            os.close(fd)
     if len(header) < len(PE_SIGNATURE) + FILE_HEADER_SIZE + MAGIC_SIZE:
-        # The file shrank between the stat and the read.
+        # The file shrank between the fstat and the read.
         return _fail("ends before its PE header: the file is truncated")
     if header[:4] != PE_SIGNATURE:
         return _fail("has no PE signature where its MZ header points")

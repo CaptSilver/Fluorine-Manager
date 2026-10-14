@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -100,8 +101,8 @@ class RefusedTests(PeCase):
         with mock.patch.object(pe, "open", side_effect=PermissionError("denied"), create=True):
             self.refused(path, "cannot be read", "denied")
 
-    def test_a_stat_error_is_a_refusal_not_an_exception(self) -> None:
-        with mock.patch.object(pe.os, "stat", side_effect=PermissionError("denied")):
+    def test_an_open_error_is_a_refusal_not_an_exception(self) -> None:
+        with mock.patch.object(pe.os, "open", side_effect=PermissionError("denied")):
             self.refused(self.tmp / "x.dll", "cannot be read", "denied")
 
     def test_a_path_with_a_nul_is_a_refusal_not_an_exception(self) -> None:
@@ -169,6 +170,43 @@ class ReadLimitTests(PeCase):
         for start, size in reads:
             self.assertGreaterEqual(size, 0, "an unbounded read")
             self.assertLessEqual(start + size, limit)
+
+
+class SingleOpenTests(PeCase):
+    def test_a_fifo_is_refused_without_blocking(self) -> None:
+        fifo = self.tmp / "pipe.dll"
+        os.mkfifo(fifo)
+        self.refused(fifo, "regular file")
+
+    def test_the_file_is_opened_once_without_blocking_and_judged_by_that_descriptor(self) -> None:
+        path = self.write(synthetic_pe())
+        real_open = os.open
+        flags: list[int] = []
+
+        def spy(target, flag, *args, **kwargs):
+            flags.append(flag)
+            return real_open(target, flag, *args, **kwargs)
+
+        with mock.patch.object(pe.os, "open", spy), mock.patch.object(
+            pe.os, "stat", side_effect=AssertionError("a path stat can see a different file")
+        ):
+            self.assertTrue(pe.pe_dll_ok(path))
+        [flag] = flags
+        self.assertTrue(flag & os.O_NONBLOCK)
+
+    def test_the_descriptor_is_closed_when_the_file_is_refused(self) -> None:
+        path = self.write(b"")
+        opened: list[int] = []
+        real_open = os.open
+
+        def spy(*args, **kwargs):
+            opened.append(real_open(*args, **kwargs))
+            return opened[-1]
+
+        with mock.patch.object(pe.os, "open", spy):
+            self.refused(path, "empty")
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
 
 
 class BuilderTests(unittest.TestCase):
