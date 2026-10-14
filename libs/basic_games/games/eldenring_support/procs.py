@@ -93,10 +93,25 @@ def _match(comm: str, cmdline: bytes) -> str | None:
         if lowered == name or (len(lowered) >= _COMM_LENGTH and name.startswith(lowered)):
             return name
     # Under Proton comm can read wine64-preloader or start.exe while the exe
-    # name sits only in the arguments, often as a Windows path.
-    for argument in cmdline.split(b"\0"):
-        text = argument.decode("utf-8", errors="replace")
-        base = text.replace("\\", "/").rsplit("/", 1)[-1].lower()
-        if base in NAMES:
+    # name sits only in the arguments, often as a Windows path. Only a Wine
+    # process counts as a carrier, and only the Windows names count as its
+    # arguments: any program may hold "me3" or "Game/eldenring.exe" in an
+    # argument (less, cp, an editor), and that is no game running.
+    arguments = [a.decode("utf-8", errors="replace") for a in cmdline.split(b"\0")]
+    if not (_is_wine(lowered) or _is_wine(_basename(arguments[0]))):
+        return None
+    for text in arguments:
+        base = _basename(text)
+        if base in NAMES and base.endswith(".exe"):
             return base
     return None
+
+
+def _basename(argument: str) -> str:
+    return argument.replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+
+def _is_wine(name: str) -> bool:
+    # wine, wine64, wine-preloader, wine64-preloader, wineserver, a Proton
+    # wrapper, or a Windows program such as start.exe.
+    return "wine" in name or "proton" in name or name.endswith(".exe")

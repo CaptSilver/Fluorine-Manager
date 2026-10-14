@@ -91,6 +91,22 @@ class GameRunningTests(FakeProc):
         self.add(32, "less", "less", "notes about eldenring.exe.txt")
         self.assertEqual(self.running(), [])
 
+    def test_a_tool_holding_the_game_or_me3_as_an_argument_does_not_count(self) -> None:
+        self.add(34, "less", "less", "/home/me/.local/bin/me3")
+        self.add(35, "cp", "cp", "Game/eldenring.exe", "/backup/")
+        self.add(36, "vim", "vim", "Game/eldenring.exe")
+        self.add(37, "sha256sum", "sha256sum", "/home/me/.local/bin/me3")
+        self.add(38, "tail", "tail", "-f", "/home/me/.local/share/me3/me3")
+        self.assertEqual(self.running(), [])
+
+    def test_a_bare_me3_argument_under_wine_does_not_count(self) -> None:
+        self.add(39, "wine64-preloader", "wine64-preloader", "me3")
+        self.assertEqual(self.running(), [])
+
+    def test_wine_started_by_its_full_path_is_found_by_argv0(self) -> None:
+        self.add(41, "wine-preloader", "/usr/bin/wine64", "Z:\\ELDEN RING\\Game\\eldenring.exe")
+        self.assertEqual(self.running(), [(41, "eldenring.exe")])
+
     def test_a_name_that_only_contains_the_game_does_not_count(self) -> None:
         self.add(33, "myeldenring.exe", "myeldenring.exe")
         self.assertEqual(self.running(), [])
