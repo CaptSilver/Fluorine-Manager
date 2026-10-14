@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -64,6 +65,32 @@ class SaveCase(unittest.TestCase):
         return sorted(p.name for p in self.save_dir.iterdir())
 
 
+class UnreadableFolderCase(SaveCase):
+    """A save folder the process may not enter. Patched rather than chmod'd so it also fails as root."""
+
+    def lock_folder(self) -> None:
+        real_lstat, real_listdir = os.lstat, os.listdir
+        folder = self.save_dir
+
+        def deny(real):
+            def call(path, *args, **kwargs):
+                if Path(path) == folder or folder in Path(path).parents:
+                    raise PermissionError(13, "Permission denied", str(path))
+                return real(path, *args, **kwargs)
+            return call
+
+        for name, real in (("lstat", real_lstat), ("listdir", real_listdir)):
+            patch = mock.patch.object(os, name, deny(real))
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def unlock_folder(self) -> None:
+        mock.patch.stopall()
+        audit = mock.patch.object(importsave.saves, "audit_file", side_effect=lambda path: self.audited)
+        audit.start()
+        self.addCleanup(audit.stop)
+
+
 class FlagTests(SaveCase):
     def test_a_vanilla_save_raises_the_flag_with_the_stamp(self) -> None:
         self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
@@ -88,6 +115,36 @@ class FlagTests(SaveCase):
     def test_a_value_that_is_not_text_reads_as_nothing(self) -> None:
         self.organizer.persist[(kinds.PLUGIN, importsave.KEY_UNREVIEWED)] = 7
         self.assertEqual(importsave.unreviewed(self.organizer), "")
+
+
+class UnreadableFlagTests(UnreadableFolderCase):
+    def test_a_folder_that_cannot_be_read_raises_the_flag(self) -> None:
+        other = support.FakeOrganizer(self.tmp / "other")
+        self.lock_folder()
+        self.assertTrue(importsave.flag(other, self.save_dir, STAMP))
+        self.assertEqual(importsave.unreviewed(other), STAMP)
+
+    def test_a_missing_folder_raises_nothing(self) -> None:
+        other = support.FakeOrganizer(self.tmp / "other")
+        self.assertFalse(importsave.flag(other, self.tmp / "no-such-folder", STAMP))
+        self.assertEqual(importsave.unreviewed(other), "")
+
+
+class UnreadableReviewTests(UnreadableFolderCase):
+    def test_a_folder_that_cannot_be_read_leaves_the_question_open(self) -> None:
+        self.lock_folder()
+        self.assertFalse(self.review())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertEqual(importsave.decision(self.organizer), "")
+        self.assertEqual(self.texts, [])
+        self.assertTrue(any(kind == "warn" for kind, _ in self.report.lines))
+
+    def test_the_question_is_asked_once_the_folder_can_be_read_again(self) -> None:
+        self.lock_folder()
+        self.review()
+        self.unlock_folder()
+        self.assertTrue(self.review())
+        self.assertEqual(len(self.texts), 1)
 
 
 class NothingWaitingTests(SaveCase):

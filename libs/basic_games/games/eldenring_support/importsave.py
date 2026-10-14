@@ -19,10 +19,11 @@ No Qt in here: the two questions are callables the caller supplies.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Callable
 
-from . import fsprobe, kinds, saves, state
+from . import kinds, saves, state
 from .ermlib.errors import ErmError
 
 KEY_UNREVIEWED = "save_unreviewed"
@@ -68,16 +69,40 @@ def decision(organizer) -> str:
     return _text(organizer, KEY_DECISION)
 
 
+def _absent(path: Path) -> bool:
+    """True when `path` is not there, False when it is; OSError when that cannot be told.
+
+    fsprobe.kind folds every error into "nothing there", which is wrong here:
+    settling the question as GONE closes it for good, so a folder the process
+    cannot read must not pass for a missing file. The folder is listed too,
+    since a folder that can be entered but not read could be hiding the file.
+    """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        try:
+            os.listdir(path.parent)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
+        return True
+    return False
+
+
 def flag(organizer, save_dir, stamp: str) -> bool:
     """Hold the import open on an ER0000.sl2 nobody has looked at. True when the flag was just raised.
 
     Nothing is raised when the question was settled before, when the flag is
-    already up (it keeps its first stamp), or when there is no ER0000.sl2.
+    already up (it keeps its first stamp), or when there is no ER0000.sl2. A
+    folder that cannot be read raises the flag: not being able to tell is not
+    the same as there being nothing to review.
     """
     if unreviewed(organizer) or decision(organizer):
         return False
-    if fsprobe.kind(Path(save_dir) / saves.VANILLA) is None:
-        return False
+    try:
+        if _absent(Path(save_dir) / saves.VANILLA):
+            return False
+    except (OSError, ValueError):
+        pass
     organizer.setPersistent(kinds.PLUGIN, KEY_UNREVIEWED, stamp)
     return True
 
@@ -141,7 +166,12 @@ def review(
         return True
     save_dir = Path(save_dir)
     vanilla = save_dir / saves.VANILLA
-    if fsprobe.kind(vanilla) is None:
+    try:
+        gone = _absent(vanilla)
+    except (OSError, ValueError) as exc:
+        report.warn(f"{saves.VANILLA} could not be looked for in {save_dir}: {exc}. {_OPEN}")
+        return False
+    if gone:
         settle(organizer, GONE)
         report.info(f"{saves.VANILLA} is no longer in {save_dir}, so there is nothing to review")
         return True
