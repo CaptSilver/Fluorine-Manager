@@ -8,6 +8,7 @@ and its unit tests load it without a display.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 class Busy:
@@ -150,6 +151,28 @@ def _linux_path(stored: str) -> str:
     if len(stored) > 2 and stored[1] == ":" and stored[0].isalpha():
         return stored[2:].replace("\\", "/") if stored[0] in "Zz" else stored
     return stored
+
+
+class SettingsUnreadable(OSError):
+    """The instance's ModOrganizer.ini cannot be opened."""
+
+    def __init__(self, ini_path, cause: OSError) -> None:
+        super().__init__(f"The instance's settings file {ini_path} cannot be read ({cause})")
+        self.ini_path = ini_path
+
+
+def instance_wrapper_options(base_path, binary_real=None) -> list[tuple[str, str]]:
+    """stored_wrapper_options over basePath()/ModOrganizer.ini, for the one place that knows where
+    that file is. The plugin API does not name it; when the base directory has been moved away
+    from it, wrapper options cannot be ruled out, so a file that cannot be opened raises
+    SettingsUnreadable instead of reading as "no entries" (QSettings over a missing file does)."""
+    ini = Path(base_path) / "ModOrganizer.ini"
+    try:
+        with open(ini, "rb"):
+            pass
+    except OSError as exc:
+        raise SettingsUnreadable(ini, exc) from exc
+    return stored_wrapper_options(ini, binary_real=binary_real)
 
 
 def stored_wrapper_options(ini_path, binary_name: str = "me3", binary_real=None) -> list[tuple[str, str]]:

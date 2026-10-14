@@ -2,7 +2,7 @@
 to do about the save file when it exits.
 
 No Qt and no mobase in here, bar one call: the me3 entry's stored wrapper
-options are read through qtui.stored_wrapper_options, which imports QSettings
+options are read through qtui.instance_wrapper_options, which imports QSettings
 only when it runs, because the core stores executables through QSettings and a
 hand-rolled read of its INI would get the array syntax wrong. The game plugin
 hands in the dialogs and the process scan as plain callables, which is also
@@ -114,7 +114,7 @@ class LaunchGate:
     procs.game_running, `warn(message)` logs and `invalidate()` tells the
     problems listeners that something they report may have changed.
     `wrapper_options()` returns (title, options) for every stored me3 entry that
-    has wrapper options (qtui.stored_wrapper_options over basePath()/ModOrganizer.ini
+    has wrapper options (qtui.instance_wrapper_options over basePath()/ModOrganizer.ini
     unless supplied): the wrapper is the one input the three-argument
     onAboutToRun cannot show the gate.
     """
@@ -479,25 +479,19 @@ class LaunchGate:
         self._check_environment(step, notes)
 
     def _stored_wrapper_options(self) -> list[tuple[str, str]]:
-        """The entries live in the instance's ModOrganizer.ini. The plugin API
-        does not name that file, so it is looked for in basePath(); when the base
-        directory has been moved elsewhere the file is not there, and wrapper
-        options on it cannot be ruled out, so the launch stops."""
-        ini = Path(self._organizer.basePath()) / "ModOrganizer.ini"
+        """Read through qtui.instance_wrapper_options; a settings file that cannot
+        be read stops the launch, since wrapper options on it cannot be ruled out."""
         try:
-            with open(ini, "rb"):
-                pass
-        except OSError as exc:
+            return qtui.instance_wrapper_options(self._organizer.basePath(), binary_real=me3_host.binary_path())
+        except qtui.SettingsUnreadable as exc:
             raise _Veto(
                 "Settings",
-                f"The instance's settings file {ini} cannot be read ({exc}), so the wrapper options "
-                "of the me3 entry cannot be checked. They become environment variables and a "
-                "program started in front of me3.",
+                f"{exc}, so the wrapper options of the me3 entry cannot be checked. They become "
+                "environment variables and a program started in front of me3.",
                 "Keep the instance's base directory (Settings, Paths) where its ModOrganizer.ini is, "
                 "then launch again.",
                 ENTRY_SETTINGS_UNREADABLE,
             ) from exc
-        return qtui.stored_wrapper_options(ini, binary_real=me3_host.binary_path())
 
     # The two inputs the token check cannot see: the entry's stored wrapper
     # options (environment variables and a program in front of me3) and the

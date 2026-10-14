@@ -278,7 +278,7 @@ class BuildRowTests(DiagnosisCase):
     def test_a_game_outside_a_steam_library_has_no_build_rows(self) -> None:
         self.game = FakeGame(self.tmp / "elsewhere/ELDEN RING")
         (self.tmp / "elsewhere/ELDEN RING/Game").mkdir(parents=True)
-        self.diagnosis = diagnosis.Diagnosis(self.organizer, self.game)
+        self.diagnosis = diagnosis.Diagnosis(self.organizer, self.game, wrapper_options=lambda: [])
         self.assertEqual(self.keys(), [])
 
     def test_the_build_is_identified_once_until_one_of_its_files_moves(self) -> None:
@@ -728,6 +728,18 @@ class Me3RowTests(DiagnosisCase):
         problem = self.one("ENTRY_WRAPPER_OPTIONS")
         self.assertIn("Elden Ring (me3): FOO=1", problem.text)
         self.assertFalse(problem.informational)
+
+    def test_an_ini_that_cannot_be_read_is_a_row_and_not_a_clean_folder(self) -> None:
+        ini = Path(self.organizer.basePath()) / "ModOrganizer.ini"
+        for make in (lambda: None, lambda: ini.mkdir()):
+            with self.subTest(make):
+                make()
+                self.diagnosis = diagnosis.Diagnosis(self.organizer, self.game)
+                problem = self.one("ENTRY_SETTINGS_UNREADABLE")
+                self.assertIn(str(ini), problem.text)
+                self.assertNotIn("DIAGNOSE_FAILED", self.keys())
+                if ini.is_dir():
+                    ini.rmdir()
 
     def test_the_default_reader_looks_at_the_instances_ini(self) -> None:
         from PyQt6.QtCore import QSettings

@@ -1,7 +1,7 @@
 """The problems the plugin reports between launches, and the numbers the core knows them by.
 
 No Qt and no mobase in here, bar the default reader of the me3 entry's wrapper
-options (qtui.stored_wrapper_options, which imports QSettings only when it runs).
+options (qtui.instance_wrapper_options, which imports QSettings only when it runs).
 plugins/diagnose.py renders what Diagnosis.problems returns and runs the fixes
 with dialogs of its own.
 
@@ -81,6 +81,7 @@ KEYS: tuple[str, ...] = (
     "ME3_CONFIG_OVERRIDE",
     "ME3_CONFIG_STEAM_DIR",
     "STEAM_LAUNCH_OPTION",
+    "ENTRY_SETTINGS_UNREADABLE",
 )
 
 TITLES: dict[str, str] = {
@@ -131,6 +132,7 @@ TITLES: dict[str, str] = {
     "ME3_CONFIG_OVERRIDE": "A me3 config file sets keys that matter to a launch",
     "ME3_CONFIG_STEAM_DIR": "A me3 config file moves the Steam folder",
     "STEAM_LAUNCH_OPTION": "Steam has a launch option set for Elden Ring",
+    "ENTRY_SETTINGS_UNREADABLE": "The instance's settings file cannot be read",
 }
 
 # The guided fixes that need no tool of the plugin's own. The diagnose plugin
@@ -206,9 +208,7 @@ class Diagnosis:
         self._game = game
         # QSettings over ModOrganizer.ini, unless a test hands in its own.
         self._wrapper_options = wrapper_options or (
-            lambda: qtui.stored_wrapper_options(
-                Path(organizer.basePath()) / "ModOrganizer.ini", binary_real=me3_host.binary_path()
-            )
+            lambda: qtui.instance_wrapper_options(organizer.basePath(), binary_real=me3_host.binary_path())
         )
         self._identity_key: tuple | None = None
         self._identity_value: gamebuild.BuildId | None = None
@@ -664,7 +664,18 @@ class Diagnosis:
 
     def _me3_rows(self, context: Context) -> list[Problem]:
         rows = self._me3_install_rows(context)
-        wrappers = self._wrapper_options()
+        try:
+            wrappers = self._wrapper_options()
+        except qtui.SettingsUnreadable as exc:
+            wrappers = []
+            rows.append(
+                Problem(
+                    "ENTRY_SETTINGS_UNREADABLE",
+                    f"{exc}, so the wrapper options of the me3 entry cannot be checked and a launch is "
+                    "refused. Keep the instance's base directory (Settings, Paths) where its "
+                    "ModOrganizer.ini is.",
+                )
+            )
         if wrappers:
             rows.append(
                 Problem(
