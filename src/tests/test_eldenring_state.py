@@ -86,6 +86,7 @@ class InstancePathsTests(TempDirCase):
             "me3_host_state": "me3-host-state.json",
             "me3_host_staging": "me3-host-staging",
             "save_backups": "save-backups",
+            "save_snapshots": "save-snapshots",
             "quarantine_game": "quarantine-game",
             "archive_hashes": "archive-hashes.json",
             "last_launch": "last-launch.json",

@@ -9,6 +9,10 @@ from .ermlib.errors import PathError
 
 _SAVE_FOLDER = "pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing"
 
+# The files a modded session must leave alone: Steam's own save, which Steam
+# Play loads and Steam Cloud syncs, and the backup the game keeps beside it.
+GUARDED = (paths.SAVE_NAMES[0], paths.SAVE_NAMES[0] + ".bak")
+
 
 def library_root(install_dir) -> Path | None:
     """The Steam library that holds `install_dir`, or None.

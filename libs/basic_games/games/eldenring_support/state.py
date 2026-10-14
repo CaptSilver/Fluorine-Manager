@@ -30,6 +30,7 @@ class InstancePaths:
         self.me3_host_state = root / "me3-host-state.json"
         self.me3_host_staging = root / "me3-host-staging"
         self.save_backups = root / "save-backups"
+        self.save_snapshots = root / "save-snapshots"
         self.quarantine_game = root / "quarantine-game"
         self.archive_hashes = root / "archive-hashes.json"
         self.last_launch = root / "last-launch.json"

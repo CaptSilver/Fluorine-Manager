@@ -145,5 +145,16 @@ class DefaultLibraryTests(TempDirCase):
         self.assertIsInstance(saves.save_dir(Path("/x\0y")), Path)
 
 
+class GuardedTests(unittest.TestCase):
+    def test_the_guarded_files_are_steams_save_and_its_backup(self) -> None:
+        # Spelled out: the gate protects what Steam Play loads, and a typo in
+        # a constant read from paths could not fail a test that reads it back.
+        self.assertEqual(saves.GUARDED, ("ER0000.sl2", "ER0000.sl2.bak"))
+
+    def test_the_modded_and_co_op_saves_are_not_guarded(self) -> None:
+        self.assertNotIn("ER0000_modded", saves.GUARDED)
+        self.assertNotIn("ER0000.co2", saves.GUARDED)
+
+
 if __name__ == "__main__":
     unittest.main()
