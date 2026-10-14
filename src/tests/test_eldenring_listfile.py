@@ -1,23 +1,34 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_listfile_tests")
-listfile = support.module(PACKAGE, "listfile")
+archives = support.module(PACKAGE, "archives")
+errors = support.module(PACKAGE, "ermlib.errors")
+gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 generated = support.module(PACKAGE, "generated")
 kinds = support.module(PACKAGE, "kinds")
+listfile = support.module(PACKAGE, "listfile")
+me3_host = support.module(PACKAGE, "me3_host")
+state = support.module(PACKAGE, "state")
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
+LIVE = gamebuild.BuildId(
+    exe="2.7.1.0", app="1.17.1", regulation="11711000", steam_buildid="25080141", regulation_sha=SHA_C
+)
+CODECS = {"zstd": 10507, "zlib": "1.3.1", "ooz": SHA_B}
 
 
 def package_entry(name: str = "Clever's Moveset", **changes) -> dict:
@@ -488,6 +499,383 @@ class LayoutTests(unittest.TestCase):
 
     def test_differences_are_none_when_the_archive_cannot_be_laid_out(self) -> None:
         self.assertIsNone(listfile.layout_differences(self.tmp / "none.rar", None, ["a"]))
+
+
+class Instance:
+    """A Fluorine instance whose mods were installed from archives in downloads/.
+
+    Plain object, so a test can have several: a partner who exports a list and
+    the machine that imports it.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.organizer = support.FakeOrganizer(root)
+        self.modlist = self.organizer.mod_list
+        self.paths = state.InstancePaths(self.organizer)
+        self.cache: dict = {}
+        self.write_outputs({"regulation.bin": SHA_C})
+
+    def write_outputs(self, outputs: dict) -> None:
+        state.write_json(self.paths.generated_state, {"fingerprint": "f", "outputs": outputs})
+
+    def install(
+        self, name: str, files: dict, *, archive: str | None = None, archive_files: dict | None = None,
+        nexus_id: int = 0, file_id: int | None = None, version: str = "", enabled: bool = True,
+        settings: dict | None = None,
+    ):
+        """A mod as an install leaves it: its archive in downloads/, its tree extracted, its kind recorded."""
+        archive = archive or f"{name}.zip"
+        zipped = archive_files if archive_files is not None else files
+        path = support.write_zip(self.organizer.downloads / archive, dict(zipped))
+        if nexus_id or file_id:
+            archives.write_sidecar(
+                path, game_name="eldenring", mod_id=nexus_id or None, file_id=file_id, version=version,
+                mod_name=name, repository="Nexus",
+            )
+        mod = self.modlist.add(
+            name, enabled=enabled, files=files, nexus_id=nexus_id, version=version, installation_file=archive
+        )
+        kinds.record_on_install(mod)
+        for key, value in (settings or {}).items():
+            mod.setPluginSetting(kinds.PLUGIN, key, value)
+        return mod
+
+    def export(self, **changes) -> dict:
+        options = {
+            "name": "seamless-full", "seed": "", "live": LIVE, "cache": self.cache, "codecs": lambda: CODECS,
+            "now": datetime(2026, 10, 14, 9, 30, 5, tzinfo=timezone.utc),
+        }
+        options.update(changes)
+        return listfile.export(self.organizer, **options)
+
+
+class World(unittest.TestCase):
+    """One Instance in a temporary folder, with its parts at hand."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.instance = Instance(self.tmp / "instance")
+        self.organizer = self.instance.organizer
+        self.modlist = self.instance.modlist
+        self.paths = self.instance.paths
+        self.cache = self.instance.cache
+        self.install = self.instance.install
+        self.export = self.instance.export
+        self.write_outputs = self.instance.write_outputs
+
+    def entry(self, doc: dict, name: str) -> dict:
+        return next(item for item in doc["mods"] if item["name"] == name)
+
+    def export_error(self, **changes) -> str:
+        with self.assertRaises(listfile.ExportError) as caught:
+            self.export(**changes)
+        return str(caught.exception)
+
+
+class ExportEntryTests(World):
+    def test_a_nexus_package_is_pinned_by_its_archive_and_its_tree(self) -> None:
+        mod = self.install(
+            "Clever's Moveset", {"regulation.bin": b"one", "msg/a.dcx": b"two"}, nexus_id=1928, file_id=49812,
+            version="26.2", archive="moveset 26.2.zip",
+            archive_files={"Wrapper/regulation.bin": b"one", "Wrapper/msg/a.dcx": b"two"},
+        )
+        entry = self.entry(self.export(), "Clever's Moveset")
+        archive = self.organizer.downloads / "moveset 26.2.zip"
+        self.assertEqual(
+            entry,
+            {
+                "name": "Clever's Moveset", "kind": "package", "native_dll": None, "enabled": True, "subdir": None,
+                "manual": False, "source": "nexus", "nexus_id": 1928, "file_id": 49812, "version": "26.2",
+                "archive": "moveset 26.2.zip", "sha256": archives.archive_sha256(self.paths, archive),
+                "content_sha256": listfile.content_sha256(
+                    mod.absolutePath(), "package", install_files=None, view=None, cache={}
+                ),
+            },
+        )
+
+    def test_the_mods_come_in_priority_order_with_their_state_and_without_the_generated_mod(self) -> None:
+        self.install("low", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+        self.install("off", {"regulation.bin": b"2"}, nexus_id=2, version="1", enabled=False)
+        self.modlist.add(generated.NAME)
+        sep = self.modlist.add("---sep---")
+        sep.isSeparator = lambda: True
+        self.install("high", {"regulation.bin": b"3"}, nexus_id=3, version="1")
+        doc = self.export()
+        self.assertEqual([(m["name"], m["enabled"]) for m in doc["mods"]], [("low", True), ("off", False), ("high", True)])
+
+    def test_a_github_mod_carries_its_repository_and_tag_and_no_nexus_fields(self) -> None:
+        self.install(
+            "erd-tools", {"mods/ErdTools.dll": b"MZ"}, archive="erd-tools-1.4.0.zip",
+            settings={"github_repo_id": 514620889, "github_tag": "v1.4.0"},
+        )
+        entry = self.entry(self.export(), "erd-tools")
+        self.assertEqual((entry["source"], entry["repo_id"], entry["tag"]), ("github", 514620889, "v1.4.0"))
+        self.assertEqual(entry["archive"], "erd-tools-1.4.0.zip")
+        for absent in ("nexus_id", "file_id", "version"):
+            self.assertNotIn(absent, entry)
+
+    def test_a_repository_id_read_back_as_text_still_counts(self) -> None:
+        self.install("m", {"mods/m.dll": b"MZ"}, settings={"github_repo_id": "514620889", "github_tag": "v1"})
+        self.assertEqual(self.entry(self.export(), "m")["repo_id"], 514620889)
+
+    def test_a_mod_with_no_source_is_local_and_has_no_archive(self) -> None:
+        self.modlist.add("mine", files={"regulation.bin": b"hand made"})
+        entry = self.entry(self.export(), "mine")
+        self.assertEqual((entry["source"], entry["archive"], entry["sha256"]), ("local", None, None))
+        self.assertFalse(entry["manual"])
+        self.assertRegex(entry["content_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_a_nexus_mod_whose_archive_is_gone_is_an_error_never_local(self) -> None:
+        self.install("gone", {"regulation.bin": b"x"}, nexus_id=7, version="1")
+        (self.organizer.downloads / "gone.zip").unlink()
+        text = self.export_error()
+        self.assertIn("gone", text)
+        self.assertIn("archive", text)
+
+    def test_a_nexus_mod_that_records_no_archive_at_all_is_an_error(self) -> None:
+        self.modlist.add("dnd", files={"regulation.bin": b"x"}, nexus_id=9, version="1")
+        self.assertIn("records no archive", self.export_error())
+
+    def test_a_nexus_mod_with_no_version_and_a_github_mod_with_no_tag_are_errors(self) -> None:
+        self.install("nov", {"regulation.bin": b"x"}, nexus_id=7, version="")
+        self.install("notag", {"mods/n.dll": b"MZ"}, settings={"github_repo_id": 5})
+        text = self.export_error()
+        self.assertIn("nov: Fluorine has no version", text)
+        self.assertIn("notag: no release tag", text)
+
+    def test_every_problem_is_listed_not_just_the_first(self) -> None:
+        self.install("a", {"regulation.bin": b"x"}, nexus_id=1, version="")
+        self.install("b", {"regulation.bin": b"x"}, nexus_id=2, version="1")
+        (self.organizer.downloads / "b.zip").unlink()
+        text = self.export_error()
+        self.assertIn("a:", text)
+        self.assertIn("b:", text)
+
+    def test_the_file_id_comes_from_the_sidecar_and_is_null_without_one(self) -> None:
+        self.install("withid", {"regulation.bin": b"1"}, nexus_id=1, file_id=77, version="1")
+        self.install("drag", {"regulation.bin": b"2"}, nexus_id=2, version="1")
+        doc = self.export()
+        self.assertEqual(self.entry(doc, "withid")["file_id"], 77)
+        self.assertIsNone(self.entry(doc, "drag")["file_id"])
+
+    def test_a_sidecar_whose_file_id_is_zero_or_empty_exports_null_never_zero(self) -> None:
+        self.install("zero", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+        Path(str(self.organizer.downloads / "zero.zip") + ".meta").write_text("[General]\nmodID=1\nfileID=0\nversion=1\n")
+        self.install("empty", {"regulation.bin": b"2"}, nexus_id=2, version="1")
+        Path(str(self.organizer.downloads / "empty.zip") + ".meta").write_text("[General]\nmodID=2\nfileID=\nversion=1\n")
+        doc = self.export()
+        self.assertIsNone(self.entry(doc, "zero")["file_id"])
+        self.assertIsNone(self.entry(doc, "empty")["file_id"])
+
+    def test_a_version_object_is_written_as_its_display_string(self) -> None:
+        mod = self.install("v", {"regulation.bin": b"1"}, nexus_id=1, version="")
+        mod._version = type(
+            "VersionInfo", (), {"displayString": lambda self, forced=2: "26.2", "__str__": lambda self: "26.2.0"}
+        )()
+        self.assertEqual(self.entry(self.export(), "v")["version"], "26.2")
+
+    def test_a_native_carries_its_dll_and_deploy_config_and_others_carry_neither(self) -> None:
+        self.install(
+            "adjust-the-fov", {"mods/AdjustTheFov.dll": b"MZ", "mods/AdjustTheFov/config.ini": b"fov = 1\n"},
+            nexus_id=325, version="2.0.1",
+        )
+        self.install("pack", {"regulation.bin": b"1"}, nexus_id=2, version="1")
+        doc = self.export()
+        native = self.entry(doc, "adjust-the-fov")
+        self.assertEqual(native["kind"], "native")
+        self.assertEqual(native["native_dll"], "mods/AdjustTheFov.dll")
+        self.assertEqual(native["deploy_config"], ["mods/AdjustTheFov/config.ini"])
+        pack = self.entry(doc, "pack")
+        self.assertIsNone(pack["native_dll"])
+        self.assertNotIn("deploy_config", pack)
+
+    def test_a_native_whose_deploy_config_is_damaged_is_an_error(self) -> None:
+        mod = self.install("n", {"mods/n.dll": b"MZ"}, nexus_id=2, version="1")
+        mod.setPluginSetting(kinds.PLUGIN, "deploy_config", "{not json")
+        self.assertIn("n: the recorded config files cannot be read", self.export_error())
+
+    def test_the_subdir_a_re_rooting_import_recorded_travels(self) -> None:
+        self.install(
+            "forever-buffs", {"regulation.bin": b"F", "dead.bin": b"x"}, nexus_id=8, version="1",
+            archive_files={"Files/mod/regulation.bin": b"F", "Files/mod/dead.bin": b"x", "Files/CSV 4 Merge/a.csv": b"c"},
+            settings={"install_subdir": "Files/mod"},
+        )
+        entry = self.entry(self.export(), "forever-buffs")
+        self.assertEqual(entry["subdir"], "Files/mod")
+        self.assertFalse(entry["manual"])
+
+    def test_a_mod_with_prune_rules_is_digested_through_its_view(self) -> None:
+        mod = self.install("pruned", {"regulation.bin": b"1", "dead.bin": b"2"}, nexus_id=3, version="1")
+        plain = self.entry(self.export(), "pruned")["content_sha256"]
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [{"mod": "pruned", "paths": ["dead.bin"]}], "renames": []},
+        )
+        pruned = self.entry(self.export(), "pruned")["content_sha256"]
+        self.assertNotEqual(plain, pruned)
+        view = {"regulation.bin": Path(mod.absolutePath()) / "regulation.bin"}
+        self.assertEqual(
+            pruned, listfile.content_sha256(mod.absolutePath(), "package", install_files=None, view=view, cache={})
+        )
+
+    def test_a_file_that_cannot_be_read_is_reported_against_its_mod(self) -> None:
+        self.install("a", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+        real = state.cached_sha256
+
+        def refuse(cache, path):
+            if str(path).endswith("regulation.bin"):
+                raise PermissionError("denied")
+            return real(cache, path)
+
+        with mock.patch.object(state, "cached_sha256", refuse):
+            self.assertIn("a: cannot read", self.export_error())
+
+
+    def test_a_folder_inside_a_mod_that_cannot_be_listed_is_an_error_not_a_quietly_shorter_list(self) -> None:
+        self.install("a", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+
+        def unlistable(top, onerror=None):
+            if onerror is not None:
+                onerror(PermissionError(13, "Permission denied", str(top)))
+            return iter(())
+
+        with mock.patch.object(listfile.treewalk.os, "walk", unlistable):
+            self.assertIn("a: cannot read its files", self.export_error())
+
+
+class ExportManualTests(World):
+    def test_an_archive_the_import_rules_reproduce_exactly_is_not_manual(self) -> None:
+        self.install(
+            "wrapped", {"regulation.bin": b"1", "msg/a.dcx": b"2"}, nexus_id=1, version="1",
+            archive_files={"Wrapper/regulation.bin": b"1", "Wrapper/msg/a.dcx": b"2"},
+        )
+        entry = self.entry(self.export(), "wrapped")
+        self.assertFalse(entry["manual"])
+        self.assertNotIn("installed_files", entry)
+
+    def test_an_archive_with_a_fomod_folder_is_manual_and_lists_the_installed_files(self) -> None:
+        self.install(
+            "fomod", {"Option A/regulation.bin": b"1"}, nexus_id=1, version="1",
+            archive_files={
+                "fomod/ModuleConfig.xml": b"x", "Option A/regulation.bin": b"1", "Option B/regulation.bin": b"2",
+            },
+        )
+        entry = self.entry(self.export(), "fomod")
+        self.assertTrue(entry["manual"])
+        self.assertEqual(entry["installed_files"], ["Option A/regulation.bin"])
+
+    def test_a_tree_that_differs_from_what_the_archive_lays_out_is_manual(self) -> None:
+        self.install(
+            "edited", {"regulation.bin": b"1"}, nexus_id=1, version="1",
+            archive_files={"regulation.bin": b"1", "extra.bin": b"2"},
+        )
+        entry = self.entry(self.export(), "edited")
+        self.assertTrue(entry["manual"])
+        self.assertEqual(entry["installed_files"], ["regulation.bin"])
+
+    def test_an_archive_the_bundled_python_cannot_list_is_manual(self) -> None:
+        self.install(
+            "sevenz", {"regulation.bin": b"1"}, nexus_id=1, version="1", archive="pack.7z", archive_files={"x": b"y"}
+        )
+        (self.organizer.downloads / "pack.7z").write_bytes(b"7z\xbc\xaf\x27\x1c not a zip")
+        entry = self.entry(self.export(), "sevenz")
+        self.assertTrue(entry["manual"])
+        self.assertEqual(entry["installed_files"], ["regulation.bin"])
+
+    def test_a_mod_with_a_hidden_file_is_manual_because_the_archive_would_put_it_back(self) -> None:
+        mod = self.install("hid", {"regulation.bin": b"1", "b.bin": b"2"}, nexus_id=1, version="1")
+        (Path(mod.absolutePath()) / "b.bin").rename(Path(mod.absolutePath()) / "b.bin.mohidden")
+        entry = self.entry(self.export(), "hid")
+        self.assertTrue(entry["manual"])
+        self.assertEqual(entry["installed_files"], ["regulation.bin"])
+
+    def test_a_log_a_native_wrote_beside_its_dll_does_not_make_it_manual(self) -> None:
+        mod = self.install("erdyes", {"mods/erdyes.dll": b"MZ", "mods/erdyes.ini": b"x"}, nexus_id=6927, version="1")
+        (Path(mod.absolutePath()) / "mods/erdyes").mkdir()
+        (Path(mod.absolutePath()) / "mods/erdyes/log.txt").write_text("started")
+        self.assertFalse(self.entry(self.export(), "erdyes")["manual"])
+
+    def test_a_local_mod_is_never_manual(self) -> None:
+        self.modlist.add("mine", files={"regulation.bin": b"1"})
+        entry = self.entry(self.export(), "mine")
+        self.assertFalse(entry["manual"])
+        self.assertNotIn("installed_files", entry)
+
+
+class ExportDocumentTests(World):
+    def test_the_top_level_fields_come_from_the_live_build_the_pin_and_the_profile(self) -> None:
+        self.install("m", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {
+                "merges": [], "prunes": [], "renames": [],
+                "vanilla_sources": {
+                    "anc": {
+                        "archive": "a.zip", "sha256": SHA_A, "source": "nexus", "nexus_id": 428, "file_id": None,
+                        "version": "v1",
+                    }
+                },
+                "randomizer_seed": "from the profile", "active_list": {"name": "old"},
+            },
+        )
+        doc = self.export(seed="typed seed")
+        self.assertEqual(doc["format"], 1)
+        self.assertEqual(doc["name"], "seamless-full")
+        self.assertEqual(doc["exported"], "2026-10-14T09:30:05Z")
+        self.assertEqual(
+            doc["game_build"], {"exe": "2.7.1.0", "app": "1.17.1", "regulation": "11711000", "regulation_sha": SHA_C}
+        )
+        self.assertEqual((doc["me3_version"], doc["me3_sha256"]), (me3_host.PIN.version, me3_host.PIN.archive_sha256))
+        self.assertEqual(doc["codecs"], CODECS)
+        self.assertEqual(doc["randomizer_seed"], "typed seed")
+        self.assertEqual(set(doc["rules"]), {"merges", "prunes", "renames", "vanilla_sources"})
+        self.assertIn("anc", doc["rules"]["vanilla_sources"])
+        self.assertEqual(doc["merged_regulation_sha256"], SHA_C)
+        self.assertNotIn("ersc_version", doc)
+        self.assertNotIn("active_list", doc)
+
+    def test_outputs_are_the_generated_state_without_the_ersc_ini(self) -> None:
+        self.write_outputs(
+            {"regulation.bin": SHA_C, "SeamlessCoop/ersc.dll": SHA_A, "SeamlessCoop/ersc_settings.ini": SHA_B}
+        )
+        self.assertEqual(self.export()["outputs"], {"regulation.bin": SHA_C, "SeamlessCoop/ersc.dll": SHA_A})
+
+    def test_without_a_regulation_output_the_summary_hash_is_null(self) -> None:
+        self.write_outputs({})
+        self.assertIsNone(self.export()["merged_regulation_sha256"])
+
+    def test_a_generated_mod_that_was_never_built_is_an_error_naming_the_fix(self) -> None:
+        self.paths.generated_state.unlink()
+        self.assertIn("Rebuild merges", self.export_error())
+
+    def test_damaged_outputs_are_an_error_too(self) -> None:
+        state.write_json(self.paths.generated_state, {"fingerprint": "f", "outputs": ["no"]})
+        self.assertIn("Rebuild merges", self.export_error())
+
+    def test_the_co_op_password_is_not_in_the_list(self) -> None:
+        self.install("m", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+        self.organizer.setPluginSetting(kinds.PLUGIN, "coop_password", "hunter2")
+        self.assertNotIn("hunter2", listfile.dumps(self.export()))
+
+    def test_the_result_is_a_valid_list_and_survives_a_round_trip(self) -> None:
+        self.install("m", {"regulation.bin": b"1"}, nexus_id=1, version="1")
+        self.modlist.add("mine", files={"x.bin": b"1"})
+        doc = self.export()
+        self.assertEqual(listfile.parse(listfile.dumps(doc)), listfile.check_document(doc))
+
+    def test_a_setup_that_would_not_import_back_is_refused_at_export(self) -> None:
+        self.modlist.add("trailing ", files={"x.bin": b"1"})
+        self.assertIn("cannot be the name of a mod folder", self.export_error())
+
+    def test_the_list_name_is_required(self) -> None:
+        self.assertIn("name", self.export_error(name=""))
+
+    def test_the_compression_libraries_are_looked_up_when_the_list_is_written_and_not_when_the_module_loads(self) -> None:
+        with mock.patch.object(listfile.generated, "codecs", return_value={"zstd": 7}) as read:
+            doc = listfile.export(self.organizer, name="x", seed="", live=LIVE, cache=self.cache)
+        read.assert_called_once_with()
+        self.assertEqual(doc["codecs"], {"zstd": 7})
 
 
 if __name__ == "__main__":

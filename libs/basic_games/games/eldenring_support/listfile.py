@@ -19,10 +19,11 @@ import re
 import tarfile
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
-from . import generated, kinds, state, treewalk
+from . import archives, coop_settings, generated, kinds, me3_host, mods, state, treewalk, views
 from .ermlib import gamebuild
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
@@ -444,3 +445,193 @@ def layout_differences(archive, subdir: str | None, installed: list[str]) -> tup
         return None
     have, would = set(installed), set(files)
     return sorted(have - would), sorted(would - have)
+
+
+# -- writing a list ------------------------------------------------------------
+
+
+class _Problem(Exception):
+    """One reason a mod cannot be written down; collected so the user sees them all."""
+
+
+def version_text(mod) -> str:
+    """The mod's version as text: the display string of a VersionInfo, else str()."""
+    version = mod.version()
+    display = getattr(version, "displayString", None)
+    return str(display() if callable(display) else version).strip()
+
+
+def _setting_int(mod, key: str) -> int | None:
+    # A setting comes back as text once it has been through meta.ini.
+    try:
+        number = int(str(mod.pluginSetting(kinds.PLUGIN, key)).strip())
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
+def _setting_text(mod, key: str) -> str | None:
+    value = mod.pluginSetting(kinds.PLUGIN, key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def source_of(mod) -> str:
+    """nexus when Fluorine knows a Nexus id, github when a repository was recorded, else local.
+
+    Decided from the mod alone: the archive and its sidecar go away with the
+    download, and a Nexus mod whose archive was deleted must not slide into
+    `local`.
+    """
+    if mod.nexusId() > 0:
+        return NEXUS
+    if _setting_int(mod, kinds.KEY_GITHUB_REPO):
+        return GITHUB
+    return LOCAL
+
+
+def _visible_files(mod_dir) -> list[str]:
+    return sorted(rel for rel, _path in treewalk.package_files(mod_dir, strict=True))
+
+
+def _laid_out_files(mod, kind: str, mod_dir) -> list[str]:
+    """The installed files an archive's layout has to reproduce.
+
+    A native's runtime files (logs, crash dumps) are not part of what was
+    installed, so it is held to the list recorded when it was installed.
+    """
+    recorded = kinds.recorded_install_files(mod) if kind == kinds.NATIVE else None
+    return sorted(recorded) if recorded is not None else _visible_files(mod_dir)
+
+
+def _archive_of(organizer, mod, cache: dict) -> tuple[Path, str]:
+    name = mod.name()
+    archive = archives.archive_path(organizer, mod)
+    if archive is None:
+        raise _Problem(f"{name}: records no archive, so the list cannot pin it. Reinstall it from an archive.")
+    if not os.path.isfile(archive):
+        raise _Problem(
+            f"{name}: its archive {archive.name} is gone from the downloads folder, so the list cannot pin it. "
+            "Download it again or reinstall the mod."
+        )
+    return archive, state.cached_sha256(cache, archive)
+
+
+def _source_fields(organizer, mod, source: str, kind: str, subdir: str | None, mod_dir, cache: dict) -> dict:
+    name = mod.name()
+    if source == LOCAL:
+        return {"source": LOCAL, "archive": None, "sha256": None}
+    archive, sha = _archive_of(organizer, mod, cache)
+    if source == NEXUS:
+        version = version_text(mod)
+        if not version:
+            raise _Problem(f"{name}: Fluorine has no version recorded for it, so the list cannot pin it.")
+        sidecar = archives.meta_sidecar(archive)
+        fields = {
+            "source": NEXUS, "nexus_id": mod.nexusId(), "file_id": sidecar["file_id"] if sidecar else None,
+            "version": version,
+        }
+    else:
+        tag = _setting_text(mod, kinds.KEY_GITHUB_TAG)
+        if not tag:
+            raise _Problem(f"{name}: no release tag is recorded for it, so the list cannot pin it.")
+        fields = {"source": GITHUB, "repo_id": _setting_int(mod, kinds.KEY_GITHUB_REPO), "tag": tag}
+    layout = archive_layout(archive, subdir)
+    installed = _laid_out_files(mod, kind, mod_dir)
+    # A tree the import rules cannot reproduce from the archive alone (a FOMOD
+    # choice, a hidden or edited file, a .7z the bundled Python cannot list) is
+    # something a partner has to provide: they get the file list to end up with.
+    manual = layout.fomod or layout.files is None or layout.files != installed
+    fields.update({"archive": archive.name, "sha256": sha, "manual": manual})
+    if manual:
+        fields["installed_files"] = installed
+    return fields
+
+
+def _entry_for(organizer, rules: dict, mod, enabled: bool, cache: dict) -> dict:
+    name = mod.name()
+    mod_dir = Path(mod.absolutePath())
+    kind = kinds.mod_kind(mod)
+    subdir = _setting_text(mod, kinds.KEY_INSTALL_SUBDIR)
+    entry: dict = {
+        "name": name, "kind": kind, "native_dll": None, "enabled": enabled, "subdir": subdir, "manual": False,
+    }
+    install_files = None
+    if kind == kinds.NATIVE:
+        entry["native_dll"] = kinds.recorded_native_dll(mod)
+        deploy = kinds.recorded_deploy_config(mod)
+        if deploy is None:
+            raise _Problem(f"{name}: the recorded config files cannot be read. Open Set mod kind and record them again.")
+        entry["deploy_config"] = deploy
+        install_files = kinds.recorded_install_files(mod)
+    view = None
+    try:
+        if kind == kinds.PACKAGE and views.has_rules(name, rules["prunes"], rules["renames"]):
+            view = views.view_files(name, mod_dir, rules["prunes"], rules["renames"])
+        entry["content_sha256"] = content_sha256(mod_dir, kind, install_files=install_files, view=view, cache=cache)
+        entry.update(_source_fields(organizer, mod, source_of(mod), kind, subdir, mod_dir, cache))
+    except ErmError as exc:
+        raise _Problem(f"{name}: {exc}") from exc
+    except OSError as exc:
+        raise _Problem(f"{name}: cannot read its files ({exc})") from exc
+    return entry
+
+
+def _outputs(paths: state.InstancePaths) -> dict:
+    recorded = state.read_cache(paths.generated_state).get("outputs")
+    if not isinstance(recorded, dict) or not all(
+        isinstance(rel, str) and isinstance(sha, str) for rel, sha in recorded.items()
+    ):
+        raise ExportError(
+            "The generated mod has not been built yet, so the list cannot say what the merge produced. "
+            'Run Tools > "Elden Ring: Rebuild merges…" first.'
+        )
+    ini = f"{generated.ERSC_DIR}/{coop_settings.INI_NAME}"
+    return {rel: sha for rel, sha in recorded.items() if rel != ini}
+
+
+def export(
+    organizer, *, name: str, seed: str, live, cache: dict, codecs: Callable[[], dict] | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """The setup of the current profile as a list document.
+
+    `live` is the identified game build, `cache` the instance's hash cache.
+    The generated mod must be built (its state file holds the outputs), which
+    the tool guarantees by preparing first. Raises ExportError listing every mod
+    that cannot be pinned, so one run shows all of them. The co-op password is
+    not in the list: it is a setting of the plugin, not of the profile.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ExportError("The list needs a name.")
+    paths = state.InstancePaths(organizer)
+    rules = state.read_profile_rules(organizer.profilePath())
+    entries, problems = [], []
+    for _name, mod, enabled in mods.listed_mods(organizer, exclude=(generated.NAME,)):
+        try:
+            entries.append(_entry_for(organizer, rules, mod, enabled, cache))
+        except _Problem as exc:
+            problems.append(str(exc))
+    if problems:
+        raise ExportError("These mods cannot be written into a list yet:\n" + "\n".join(problems))
+    outputs = _outputs(paths)
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    build = live._asdict()
+    doc = {
+        "format": FORMAT,
+        "name": name.strip(),
+        "exported": stamp,
+        "game_build": {field: build[field] for field in _GAME_BUILD_FIELDS},
+        "me3_version": me3_host.PIN.version,
+        "me3_sha256": me3_host.PIN.archive_sha256,
+        "codecs": (codecs or generated.codecs)(),
+        "randomizer_seed": seed,
+        "rules": {key: rules[key] for key in ("merges", "prunes", "renames", "vanilla_sources")},
+        "merged_regulation_sha256": outputs.get("regulation.bin"),
+        "outputs": outputs,
+        "mods": entries,
+    }
+    try:
+        check_document(doc)
+    except ListFormatError as exc:
+        raise ExportError(f"This setup would not import back: {exc}") from exc
+    return doc
