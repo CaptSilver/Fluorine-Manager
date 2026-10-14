@@ -1018,6 +1018,13 @@ class ActiveListRowTests(DiagnosisCase):
         self.activate({"format": 9})
         self.assertIn("cannot be used", self.one("ACTIVE_LIST_MISMATCH").text)
 
+    def test_a_damaged_list_is_reported_even_when_the_build_cannot_be_identified(self) -> None:
+        self.identify.side_effect = gamebuild.GameBuildError("no buildid")
+        for damaged in ({"format": 9}, {**self.doc, "game_build": {"exe": "x"}}, {**self.doc, "game_build": None}):
+            with self.subTest(damaged=damaged):
+                self.activate(damaged)
+                self.assertIn("cannot be used", self.one("ACTIVE_LIST_MISMATCH").text)
+
     def test_damaged_rules_are_left_to_their_own_row(self) -> None:
         state.profile_rules(self.organizer.profilePath()).write_text("{nope")
         self.assertEqual(self.keys(), ["RULES_DAMAGED"])

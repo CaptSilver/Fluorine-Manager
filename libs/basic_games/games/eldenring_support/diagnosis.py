@@ -707,6 +707,8 @@ class Diagnosis:
         if doc is None:
             return []
         try:
+            # Checked first: build_of reads the document's game_build unchecked.
+            doc = listfile.check_document(doc)
             found = listfile.verify(
                 self._organizer, doc, live=self._identify(context) or listfile.build_of(doc), cache=context.cache,
                 codecs=generated.codecs, host_status=lambda: me3_host.status(context.paths), check_outputs=False,
