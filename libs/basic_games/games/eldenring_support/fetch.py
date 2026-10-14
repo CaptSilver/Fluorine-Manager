@@ -275,6 +275,7 @@ class Fetcher:
         if found is not None:
             self._arrive(row, found)
             return
+        self._refuse_claimed_name(row)
         self._move_stale(row.expected_name)
         source = entry.get("source")
         if source == "github":
@@ -283,6 +284,13 @@ class Fetcher:
             self._start_nexus(row)
         else:
             raise FetchError("there is nothing to download it from; provide the archive yourself")
+
+    def _refuse_claimed_name(self, row: Row) -> None:
+        # Moving the file aside would leave the earlier row's path pointing at nothing.
+        target = Path(self._organizer.downloadsPath()) / row.expected_name
+        for other in self.rows:
+            if other is not row and other.state == ARRIVED and other.path is not None and os.path.lexists(target) and other.path == target:
+                raise FetchError(f"two entries name the same archive, {row.expected_name}, with different bytes")
 
     def _move_stale(self, name: str) -> None:
         # DownloadManager::startDownload opens a modal "Download again?" box for

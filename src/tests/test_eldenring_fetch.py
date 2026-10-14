@@ -111,6 +111,17 @@ class RequestTests(FetchCase):
         kept = sorted(path.read_bytes() for path in (self.paths.stale_downloads / STAMP).iterdir())
         self.assertEqual(kept, [b"first", b"second"])
 
+    def test_a_second_entry_naming_an_arrived_archive_with_other_bytes_fails_and_leaves_the_file(self) -> None:
+        kept = self.put("main.zip", b"A")
+        first = self.fetcher.request("a", github_entry(b"A", name="main.zip"))
+        second = self.fetcher.request("b", github_entry(b"B", name="main.zip"))
+        self.assertEqual((first.state, first.path), (fetch.ARRIVED, kept))
+        self.assertEqual(kept.read_bytes(), b"A")
+        self.assertEqual(second.state, fetch.FAILED)
+        self.assertIn("same archive", second.reason)
+        self.assertEqual(self.manager.started, [])
+        self.assertFalse((self.paths.stale_downloads / STAMP).exists())
+
     def test_a_stale_file_that_cannot_be_moved_fails_its_row_and_starts_nothing(self) -> None:
         self.put("erd-tools-1.4.0.zip", b"old")
         with mock.patch.object(fetch.atomic, "move_durably", side_effect=OSError("read-only")):
