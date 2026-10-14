@@ -796,6 +796,16 @@ class ExportManualTests(World):
         (Path(mod.absolutePath()) / "mods/erdyes/log.txt").write_text("started")
         self.assertFalse(self.entry(self.export(), "erdyes")["manual"])
 
+    def test_a_native_with_a_file_hidden_after_install_is_manual_and_lists_what_is_left(self) -> None:
+        mod = self.install(
+            "nat", {"mods/nat.dll": b"MZ", "mods/nat.ini": b"x", "mods/nat/data.bin": b"d"}, nexus_id=1, version="1"
+        )
+        data = Path(mod.absolutePath()) / "mods/nat/data.bin"
+        data.rename(data.with_name("data.bin.mohidden"))
+        entry = self.entry(self.export(), "nat")
+        self.assertTrue(entry["manual"])
+        self.assertEqual(entry["installed_files"], ["mods/nat.dll", "mods/nat.ini"])
+
     def test_a_local_mod_is_never_manual(self) -> None:
         self.modlist.add("mine", files={"regulation.bin": b"1"})
         entry = self.entry(self.export(), "mine")

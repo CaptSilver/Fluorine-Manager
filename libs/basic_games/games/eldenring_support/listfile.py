@@ -497,10 +497,14 @@ def _laid_out_files(mod, kind: str, mod_dir) -> list[str]:
     """The installed files an archive's layout has to reproduce.
 
     A native's runtime files (logs, crash dumps) are not part of what was
-    installed, so it is held to the list recorded when it was installed.
+    installed, so it is held to the list recorded when it was installed, less
+    any recorded file that has since been hidden or deleted: the archive would
+    put those back.
     """
     recorded = kinds.recorded_install_files(mod) if kind == kinds.NATIVE else None
-    return sorted(recorded) if recorded is not None else _visible_files(mod_dir)
+    if recorded is None:
+        return _visible_files(mod_dir)
+    return sorted(rel for rel in recorded if _is_content_path(rel) and (Path(mod_dir) / rel).is_file())
 
 
 def _archive_of(organizer, mod, cache: dict) -> tuple[Path, str]:
