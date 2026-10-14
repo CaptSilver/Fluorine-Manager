@@ -86,11 +86,15 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
 
         generated.ensure_mod(self._organizer, then=go)
 
+    # Closes the dialog shown when the generated mod could not be placed.
+    _placement_tail = "Nothing was done."
+
     def _prepared_action(self, error, action) -> None:
         if error is not None:
+            qWarning(f"{self.displayName()}: could not place the {generated.NAME} mod: {error!r}")
             QMessageBox.critical(
                 self._parent, self.displayName(),
-                f"The {generated.NAME} mod could not be enabled and raised to the top: {error}\n\nNothing was done.",
+                f"The {generated.NAME} mod could not be enabled and raised to the top: {error}\n\n{self._placement_tail}",
             )
             return
         try:
@@ -706,32 +710,12 @@ class RebuildTool(EldenRingTool):
     def tooltip(self) -> str:
         return "Run the same checks and merges a launch runs, and stop there."
 
-    def _rebuild(self, error=None) -> None:
-        # Also the continuation of ensure_mod, which on a fresh instance runs
-        # from the directory refresh and not from display(); a placement that
-        # failed there arrives as `error`. Nothing above display() catches
-        # there, so the whole body is shielded.
-        self._shielded(lambda: self._rebuild_unshielded(error))
-
-    def _rebuild_unshielded(self, error) -> None:
-        if error is not None:
-            qWarning(f"{self.displayName()}: could not place the {generated.NAME} mod: {error!r}")
-            QMessageBox.critical(
-                self._parent,
-                self.displayName(),
-                f"The {generated.NAME} mod could not be enabled and raised to the top: {error}\n\n"
-                "Nothing was merged. Fix the mod list by hand and run this again.",
-            )
-            return
-        try:
-            prepared = self._the_gate().rebuild()
-        except gate.Veto as veto:
-            QMessageBox.critical(self._parent, self.displayName(), veto.text())
-            return
-        QMessageBox.information(self._parent, self.displayName(), describe_rebuild(prepared))
+    _placement_tail = "Nothing was merged. Fix the mod list by hand and run this again."
 
     def run(self) -> None:
-        generated.ensure_mod(self._organizer, then=self._rebuild)
+        self._prepared_then(
+            lambda prepared: QMessageBox.information(self._parent, self.displayName(), describe_rebuild(prepared))
+        )
 
 
 SET_KIND_CHOICES = [*kinds.SETTABLE, "reclassify"]

@@ -1653,6 +1653,7 @@ class ExportListToolTests(ListToolCase):
                 self.organizer.simulate_refresh()
         self.assertEqual(SHOWN[-1][0], "critical")
         self.assertIn("cannot place", SHOWN[-1][2])
+        self.assertTrue(any("cannot place" in message for message in WARNINGS))
         self.assertFalse(self.target.exists())
 
     def test_the_file_name_suggestion_keeps_only_safe_characters(self) -> None:
