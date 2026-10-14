@@ -4,8 +4,12 @@ importer.run brings erm's mods, profiles and records over and touches nothing
 in Game/. This part settles the question about ER0000.sl2, moves erm's files
 out of Game/, reports the launcher as erm left it, records what is left of
 Game/ as vanilla and checks that Steam no longer carries erm's launch option.
-It asks before it moves or records anything, moves files only out (into
-quarantine-game/, nothing is deleted) and never touches the launcher.
+It asks before it moves or records anything and moves files only out (into
+quarantine-game/, nothing is deleted). It never touches the launcher.
+
+The user can override what would otherwise hold the import: accept ER0000.sl2
+as the vanilla save, or move erm's files out before that is settled. Each choice goes into the import report and the instance's
+import-overrides.json (importoverrides) before it takes effect.
 
 Every part is safe to repeat. A part that cannot finish says why in the report
 and the import is not marked done; running it again resumes there.
@@ -28,6 +32,7 @@ from . import (
     hardening,
     importer,
     importgame,
+    importoverrides,
     importsave,
     inventory,
     kinds,
@@ -57,6 +62,12 @@ class Ui:
     the value Steam carries and returns True when the user says it is cleared and
     Fluorine should look again. `busy(title)` returns a context manager with
     `update(message)`.
+
+    The three after `busy` are the overrides, each skipped when it is None.
+    `ask_save_route(text)` returns importsave.ROUTE_QUESTIONS or ROUTE_ACCEPT (None when
+    closed) and `confirm_accept(text)` says whether the user confirmed accepting
+    ER0000.sl2; they come as a pair. `move_anyway(text)` returns MOVE_ONLY,
+    MOVE_AND_CHECK or None.
     """
 
     ask_answer: Callable[[str], str | None]
@@ -65,6 +76,13 @@ class Ui:
     confirm_adoption: Callable[[str], str | None]
     launch_option: Callable[[str], bool]
     busy: Callable[[str], object]
+    ask_save_route: Callable[[str], str | None] | None = None
+    confirm_accept: Callable[[str], bool] | None = None
+    move_anyway: Callable[[str], str | None] | None = None
+
+    def __post_init__(self) -> None:
+        if (self.ask_save_route is None) != (self.confirm_accept is None):
+            raise ValueError("ask_save_route and confirm_accept go together")
 
 
 @dataclass
@@ -389,6 +407,54 @@ def clean_game(
     return not done.failed, bool(done.moved) or earlier
 
 
+# -- Game/ before ER0000.sl2 is settled -----------------------------------------
+
+MOVE_ONLY, MOVE_AND_CHECK = "move", "move-and-check"
+MOVE_ANYWAY_TEXT = (
+    "ER0000.sl2 is not settled, so erm's files are still in Game/ and erm keeps working through Steam.\n\n"
+    "You can move them out now anyway, but:\n\n"
+    "- If Steam's launch option stays set, a Steam Play starts me3 with erm's profile. That profile names "
+    "Game/SeamlessCoop/ersc.dll, which will be in quarantine, so the game starts without Seamless Co-op and "
+    "can write ER0000.sl2.\n"
+    "- If you clear the launch option, a Steam Play starts the game under Easy Anti-Cheat with an "
+    "ER0000.sl2 nobody has reviewed, which a profile without Seamless Co-op may have written.\n\n"
+    "Either way, do not press Play in Steam until ER0000.sl2 is settled. The import is not marked done "
+    "until it is. Moving the files can be followed by the same check of the launch option that ends a "
+    "normal import: Fluorine shows what Steam carries and waits while you clear it in Steam."
+)
+
+
+def offer_move_anyway(
+    organizer, installed: dict, paths: state.InstancePaths, host: Host, ui: Ui, report: importer.Report, log
+) -> str | None:
+    """Ask whether to move erm's files out of Game/ although ER0000.sl2 is not settled.
+
+    Returns MOVE_ONLY or MOVE_AND_CHECK when the user chose to, after recording it, else None. Nothing is
+    asked when there is nothing to move, or when files deployed into Game/mods/ would make clean_game
+    refuse anyway.
+    """
+    if ui.move_anyway is None:
+        return None
+    manifest = deploy.read_manifest(paths)
+    if manifest.files or manifest.dirs:
+        report.info(
+            "Moving erm's files now is not offered while Fluorine has files deployed into Game/mods/: "
+            "undeploy them first (Sync deployed files)."
+        )
+        return None
+    found = importgame.survey(organizer, installed, host.game_dir)
+    if not found.moves() and not found.carries:
+        return None
+    picked = ui.move_anyway(MOVE_ANYWAY_TEXT)
+    if picked not in (MOVE_ONLY, MOVE_AND_CHECK):
+        return None
+    log.add(
+        importoverrides.GAME_FILES, "erm's files in Game/", "move before ER0000.sl2 is settled",
+        "the launch option is checked right after" if picked == MOVE_AND_CHECK else "the launch option is left as it is",
+    )
+    return picked
+
+
 # -- the whole of it ------------------------------------------------------------
 
 
@@ -397,12 +463,14 @@ def finish(
 ) -> importer.Report:
     """Run the second part of the import into `report`. Raises ImportStopped, with the report, when it cannot go on.
 
-    The order: the question about ER0000.sl2; the move out of Game/; the
-    launcher report; the vanilla inventory; Steam's launch option; the done
+    The order: the question about ER0000.sl2; the move out of Game/ (offered
+    anyway when the question is not settled); the launcher report and the
+    choice to fix it; the vanilla inventory; Steam's launch option; the done
     mark. The launch option is asked about only when the question is settled
     and Game/ is recorded as vanilla, because clearing it is what hands
     ER0000.sl2 to a Steam Play under Easy Anti-Cheat, where a proxy DLL
-    still in Game/ would load.
+    still in Game/ would load. The one exception is a move the user chose to
+    follow with the check, MOVE_AND_CHECK; the done mark is still withheld.
     """
     try:
         _finish(organizer, Path(erm_dir), report, host, ui, stamp)
@@ -422,27 +490,35 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
     installed = importer.read_installed(erm_dir)
     procs.refuse_while_running(host.running, "run the import again")
     paths = state.InstancePaths(organizer)
+    log = importoverrides.OverrideLog.open(paths, report, stamp)
     saved = importsave.review(
         organizer, paths, host.save_dir, stamp, report, ask_answer=ui.ask_answer, ask_action=ui.ask_action,
         running=host.running, steam_running=host.steam_running, install_root=host.steam_root,
+        ask_route=ui.ask_save_route, confirm_accept=ui.confirm_accept,
+        backup=importer.backup_copy(paths, saves.VANILLA, stamp), overrides=log,
     )
+    moved_now = None
     if saved:
         cleaned, moved = clean_game(organizer, installed, paths, host, ui, report, stamp)
     else:
-        cleaned = moved = False
-        report.warn(
-            "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam meanwhile. "
-            "Moving them first would leave Steam's launch option starting me3 with erm's mods but without "
-            "Seamless Co-op."
-        )
+        moved_now = offer_move_anyway(organizer, installed, paths, host, ui, report, log)
+        if moved_now is not None:
+            cleaned, moved = clean_game(organizer, installed, paths, host, ui, report, stamp)
+        else:
+            cleaned = moved = False
+            report.warn(
+                "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam meanwhile. "
+                "Moving them first would leave Steam's launch option starting me3 with erm's mods but without "
+                "Seamless Co-op."
+            )
     launcher_report(host, paths, report)
     adopted = False
     if cleaned:
         adopted = adopt_inventory(installed, paths, host, ui, report)
-    elif saved:
+    elif saved or moved_now is not None:
         report.warn("Game/ was not recorded as vanilla: erm's files are still in it.")
     option = False
-    if saved and adopted:
+    if (saved or moved_now == MOVE_AND_CHECK) and adopted:
         option = launch_option_cleared(host, ui, report)
     else:
         report.info(
@@ -455,6 +531,11 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
             "Do not press Play in Steam until the launch option is cleared: it starts me3 with erm's mods and "
             "without Seamless Co-op, into ER0000.sl2."
         )
+    if option and not saved:
+        report.warn(
+            "The launch option is cleared while ER0000.sl2 is not settled. Do not press Play in Steam until it is: "
+            "a Steam Play starts the game under Easy Anti-Cheat with that save."
+        )
     blockers = []
     if not saved:
         blockers.append("ER0000.sl2 is still unreviewed")
@@ -462,6 +543,6 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
         blockers.append("erm's files are still in Game/")
     elif not adopted:
         blockers.append("Game/ is not recorded as vanilla")
-    if saved and adopted and not option:
+    if (saved or moved_now == MOVE_AND_CHECK) and adopted and not option:
         blockers.append("Steam still carries a launch option")
     mark_done(organizer, stamp, report, blockers)

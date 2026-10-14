@@ -16,6 +16,7 @@ errors = support.module(PACKAGE, "ermlib.errors")
 gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 hardening = support.module(PACKAGE, "hardening")
 importer = support.module(PACKAGE, "importer")
+importoverrides = support.module(PACKAGE, "importoverrides")
 importfinish = support.module(PACKAGE, "importfinish")
 importsave = support.module(PACKAGE, "importsave")
 inventory = support.module(PACKAGE, "inventory")
@@ -81,6 +82,9 @@ class Script:
         self.answer, self.action = importsave.NO, importsave.KEEP
         self.accept, self.adoption = True, importfinish.VERIFIED
         self.recheck = lambda: True
+        # The overrides are offered only when a test switches them on, so the other tests see no extra dialog.
+        self.offer_route, self.route, self.confirm_accept = False, importsave.ROUTE_ACCEPT, True
+        self.offer_anyway, self.anyway = False, importfinish.MOVE_ONLY
         self.shown: list[tuple[str, str]] = []
         self.preselected: list[str] = []
         self.progress: list[str] = []
@@ -110,9 +114,26 @@ class Script:
             self.shown.append(("launch-option", text))
             return self.recheck()
 
+        def ask_route(text):
+            self.shown.append(("route", text))
+            return self.route
+
+        def confirm_accept(text):
+            self.shown.append(("accept", text))
+            return self.confirm_accept
+
+        def move_anyway(text):
+            self.shown.append(("anyway", text))
+            return self.anyway
+
+        extra = {}
+        if self.offer_route:
+            extra.update(ask_save_route=ask_route, confirm_accept=confirm_accept)
+        if self.offer_anyway:
+            extra["move_anyway"] = move_anyway
         return importfinish.Ui(
             ask_answer=ask_answer, ask_action=ask_action, review=review, confirm_adoption=confirm,
-            launch_option=launch_option, busy=lambda title: Busy(self.progress),
+            launch_option=launch_option, busy=lambda title: Busy(self.progress), **extra,
         )
 
 
@@ -800,6 +821,178 @@ class LaunchOptionOrderTests(FinishCase):
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"vanilla")
         self.assertIn("you vouched", report.text())
         self.assertEqual(self.script.kinds_shown(), ["answer", "action", "review", "adoption"])
+
+
+class OverrideCase(FinishCase):
+    """An import whose ER0000.sl2 is unsettled, run with the same stamp the second part uses."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla")
+        (self.save_dir / "ER0000.co2").write_bytes(b"coop")
+        self.run_import(stamp=STAMP)
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+
+    def recorded(self) -> list[dict]:
+        return json.loads(self.paths.import_overrides.read_text())["imports"][-1]["overrides"]
+
+    def erm_files_left(self) -> bool:
+        return os.path.lexists(self.game / "dinput8.dll")
+
+
+class AcceptSaveTests(OverrideCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.script.offer_route = True
+
+    def test_accepting_the_save_lets_the_cleanup_go_on_in_the_same_run_and_the_import_finish(self) -> None:
+        report = self.finish()
+        self.assertEqual(self.script.kinds_shown()[:3], ["route", "accept", "review"])
+        self.assertFalse(self.erm_files_left())
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"vanilla")
+        self.assertEqual(importsave.unreviewed(self.organizer), "")
+        self.assertEqual(self.done(), STAMP)
+        self.assertEqual([o["kind"] for o in self.recorded()], ["save"])
+        self.assertTrue(any(text.startswith("Override: ER0000.sl2: accepted as my vanilla save.") for _, text in report.lines))
+
+    def test_the_confirmation_names_the_copy_taken_before_the_import(self) -> None:
+        self.finish()
+        text = dict(self.script.shown)["accept"]
+        self.assertIn(str(importer.backup_copy(self.paths, "ER0000.sl2", STAMP)), text)
+
+    def test_a_save_that_changed_since_the_backup_is_refused_and_game_is_not_touched(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla and a cloud sync")
+        before = base.tree(self.game)
+        report = self.finish()
+        self.assertEqual(base.tree(self.game), before)
+        self.assertIn("has changed since the copy", report.text())
+        self.assertNotIn("accept", self.script.kinds_shown())
+        self.assertIsNone(self.done())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+
+    def test_declining_the_confirmation_leaves_everything_as_it_was(self) -> None:
+        self.script.confirm_accept = False
+        before = base.tree(self.game)
+        report = self.finish()
+        self.assertEqual(base.tree(self.game), before)
+        self.assertEqual(self.script.kinds_shown(), ["route", "accept"])
+        self.assertIsNone(self.done())
+        self.assertIn("ER0000.sl2 is still unreviewed", report.text())
+        self.assertFalse(self.paths.import_overrides.exists())
+
+    def test_choosing_the_questions_runs_the_old_flow_and_records_no_override(self) -> None:
+        self.script.route = importsave.ROUTE_QUESTIONS
+        self.finish()
+        self.assertEqual(self.script.kinds_shown()[:3], ["route", "answer", "action"])
+        self.assertNotIn("accept", self.script.kinds_shown())
+        self.assertFalse(self.paths.import_overrides.exists())
+
+
+class MoveAnywayTests(OverrideCase):
+    VALUE = "me3 launch -p /home/x/erm/tools/me3/erm-coop.me3 # %command%"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.script.answer = None  # the question is closed without an answer, so ER0000.sl2 stays unsettled
+        self.script.offer_anyway = True
+
+    def test_without_the_override_the_files_stay_where_they_are(self) -> None:
+        self.script.offer_anyway = False
+        self.finish()
+        self.assertTrue(self.erm_files_left())
+
+    def test_moving_now_takes_erms_files_out_records_it_and_warns_against_play(self) -> None:
+        self.script.anyway = importfinish.MOVE_ONLY
+        report = self.finish()
+        self.assertFalse(self.erm_files_left())
+        self.assertTrue(any(f.name == "ersc.dll" for f in self.where().rglob("*")))
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+        self.assertNotIn("launch-option", self.script.kinds_shown())
+        self.assertIsNone(self.done())
+        self.assertEqual([(o["kind"], o["choice"]) for o in self.recorded()], [("game-files", "move before ER0000.sl2 is settled")])
+
+    def test_the_dialog_names_both_risks(self) -> None:
+        self.finish()
+        text = dict(self.script.shown)["anyway"]
+        self.assertIn("without Seamless Co-op", text)
+        self.assertIn("Easy Anti-Cheat with an ER0000.sl2 nobody has reviewed", text)
+
+    def test_moving_and_checking_the_option_reads_it_in_the_same_step_and_still_withholds_the_done_mark(self) -> None:
+        self.script.anyway = importfinish.MOVE_AND_CHECK
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: self.options.clear() or True
+        report = self.finish()
+        self.assertFalse(self.erm_files_left())
+        self.assertIn("launch-option", self.script.kinds_shown())
+        self.assertIn("Steam carries no launch option", report.text())
+        self.assertIn("cleared while ER0000.sl2 is not settled", report.text())
+        self.assertIsNone(self.done())
+        self.assertIn("ER0000.sl2 is still unreviewed", report.text())
+
+    def test_a_launch_option_that_stays_set_after_the_move_is_reported(self) -> None:
+        self.script.anyway = importfinish.MOVE_AND_CHECK
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: False
+        report = self.finish()
+        self.assertIn(self.VALUE, report.text())
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+        self.assertIsNone(self.done())
+
+    def test_declining_the_adoption_list_after_moving_and_checking_leaves_the_launch_option_unread(self) -> None:
+        self.script.anyway = importfinish.MOVE_AND_CHECK
+        self.script.adoption = None
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        report = self.finish()
+        self.assertFalse(self.erm_files_left())
+        self.assertNotIn("launch-option", self.script.kinds_shown())
+        self.assertIn("Steam's launch option was not looked at", report.text())
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+        self.assertIsNone(self.done())
+
+    def test_closing_the_dialog_moves_nothing_and_records_nothing(self) -> None:
+        self.script.anyway = None
+        before = base.tree(self.game)
+        report = self.finish()
+        self.assertEqual(base.tree(self.game), before)
+        self.assertFalse(self.paths.import_overrides.exists())
+        self.assertIn("erm's files stay in Game/ until ER0000.sl2 is settled", report.text())
+
+    def test_files_deployed_into_game_mean_the_override_is_not_offered(self) -> None:
+        entry = deploy.Entry("0" * 64, 1, "adjust-the-fov")
+        deploy.write_manifest(
+            self.paths, deploy.Manifest({"mods/AdjustTheFov/config.ini": entry}, ["mods/AdjustTheFov"])
+        )
+        before = base.tree(self.game)
+        report = self.finish()
+        self.assertNotIn("anyway", self.script.kinds_shown())
+        self.assertEqual(base.tree(self.game), before)
+        self.assertIn("is not offered while Fluorine has files deployed", report.text())
+
+    def test_with_nothing_of_erms_left_in_game_the_override_is_not_offered(self) -> None:
+        for rel in [*ERM_FILES, *RESIDUE, "mods/AdjustTheFov/config.ini"]:
+            (self.game / rel).unlink(missing_ok=True)
+        self.finish()
+        self.assertNotIn("anyway", self.script.kinds_shown())
+
+    def test_declining_the_move_list_after_choosing_to_move_changes_nothing(self) -> None:
+        self.script.accept = False
+        before = base.tree(self.game)
+        self.finish()
+        self.assertEqual(base.tree(self.game), before)
+        self.assertEqual([(o["kind"], o["choice"]) for o in self.recorded()], [("game-files", "move before ER0000.sl2 is settled")])
+
+
+class UiTests(unittest.TestCase):
+    def test_the_save_route_and_its_confirmation_come_as_a_pair(self) -> None:
+        plain = dict(
+            ask_answer=None, ask_action=None, review=None, confirm_adoption=None, launch_option=None, busy=None
+        )
+        importfinish.Ui(**plain)
+        with self.assertRaises(ValueError):
+            importfinish.Ui(**plain, ask_save_route=lambda text: None)
+        with self.assertRaises(ValueError):
+            importfinish.Ui(**plain, confirm_accept=lambda text: True)
+        importfinish.Ui(**plain, ask_save_route=lambda text: None, confirm_accept=lambda text: True)
 
 
 if __name__ == "__main__":
