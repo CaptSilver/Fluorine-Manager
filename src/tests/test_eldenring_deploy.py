@@ -57,6 +57,7 @@ class ManifestTests(DeployCase):
             json.dumps({"files": {}, "dirs": {}}),
             json.dumps({"files": {}, "dirs": [], "extra": 1}),
             json.dumps({"files": {"mods/A/config.ini": {**entry, "sha256": "zz"}}, "dirs": []}),
+            json.dumps({"files": {"mods/A/config.ini": {**entry, "sha256": "a" * 64 + "\n"}}, "dirs": []}),
             json.dumps({"files": {"mods/A/config.ini": {**entry, "size": -1}}, "dirs": []}),
             json.dumps({"files": {"mods/A/config.ini": {**entry, "size": True}}, "dirs": []}),
             json.dumps({"files": {"mods/A/config.ini": {**entry, "mod": 5}}, "dirs": []}),

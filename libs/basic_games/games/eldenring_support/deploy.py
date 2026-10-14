@@ -89,7 +89,7 @@ def read_manifest(paths: state.InstancePaths) -> Manifest:
             not isinstance(entry, dict)
             or set(entry) != {"sha256", "size", "mod"}
             or not isinstance(entry["sha256"], str)
-            or not _SHA256.match(entry["sha256"])
+            or not _SHA256.fullmatch(entry["sha256"])
             or not isinstance(entry["size"], int)
             or isinstance(entry["size"], bool)
             or entry["size"] < 0
