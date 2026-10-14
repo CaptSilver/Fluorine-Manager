@@ -18,6 +18,7 @@ from typing import Callable
 from . import atomic, procs
 from .ermlib import github, paths
 from .ermlib import saves as ermsaves
+from .ermlib import steam
 from .ermlib.errors import ErmError, PathError, SafetyError
 
 _SAVE_FOLDER = "pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing"
@@ -296,3 +297,93 @@ def _read_whole(path: Path) -> bytes:
     if not data:
         raise ErmError(f"{path} is empty, so it is not restored over a save")
     return data
+
+
+# -- taking Steam's save out of Steam's way ---------------------------------------
+
+
+def quarantine_vanilla(
+    folder,
+    backups_dir,
+    stamp: str,
+    *,
+    running: Callable[[], list] | None = None,
+    steam_running: Callable[[], bool] | None = None,
+    install_root: Callable[[], Path | None] | None = None,
+) -> list[str]:
+    """Move ER0000.sl2 out of the save folder so Steam Play and Steam Cloud cannot reach it.
+
+    Only ER0000.sl2: it is the file Steam syncs. Refuses while the game runs,
+    while Steam runs (it would sync the move as a deletion), and when no Steam
+    install with a userdata/ folder is found, because the cloud listing for a
+    root without one is empty and an empty list must not pass for "no cloud
+    saves". A copy is taken first, and both it and the moved file are hashed
+    against the original, because ermlib's quarantine checks neither. Returns
+    the lines to show: where the file went and, per Steam account, what to
+    purge from the cloud.
+    """
+    procs.refuse_while_running(running, "quarantine the save")
+    root = (install_root or steam_install_root)()
+    if root is None:
+        raise SafetyError(
+            "No Steam install with a userdata/ folder was found, so Fluorine cannot tell whether "
+            "Steam Cloud holds this save. Nothing was moved."
+        )
+    target = Path(folder) / VANILLA
+    if not os.path.lexists(target):
+        raise ErmError(f"There is no {VANILLA} in {folder} to quarantine.")
+    taken = Path(backups_dir) / "quarantine" / f"{VANILLA}.{stamp}"
+    if os.path.lexists(taken) or not STAMP.fullmatch(str(stamp)):
+        raise ErmError(f"{taken} cannot be used as the quarantined name; nothing was moved.")
+    steam_up = (steam_running or steam.steam_running)()
+    orig = Path(backups_dir) / "quarantine-backup" / f"{VANILLA}.{stamp}-orig"
+    try:
+        before = github.sha256_file(target)
+        report = ermsaves.quarantine(target, backups_dir, steam.cloud_saves(root), steam_up, stamp=stamp)
+        unequal = [copy for copy in (taken, orig) if github.sha256_file(copy) != before]
+    except OSError as exc:
+        raise ErmError(f"cannot quarantine {target}: {exc}") from exc
+    if unequal:
+        raise ErmError(
+            f"{VANILLA} was moved, but a copy did not read back the same. Compare {taken} and {orig} "
+            "with each other and with an older backup before using either. Neither was deleted."
+        )
+    return [message for _, message in report.items]
+
+
+def move_to_modded(
+    source,
+    folder,
+    backups_dir,
+    stamp: str,
+    *,
+    running: Callable[[], list] | None = None,
+    steam_running: Callable[[], bool] | None = None,
+) -> Placed:
+    """Make `source` the modded save, so that character is played on through me3.
+
+    `source` is ER0000.sl2 in the save folder, or the ER0000.sl2 a modded
+    session wrote that a restore put in quarantine. An existing modded save is
+    copied aside first. Moving ER0000.sl2 takes it away from Steam like a
+    quarantine does, so it waits for Steam to be closed too.
+    """
+    source, folder = Path(source), Path(folder)
+    in_folder = source == folder / VANILLA
+    if not in_folder:
+        parsed = parse_backup(source)
+        if parsed is None or parsed.base != VANILLA or not parsed.modded_session:
+            raise SafetyError(f"{source.name} is neither ER0000.sl2 nor a modded session's copy of it; nothing was moved.")
+    procs.refuse_while_running(running, "move a save to the modded name")
+    if in_folder and (steam_running or steam.steam_running)():
+        raise SafetyError("Close Steam first: it would sync the move of ER0000.sl2 as a deletion. Nothing was moved.")
+    if not os.path.isfile(source):
+        raise ErmError(f"There is no file {source} to move.")
+    if os.path.getsize(source) == 0:
+        raise ErmError(f"{source} is empty, so it is not made the modded save.")
+    destination = folder / MODDED
+    safety = _copy_aside([destination], backups_dir, "pre-move-to-modded", stamp)[0] if os.path.lexists(destination) else None
+    try:
+        atomic.move_durably(source, destination)
+    except OSError as exc:
+        raise ErmError(f"cannot move {source} to {destination}: {exc}") from exc
+    return Placed(destination, safety)

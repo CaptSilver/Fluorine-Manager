@@ -496,5 +496,206 @@ class RestoreBackupTests(SaveFolderCase):
         self.assertIn(f"ER0000.co2.{LATER}-pre-restore", self.left())
 
 
+REMOTECACHE = '"{app}"\n{{\n\t"EldenRing/76561198000000000/ER0000.sl2"\n\t{{\n\t\t"size"\t\t"28000000"\n\t}}\n}}\n'
+
+
+class QuarantineVanillaTests(SaveFolderCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.steam = self.tmp / "steam"
+        (self.steam / "userdata").mkdir(parents=True)
+        self.write("ER0000.sl2", SL2)
+        self.write("ER0000.sl2.bak", BAK)
+        self.write("ER0000.co2", CO2)
+        self.write("ER0000_modded", MODDED)
+
+    def quarantine(self, **kwargs):
+        kwargs.setdefault("running", lambda: [])
+        kwargs.setdefault("steam_running", lambda: False)
+        kwargs.setdefault("install_root", lambda: self.steam)
+        return saves.quarantine_vanilla(self.folder, self.backups, STAMP, **kwargs)
+
+    def assert_untouched(self) -> None:
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertFalse(self.backups.exists())
+
+    def test_steams_save_is_moved_with_a_copy_taken_first_and_nothing_else_moves(self) -> None:
+        lines = self.quarantine()
+        self.assertFalse((self.folder / "ER0000.sl2").exists())
+        self.assertEqual((self.backups / "quarantine" / f"ER0000.sl2.{STAMP}").read_bytes(), SL2)
+        self.assertEqual((self.backups / "quarantine-backup" / f"ER0000.sl2.{STAMP}-orig").read_bytes(), SL2)
+        self.assertEqual(
+            sorted(p.name for p in self.folder.iterdir()), ["ER0000.co2", "ER0000.sl2.bak", "ER0000_modded"]
+        )
+        self.assertTrue(any("moved ER0000.sl2" in line for line in lines), lines)
+
+    def test_each_steam_account_that_holds_the_save_in_the_cloud_is_named(self) -> None:
+        account = self.steam / "userdata/65369667/1245620"
+        account.mkdir(parents=True)
+        (account / "remotecache.vdf").write_text(REMOTECACHE.format(app="1245620"))
+        lines = self.quarantine()
+        [purge] = [line for line in lines if "Steam Cloud" in line]
+        self.assertIn("65369667", purge)
+
+    def test_steam_being_up_refuses_before_anything_moves(self) -> None:
+        with self.assertRaises(errors.SafetyError) as caught:
+            self.quarantine(steam_running=lambda: True)
+        self.assertIn("Steam", str(caught.exception))
+        self.assert_untouched()
+
+    def test_the_default_check_for_steam_is_ermlibs_process_scan(self) -> None:
+        with mock.patch.object(saves.steam, "steam_running", return_value=True):
+            with self.assertRaises(errors.SafetyError):
+                self.quarantine(steam_running=None)
+        self.assert_untouched()
+
+    def test_no_steam_install_with_userdata_refuses_because_the_cloud_cannot_be_checked(self) -> None:
+        with self.assertRaises(errors.SafetyError) as caught:
+            self.quarantine(install_root=lambda: None)
+        self.assertIn("userdata", str(caught.exception))
+        self.assert_untouched()
+
+    def test_the_default_install_root_is_the_steam_under_home(self) -> None:
+        home = self.tmp / "home"
+        home.mkdir()
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            with self.assertRaises(errors.SafetyError):
+                self.quarantine(install_root=None)
+        self.assert_untouched()
+
+    def test_a_running_game_is_refused(self) -> None:
+        with self.assertRaises(errors.ErmError) as caught:
+            self.quarantine(running=lambda: [(5, "me3")])
+        self.assertIn("me3 pid 5", str(caught.exception))
+        self.assert_untouched()
+
+    def test_no_steam_save_to_move_is_said_plainly(self) -> None:
+        (self.folder / "ER0000.sl2").unlink()
+        with self.assertRaises(errors.ErmError) as caught:
+            self.quarantine()
+        self.assertIn("no ER0000.sl2", str(caught.exception))
+        self.assertFalse(self.backups.exists())
+
+    def test_a_name_already_taken_is_not_overwritten(self) -> None:
+        taken = self.put(f"quarantine/ER0000.sl2.{STAMP}", b"an earlier quarantine")
+        with self.assertRaises(errors.ErmError):
+            self.quarantine()
+        self.assertEqual(taken.read_bytes(), b"an earlier quarantine")
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+
+    def test_a_move_that_fails_is_an_error_not_a_crash(self) -> None:
+        with mock.patch.object(saves.ermsaves.shutil, "move", side_effect=PermissionError("denied")):
+            with self.assertRaises(errors.ErmError):
+                self.quarantine()
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+
+    def test_copies_that_do_not_read_back_the_same_are_reported_with_both_paths(self) -> None:
+        # ermlib copies and moves with shutil and checks nothing; across
+        # filesystems that move is a copy followed by an unlink.
+        real = saves.github.sha256_file
+        with mock.patch.object(
+            saves.github, "sha256_file", side_effect=lambda p: "0" * 64 if "quarantine" in str(p) else real(p)
+        ):
+            with self.assertRaises(errors.ErmError) as caught:
+                self.quarantine()
+        text = str(caught.exception)
+        self.assertIn(str(self.backups / "quarantine" / f"ER0000.sl2.{STAMP}"), text)
+        self.assertIn(str(self.backups / "quarantine-backup" / f"ER0000.sl2.{STAMP}-orig"), text)
+
+    def test_a_clean_quarantine_hashes_the_file_before_it_moves(self) -> None:
+        seen = []
+        real = saves.github.sha256_file
+
+        def watching(path):
+            seen.append((str(path), (self.folder / "ER0000.sl2").exists()))
+            return real(path)
+
+        with mock.patch.object(saves.github, "sha256_file", side_effect=watching):
+            self.quarantine()
+        self.assertEqual(seen[0], (str(self.folder / "ER0000.sl2"), True))
+
+
+class MoveToModdedTests(SaveFolderCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("ER0000.sl2", SL2)
+        self.write("ER0000.sl2.bak", BAK)
+        self.write("ER0000.co2", CO2)
+
+    def move(self, source, **kwargs):
+        kwargs.setdefault("running", lambda: [])
+        kwargs.setdefault("steam_running", lambda: False)
+        return saves.move_to_modded(source, self.folder, self.backups, STAMP, **kwargs)
+
+    def test_steams_save_becomes_the_modded_save_and_its_backup_and_the_co_op_save_stay(self) -> None:
+        placed = self.move(self.folder / "ER0000.sl2")
+        self.assertEqual(placed.destination, self.folder / "ER0000_modded")
+        self.assertIsNone(placed.safety_copy)
+        self.assertEqual((self.folder / "ER0000_modded").read_bytes(), SL2)
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()), ["ER0000.co2", "ER0000.sl2.bak", "ER0000_modded"])
+
+    def test_an_existing_modded_save_is_copied_aside_before_it_is_replaced(self) -> None:
+        self.write("ER0000_modded", b"the old modded character")
+        placed = self.move(self.folder / "ER0000.sl2")
+        self.assertEqual(placed.safety_copy.name, f"ER0000_modded.{STAMP}-pre-move-to-modded")
+        self.assertEqual(placed.safety_copy.read_bytes(), b"the old modded character")
+        self.assertEqual((self.folder / "ER0000_modded").read_bytes(), SL2)
+
+    def test_a_copy_that_fails_leaves_both_saves_where_they_were(self) -> None:
+        self.write("ER0000_modded", b"the old modded character")
+        with mock.patch.object(saves.ermsaves, "backup_save", side_effect=OSError(28, "disk full")):
+            with self.assertRaises(errors.ErmError):
+                self.move(self.folder / "ER0000.sl2")
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual((self.folder / "ER0000_modded").read_bytes(), b"the old modded character")
+
+    def test_what_a_modded_session_wrote_to_steams_save_can_be_played_on(self) -> None:
+        kept = self.put(f"quarantine/ER0000.sl2.{LATER}-modded-session", MODDED)
+        placed = self.move(kept, steam_running=lambda: True)  # it never touches Steam's file
+        self.assertEqual((self.folder / "ER0000_modded").read_bytes(), MODDED)
+        self.assertFalse(kept.exists())
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(placed.destination, self.folder / "ER0000_modded")
+
+    def test_anything_else_is_refused_and_nothing_moves(self) -> None:
+        plain = self.put(f"quarantine/ER0000.sl2.{STAMP}", SL2)
+        bak = self.put(f"quarantine/ER0000.sl2.bak.{STAMP}-modded-session", BAK)
+        for source in (self.folder / "ER0000.co2", self.folder / "ER0000.sl2.bak", plain, bak, self.tmp / "x.sl2"):
+            with self.subTest(source.name):
+                with self.assertRaises(errors.SafetyError):
+                    self.move(source)
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertFalse((self.folder / "ER0000_modded").exists())
+        self.assertTrue(plain.exists() and bak.exists())
+
+    def test_steam_being_up_refuses_to_take_its_save_away(self) -> None:
+        with self.assertRaises(errors.SafetyError) as caught:
+            self.move(self.folder / "ER0000.sl2", steam_running=lambda: True)
+        self.assertIn("Close Steam", str(caught.exception))
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+
+    def test_a_running_game_is_refused(self) -> None:
+        with self.assertRaises(errors.ErmError) as caught:
+            self.move(self.folder / "ER0000.sl2", running=lambda: [(5, "eldenring.exe")])
+        self.assertIn("eldenring.exe pid 5", str(caught.exception))
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+
+    def test_an_empty_or_missing_save_is_refused(self) -> None:
+        self.write("ER0000.sl2", b"")
+        with self.assertRaises(errors.ErmError) as caught:
+            self.move(self.folder / "ER0000.sl2")
+        self.assertIn("empty", str(caught.exception))
+        (self.folder / "ER0000.sl2").unlink()
+        with self.assertRaises(errors.ErmError):
+            self.move(self.folder / "ER0000.sl2")
+        self.assertFalse((self.folder / "ER0000_modded").exists())
+
+    def test_a_move_that_fails_is_an_error_and_the_save_stays(self) -> None:
+        with mock.patch.object(saves.atomic, "move_durably", side_effect=PermissionError("denied")):
+            with self.assertRaises(errors.ErmError):
+                self.move(self.folder / "ER0000.sl2")
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+
+
 if __name__ == "__main__":
     unittest.main()
