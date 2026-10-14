@@ -87,9 +87,28 @@ class Host:
         if self.read_options is not None:
             return True, self.read_options()
         root = self.root()
-        if root is None:
+        if root is None or not _userdata_readable(root):
             return False, []
         return True, environment.steam_launch_options(root)
+
+
+def _userdata_readable(root: Path) -> bool:
+    """Whether Steam's userdata can be listed and every account's localconfig.vdf read.
+
+    environment.steam_launch_options skips what it cannot read, so an empty
+    answer from it proves nothing unless this holds. An account with no
+    localconfig.vdf at all (or a stray file instead of an account folder) has
+    no option and is fine.
+    """
+    try:
+        for account in (Path(root) / "userdata").iterdir():
+            try:
+                (account / "config" / "localconfig.vdf").read_bytes()
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+    except OSError:
+        return False
+    return True
 
 
 # -- the launcher -------------------------------------------------------------
@@ -241,14 +260,14 @@ LAUNCH_TEXT = (
 def launch_option_cleared(host: Host, ui: Ui, report: importer.Report) -> bool:
     """Read Steam's launch option for Elden Ring until it is empty. False when the user stops or it cannot be read.
 
-    An empty option is not a setting. A root that cannot be found means the
-    option cannot be told, which is not the same as empty.
+    An empty option is not a setting. A root or userdata folder that cannot be found or
+    read means the option cannot be told, which is not the same as empty.
     """
     while True:
         readable, found = host.launch_options()
         if not readable:
             report.warn(
-                "Steam's userdata folder was not found, so Fluorine cannot tell whether a launch option is set for "
+                "Steam's userdata folder was not found or could not be read, so Fluorine cannot tell whether a launch option is set for "
                 "Elden Ring. The import is not marked done."
             )
             return False

@@ -376,6 +376,26 @@ class LaunchOptionTests(GameCase):
         self.assertEqual(self.script.shown, [])
         self.assertIn("userdata", self.report.text())
 
+    def test_a_steam_root_without_userdata_is_not_an_empty_option(self) -> None:
+        self.host.read_options = None
+        (self.steam / "userdata").rmdir()
+        self.assertFalse(self.cleared())
+        self.assertEqual(self.script.shown, [])
+        self.assertIn("userdata", self.report.text())
+
+    def test_an_account_whose_localconfig_cannot_be_read_is_not_an_empty_option(self) -> None:
+        self.host.read_options = None
+        config = self.steam / "userdata/111/config/localconfig.vdf"
+        config.mkdir(parents=True)
+        self.assertFalse(self.cleared())
+        self.assertEqual(self.script.shown, [])
+        self.assertIn("userdata", self.report.text())
+
+    def test_an_account_with_no_localconfig_yet_reads_as_empty(self) -> None:
+        self.host.read_options = None
+        (self.steam / "userdata/111/config").mkdir(parents=True)
+        self.assertTrue(self.cleared())
+
     def test_the_real_reader_finds_the_value_under_each_account_and_sees_it_cleared(self) -> None:
         self.host.read_options = None
         for account, value in (("111", ""), ("222", self.VALUE)):
