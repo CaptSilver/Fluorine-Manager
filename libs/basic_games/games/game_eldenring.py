@@ -22,7 +22,7 @@ from PyQt6.QtCore import QDir, QFileInfo, qWarning
 import mobase
 
 from ..basic_game import BasicGame
-from .eldenring_support import gate, me3, me3_host, qtui, saves, state
+from .eldenring_support import checker, gate, kinds, me3, me3_host, prepare, qtui, saves, state
 
 ENTRY_TITLE = "Elden Ring (me3)"
 
@@ -57,6 +57,11 @@ class EldenRingGame(BasicGame):
     def init(self, organizer) -> bool:
         if not super().init(organizer):
             return False
+        # A crash between the importer changing the installer settings and
+        # restoring them leaves a record; put them back before anything else.
+        # Written only by this plugin's importers, so no isActive guard.
+        kinds.restore_interrupted(organizer)
+        self._register_feature(checker.EldenRingModDataChecker())
         self._gate = gate.LaunchGate(
             organizer,
             self,
@@ -68,6 +73,7 @@ class EldenRingGame(BasicGame):
         # pybind11 hands a plain Python callable to the first onAboutToRun
         # overload, the one with the working directory and arguments.
         registered = (
+            organizer.modList().onModInstalled(self._on_mod_installed),
             organizer.onAboutToRun(self._on_about_to_run),
             organizer.onFinishedRun(self._on_finished_run),
             organizer.onUserInterfaceInitialized(self._on_user_interface_initialized),
@@ -76,6 +82,29 @@ class EldenRingGame(BasicGame):
             qWarning("Elden Ring: could not register the launch gate callbacks")
             return False
         return True
+
+    def settings(self) -> list[mobase.PluginSetting]:
+        return super().settings() + [
+            mobase.PluginSetting(
+                prepare.COOP_PASSWORD_SETTING,
+                "Shared password written into the Seamless Co-op settings at every launch. "
+                "Stored as plain text in ModOrganizer.ini.",
+                "",
+            )
+        ]
+
+    def _on_mod_installed(self, mod) -> None:
+        # Connected for every game plugin, active or not: a Skyrim instance
+        # must not get Elden Ring kinds written into its mods. A Qt slot
+        # underneath: pybind11 does not catch a Python exception out of the
+        # callback, so one that escaped would take Fluorine down. The mod is
+        # left without a kind, which the gate reports as unknown.
+        if not self.isActive():
+            return
+        try:
+            kinds.record_on_install(mod)
+        except Exception as exc:
+            qWarning(f"Elden Ring: could not record the kind of {mod.name()}: {exc!r}")
 
     def _show_critical(self, title: str, text: str) -> None:
         qtui.critical(self._parent_widget, title, text)

@@ -53,6 +53,14 @@ class _BasicGame:
 
     def __init__(self) -> None:
         self._gamePath = ""
+        self.features: list = []
+
+    def _register_feature(self, feature) -> bool:
+        self.features.append(feature)
+        return True
+
+    def settings(self) -> list:
+        return []
 
     def init(self, organizer) -> bool:
         self._organizer = organizer
@@ -77,6 +85,8 @@ class _BasicGame:
 def _load_game() -> types.ModuleType:
     mobase = types.ModuleType("mobase")
     mobase.ExecutableInfo = _ExecutableInfo
+    mobase.ModDataChecker = type("ModDataChecker", (), {"VALID": 1, "FIXABLE": 2, "INVALID": 0})
+    mobase.PluginSetting = lambda name, description, default: (name, description, default)
     sys.modules["mobase"] = mobase
 
     root = types.ModuleType(ROOT_NAME)
@@ -101,18 +111,15 @@ def _load_game() -> types.ModuleType:
 GAME = _load_game()
 
 
-class FakeOrganizer:
+class FakeOrganizer(support.FakeOrganizer):
     """Records what the game plugin registers; the real one is the core's."""
 
     def __init__(self, base) -> None:
-        self.base = base
+        super().__init__(base)
         self.about_to_run: list = []
         self.finished_run: list = []
         self.ui_initialized: list = []
         self.accepts = True
-
-    def basePath(self) -> str:  # noqa: N802 - mobase spelling
-        return str(self.base)
 
     def onAboutToRun(self, callback) -> bool:  # noqa: N802
         self.about_to_run.append(callback)
@@ -335,6 +342,67 @@ class GateWiringTests(GameCase):
         self.assertIs(result, False)
         self.assertEqual(critical.call_args.args[1], "Elden Ring launch blocked")
         self.assertIn("me3", critical.call_args.args[2])
+
+
+class ModKindWiringTests(GameCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+
+    def test_the_mod_data_checker_is_registered_as_a_game_feature(self) -> None:
+        self.assertEqual(len(self.game.features), 1)
+        self.assertIsInstance(self.game.features[0], GAME.checker.EldenRingModDataChecker)
+
+    def test_the_plugin_name_is_the_section_the_mod_settings_are_stored_under(self) -> None:
+        self.assertEqual(GAME.EldenRingGame.Name, GAME.kinds.PLUGIN)
+
+    def test_an_installed_mod_is_classified_by_the_active_game(self) -> None:
+        self.assertEqual(len(self.organizer.mod_list.installed_callbacks), 1)
+        mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
+        mod.calls.clear()
+        self.organizer.mod_list.installed_callbacks[0](mod)
+        self.assertEqual(mod.pluginSetting(GAME.kinds.PLUGIN, "kind"), "package")
+
+    def test_a_classifier_failure_on_install_is_reported_and_does_not_escape(self) -> None:
+        mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
+        with mock.patch.object(GAME, "qWarning") as warn, \
+                mock.patch.object(GAME.kinds, "record_on_install", side_effect=OSError("unreadable")):
+            self.organizer.mod_list.installed_callbacks[0](mod)
+        warn.assert_called_once()
+        self.assertIn("Some Mod", warn.call_args.args[0])
+        self.assertIn("unreadable", warn.call_args.args[0])
+
+    def test_an_installed_mod_is_left_alone_when_another_game_is_managed(self) -> None:
+        self.game.active = False
+        mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
+        mod.calls.clear()
+        self.organizer.mod_list.installed_callbacks[0](mod)
+        self.assertEqual(mod.calls, [])
+
+    def test_a_refused_mod_list_callback_fails_init(self) -> None:
+        refusing = FakeOrganizer(self.base)
+        refusing.mod_list.onModInstalled = lambda callback: False
+        with mock.patch.object(GAME, "qWarning"):
+            self.assertIs(self.game.init(refusing), False)
+
+    def test_installer_settings_left_changed_by_a_crash_are_restored_at_init(self) -> None:
+        organizer = FakeOrganizer(self.base)
+        organizer.setPluginSetting("Simple Installer", "silent", True)
+        organizer.setPersistent("Fomod Installer", "enabled", False)
+        organizer.setPersistent(
+            GAME.kinds.PLUGIN, "install_context_saved", '{"silent": false, "fomod": ["Fomod Installer"]}'
+        )
+        self.game.active = False  # the restore does not depend on the managed game
+        self.game.init(organizer)
+        self.assertIs(organizer.pluginSetting("Simple Installer", "silent"), False)
+        self.assertTrue(organizer.isPluginEnabled("Fomod Installer"))
+
+    def test_the_co_op_password_is_a_plugin_setting_with_an_empty_default(self) -> None:
+        self.assertEqual(
+            [setting[0] for setting in self.game.settings()], ["coop_password"]
+        )
+        self.assertEqual(self.game.settings()[0][2], "")
 
 
 if __name__ == "__main__":
