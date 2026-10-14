@@ -214,16 +214,31 @@ def parse_backup(path) -> Backup | None:
     return None
 
 
+def _files_under(root) -> list[Path]:
+    """Every file under `root` at any depth; a folder that cannot be read is an ErmError naming it.
+
+    ermlib's list_backups walks with Path.rglob, which on Python 3.12 skips a
+    folder it cannot open without saying so. An unreadable quarantine/ would
+    drop out of the restore list, and it is where the vanilla save is filed.
+    """
+    def refuse(exc: OSError) -> None:
+        if isinstance(exc, FileNotFoundError) and Path(exc.filename) == Path(root):
+            return
+        raise ErmError(f"cannot list {exc.filename}: {exc.strerror or exc}") from exc
+
+    return sorted(
+        Path(folder) / name
+        for folder, _dirs, names in os.walk(root, onerror=refuse)
+        for name in names
+    )
+
+
 def restorable_backups(backups_dir) -> list[Backup]:
     """Every regular file under `backups_dir` that is a copy of a save, newest first.
 
     A folder that cannot be listed is an ErmError that names it.
     """
-    try:
-        # ermlib lists with Path.exists and Path.is_file, which re-raise EACCES on 3.12.
-        listed = ermsaves.list_backups(backups_dir)
-    except OSError as exc:
-        raise ErmError(f"cannot list {backups_dir}: {exc}") from exc
+    listed = _files_under(backups_dir)
     found = []
     for path in listed:
         if os.path.islink(path):

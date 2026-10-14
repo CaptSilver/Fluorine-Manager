@@ -383,13 +383,25 @@ class RestorableBackupsTests(SaveFolderCase):
     def test_no_backups_folder_gives_nothing(self) -> None:
         self.assertEqual(saves.restorable_backups(self.backups), [])
 
-    def test_a_folder_that_cannot_be_listed_is_an_error_naming_it(self) -> None:
-        # ermlib lists with Path.exists, which re-raises EACCES on Python 3.12.
-        with mock.patch.object(saves.ermsaves, "list_backups", side_effect=PermissionError(13, "denied")):
-            with self.assertRaises(errors.ErmError) as caught:
-                saves.restorable_backups(self.backups)
+    @unittest.skipIf(os.geteuid() == 0, "root reads a chmod 000 folder")
+    def test_a_subfolder_that_cannot_be_listed_is_an_error_naming_it(self) -> None:
+        self.put(f"ER0000.co2.{STAMP}-manual", b"x")
+        locked = self.backups / "quarantine"
+        locked.mkdir()
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        with self.assertRaises(errors.ErmError) as caught:
+            saves.restorable_backups(self.backups)
+        self.assertIn(str(locked), str(caught.exception))
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a chmod 000 folder")
+    def test_a_backups_folder_that_cannot_be_listed_is_an_error_naming_it(self) -> None:
+        self.backups.mkdir(parents=True, exist_ok=True)
+        self.backups.chmod(0)
+        self.addCleanup(self.backups.chmod, 0o700)
+        with self.assertRaises(errors.ErmError) as caught:
+            saves.restorable_backups(self.backups)
         self.assertIn(str(self.backups), str(caught.exception))
-        self.assertIn("denied", str(caught.exception))
 
 
 class RestoreBackupTests(SaveFolderCase):
