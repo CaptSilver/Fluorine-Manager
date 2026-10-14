@@ -321,9 +321,9 @@ class LaunchGate:
             )
         pending = data.get("pending_restore")
         if pending:
-            raise self.pending_veto(pending)
+            raise self.pending_veto(session.with_moved(paths, pending))
         if self._sweep_unseen(paths, data) == "pending":
-            raise self.pending_veto(data["pending_restore"])
+            raise self.pending_veto(session.with_moved(paths, data["pending_restore"]))
 
     @staticmethod
     def pending_veto(pending: dict) -> _Veto:
@@ -356,6 +356,15 @@ class LaunchGate:
             fix = (
                 f"Quit the game, then open {_SAVE_TOOLS}: restore the pre-session "
                 "snapshot, or keep the session's save."
+            )
+        kept = session.kept_text(pending)
+        if kept:
+            # A restore got partway: the session's files are already out of the
+            # save folder, so the save is not "as it is" and the user needs to see where it went.
+            why = f"{why}\n\n{kept}"
+            fix = (
+                f"Open {_SAVE_TOOLS} and try the restore again. If it cannot finish, the same "
+                "dialog can stop trying; the files named above stay where they are."
             )
         return _Veto("Session check", why, fix, SAVE_RESTORE_PENDING)
 
@@ -632,6 +641,11 @@ class LaunchGate:
                 "sentinel": effective,
                 "changed": changed,
             }
+            # A restore that moved files and then could not write that down
+            # leaves them unnamed; they are found again by name and time.
+            found = session.quarantined_since(paths, sentinel.get("stamp"))
+            if found:
+                data["pending_restore"]["quarantined"] = [str(path) for path in found]
             sentinel["swept"] = {"outcome": "pending"}
             outcome = "pending"
         else:
@@ -639,6 +653,13 @@ class LaunchGate:
                 sentinel["files"] = kept
             sentinel["swept"] = {"outcome": "stale-clean"}
             outcome = "stale-clean"
+            # The post-session sweep restored the save and then could not write
+            # the note about it, so nothing says where the session's copies are.
+            found = session.quarantined_since(paths, sentinel.get("stamp"))
+            if found and "sentinel_tripped" not in data:
+                note = session.tripped(session.Restored(restored=[], quarantined=found))
+                note["unrecorded"] = True
+                data["sentinel_tripped"] = note
         session.save_last_launch(paths, data)
         return outcome
 

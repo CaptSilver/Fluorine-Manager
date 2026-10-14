@@ -452,7 +452,7 @@ class Diagnosis:
             return rows
         pending = last.get("pending_restore")
         if pending:
-            veto = gate.LaunchGate.pending_veto(pending)
+            veto = gate.LaunchGate.pending_veto(session.with_moved(context.paths, pending))
             rows.append(Problem("SAVE_RESTORE_PENDING", f"{veto.reason}\n\n{veto.fix}", TOOL_SAVES))
         tripped = last.get("sentinel_tripped")
         if isinstance(tripped, dict):

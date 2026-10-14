@@ -473,6 +473,15 @@ class SessionRowTests(DiagnosisCase):
         self.assertIn("ER0000.sl2", problem.text)
         self.assertIn("Save tools", problem.text)
 
+    def test_a_restore_that_lost_its_record_of_the_moved_files_still_names_them_in_the_row(self) -> None:
+        kept = self.paths.save_backups / "quarantine" / "ER0000.sl2.20261014T000000000000Z-modded-session"
+        kept.parent.mkdir(parents=True)
+        kept.write_bytes(b"x")
+        session.save_last_launch(self.paths, {"pending_restore": self.pending()})
+        problem = self.one("SAVE_RESTORE_PENDING")
+        self.assertIn(f"  {kept}", problem.text)
+        self.assertNotIn("Keep the session's save", problem.text)
+
     def test_a_session_that_wrote_the_vanilla_save_is_an_informational_row_naming_where_it_went(self) -> None:
         session.save_last_launch(
             self.paths,

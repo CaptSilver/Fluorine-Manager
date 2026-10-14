@@ -340,6 +340,25 @@ class SessionCheckTests(GateCase):
         self.assertIn("disk full", texts["restore-failed"])
 
 
+    def test_a_partial_restore_names_the_moved_files_and_does_not_offer_to_keep_the_save_as_it_is(self) -> None:
+        for reason in ("restore-failed", "unseen-session", "game-running"):
+            with self.subTest(reason):
+                veto = gate.LaunchGate.pending_veto(
+                    {"reason": reason, "changed": ["ER0000.sl2"], "error": "disk full",
+                     "quarantined": ["/q/ER0000.sl2.x-modded-session", "/q/ER0000.sl2.bak.x-modded-session"]}
+                )
+                self.assertIn("  /q/ER0000.sl2.x-modded-session", veto.reason)
+                self.assertIn("  /q/ER0000.sl2.bak.x-modded-session", veto.reason)
+                self.assertIn("moved out of the save folder", veto.reason)
+                self.assertIn("try the restore again", veto.fix)
+                self.assertNotIn("Keep the session's save", veto.text())
+                self.assertNotIn("leaves the save as it is", veto.text())
+
+    def test_without_moved_files_the_wording_is_unchanged(self) -> None:
+        veto = gate.LaunchGate.pending_veto({"reason": "unseen-session", "changed": ["ER0000.sl2"]})
+        self.assertNotIn("moved out of the save folder", veto.text())
+        self.assertIn("Keep the session's save", veto.fix)
+
 class RecordShapeTests(GateCase):
     """A record that parses but lacks what the restore indexes is a damaged record."""
 
@@ -1291,6 +1310,68 @@ class SweepTests(GateCase):
         for path in self.quarantined():
             self.assertIn(str(path), self.modals[0][1])
         self.assertIn("No space left", self.modals[0][1])
+
+    def test_files_a_lost_record_never_named_are_found_again_by_the_next_check(self) -> None:
+        self.append("ER0000.sl2")
+        self.append("ER0000.sl2.bak")
+        real = session.save_last_launch
+
+        def failing(paths, data):
+            if "pending_restore" in data:
+                raise OSError(28, "No space left on device")
+            return real(paths, data)
+
+        with self.fail_bak_write_back(), mock.patch.object(gate.session, "save_last_launch", failing):
+            self.finish()
+        self.assertNotIn("pending_restore", self.last_launch())
+        kept = sorted(str(path) for path in self.quarantined())
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(self.new_gate().sweep_stale(), "pending")
+        pending = self.last_launch()["pending_restore"]
+        self.assertEqual(pending["reason"], "unseen-session")
+        self.assertEqual(sorted(pending["quarantined"]), kept)
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING, *kept)
+        self.assertNotIn("Keep the session's save", self.last_veto())
+
+    def test_a_pending_restore_whose_record_lost_the_moved_files_names_them_at_the_next_launch(self) -> None:
+        self.append("ER0000.sl2")
+        self.append("ER0000.sl2.bak")
+        with self.fail_bak_write_back():
+            self.finish()
+        kept = sorted(str(path) for path in self.quarantined())
+        self.assertEqual(len(kept), 2)
+        data = self.last_launch()
+        del data["pending_restore"]["quarantined"]
+        session.save_last_launch(self.paths, data)
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING, *kept)
+        self.assertNotIn("Keep the session's save", self.last_veto())
+
+    def test_a_restore_that_finished_with_a_lost_record_is_noted_by_the_next_check(self) -> None:
+        self.append("ER0000.sl2")
+        real = session.save_last_launch
+
+        def failing(paths, data):
+            if "sentinel_tripped" in data:
+                raise OSError(28, "No space left on device")
+            return real(paths, data)
+
+        with mock.patch.object(gate.session, "save_last_launch", failing):
+            self.finish()
+        [kept] = self.quarantined()
+        self.assertNotIn("sentinel_tripped", self.last_launch())
+        self.assertEqual(self.new_gate().sweep_stale(), "stale-clean")
+        note = self.last_launch()["sentinel_tripped"]
+        self.assertEqual(note["quarantined"], [str(kept)])
+        self.assertEqual(note["restored"], [])
+        self.assertTrue(note["unrecorded"])
+        # Settled once: the next check finds nothing left to note.
+        self.assertIsNone(self.new_gate().sweep_stale())
+
+    def test_a_clean_session_leaves_no_note(self) -> None:
+        self.assertEqual(self.new_gate().sweep_stale(), "stale-clean")
+        self.assertNotIn("sentinel_tripped", self.last_launch())
 
     def test_a_missing_snapshot_is_the_same_failure(self) -> None:
         self.append("ER0000.sl2")
