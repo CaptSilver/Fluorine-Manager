@@ -1445,3 +1445,7 @@ add_test(
     NAME test_eldenring_session
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_session.py
 )
+add_test(
+    NAME test_eldenring_gate
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_gate.py
+)
