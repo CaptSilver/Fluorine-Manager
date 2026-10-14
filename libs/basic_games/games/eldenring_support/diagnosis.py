@@ -190,6 +190,40 @@ class Context:
     appmanifest: dict = field(default_factory=dict)
 
 
+def _build_context(organizer, game, paths: state.InstancePaths, cache: dict) -> Context:
+    """Read what a pass needs once. The problems list and the watch both start here, so they see Game/ alike."""
+    game_dir = Path(game.dataDirectory().absolutePath())
+    library = saves.library_root(game.gameDirectory().absolutePath())
+    try:
+        manifest = deploy.read_manifest(paths)
+    except state.StateError:
+        manifest = deploy.Manifest()  # its own row says so; the rest reads as nothing deployed
+    appmanifest = {}
+    if library is not None:
+        try:
+            appmanifest = steam.read_appmanifest(library)
+        except (OSError, ValueError):
+            appmanifest = {}
+    return Context(
+        paths, game_dir, library, cache, manifest, deploy.desired(organizer),
+        environment.steam_buildid(library), appmanifest,
+    )
+
+
+def _check_or_diff(context: Context, vanilla: inventory.Inventory) -> tuple[object, bool]:
+    """Walk Game/ the way the build calls for: a check on the recorded build, a diff once Steam moved it.
+
+    Returns the findings and whether it was the diff.
+    """
+    desired = inventory.desired_shas(context.desired)
+    if inventory.build_changed(vanilla, context.buildid):
+        return inventory.diff(context.game_dir, context.manifest, vanilla, desired=desired, cache=context.cache), True
+    found = inventory.check(
+        context.game_dir, context.manifest, vanilla, context.buildid, desired=desired, cache=context.cache
+    )
+    return found, False
+
+
 def _stat(path) -> tuple | None:
     try:
         info = Path(path).stat()
@@ -229,22 +263,7 @@ class Diagnosis:
         return found
 
     def _context(self, paths: state.InstancePaths, cache: dict) -> Context:
-        game_dir = Path(self._game.dataDirectory().absolutePath())
-        library = saves.library_root(self._game.gameDirectory().absolutePath())
-        try:
-            manifest = deploy.read_manifest(paths)
-        except state.StateError:
-            manifest = deploy.Manifest()  # its own row says so; the rest reads as nothing deployed
-        appmanifest = {}
-        if library is not None:
-            try:
-                appmanifest = steam.read_appmanifest(library)
-            except (OSError, ValueError):
-                appmanifest = {}
-        return Context(
-            paths, game_dir, library, cache, manifest, deploy.desired(self._organizer),
-            environment.steam_buildid(library), appmanifest,
-        )
+        return _build_context(self._organizer, self._game, paths, cache)
 
     def _identify(self, context: Context) -> gamebuild.BuildId | None:
         """The installed build, read again only when one of the three files it comes from moved."""
@@ -290,17 +309,13 @@ class Diagnosis:
         return rows
 
     def _inventory_rows(self, context: Context, vanilla: inventory.Inventory) -> list[Problem]:
-        desired = inventory.desired_shas(context.desired)
-        if not inventory.build_changed(vanilla, context.buildid):
-            found = inventory.check(
-                context.game_dir, context.manifest, vanilla, context.buildid, desired=desired, cache=context.cache
-            )
+        found, updating = _check_or_diff(context, vanilla)
+        if not updating:
             rows = self._finding_rows(
                 context, prepare.stray_veto(context.game_dir, found.strays, found.symlinks, found.unreadable),
                 prepare.changed_veto(found), None,
             )
         else:
-            found = inventory.diff(context.game_dir, context.manifest, vanilla, desired=desired, cache=context.cache)
             update = prepare.update_veto(found) if found.suspects() else None
             rows = self._finding_rows(
                 context, prepare.stray_veto(context.game_dir, [], found.symlinks, found.unreadable), None, update
@@ -798,28 +813,20 @@ class Watch:
 
     def _signature(self) -> tuple:
         paths = state.InstancePaths(self._organizer)
-        game_dir = Path(self._game.dataDirectory().absolutePath())
-        library = saves.library_root(self._game.gameDirectory().absolutePath())
-        try:
-            appmanifest = steam.read_appmanifest(library) if library is not None else {}
-        except (OSError, ValueError):
-            appmanifest = {}
-        manifest_keys = tuple(appmanifest.get(key) for key in self._APPMANIFEST_KEYS)
-        options = tuple(environment.steam_launch_options(saves.steam_install_root()))
-        return (manifest_keys, options, self._folder(paths, game_dir, environment.steam_buildid(library)))
+        with archives.hash_cache(paths) as cache:
+            context = _build_context(self._organizer, self._game, paths, cache)
+            manifest_keys = tuple(context.appmanifest.get(key) for key in self._APPMANIFEST_KEYS)
+            options = tuple(environment.steam_launch_options(saves.steam_install_root()))
+            return (manifest_keys, options, self._folder(context))
 
-    def _folder(self, paths: state.InstancePaths, game_dir: Path, buildid: str | None) -> tuple:
+    def _folder(self, context: Context) -> tuple:
         try:
-            vanilla = inventory.read(paths)
-            manifest = deploy.read_manifest(paths)
+            vanilla = inventory.read(context.paths)
         except state.StateError:
             return ("damaged",)
-        if vanilla is None or buildid is None:
+        if vanilla is None or context.buildid is None:
             return ("unrecorded",)
-        desired = inventory.desired_shas(deploy.desired(self._organizer))
-        with archives.hash_cache(paths) as cache:
-            if inventory.build_changed(vanilla, buildid):
-                found = inventory.diff(game_dir, manifest, vanilla, desired=desired, cache=cache)
-                return ("update", tuple(found.suspects()), tuple(found.symlinks), tuple(found.unreadable))
-            found = inventory.check(game_dir, manifest, vanilla, buildid, desired=desired, cache=cache)
-            return ("same", found.signature())
+        found, updating = _check_or_diff(context, vanilla)
+        if updating:
+            return ("update", tuple(found.suspects()), tuple(found.symlinks), tuple(found.unreadable))
+        return ("same", found.signature())

@@ -889,6 +889,14 @@ class WatchTests(DiagnosisCase):
         self.assertTrue(self.watch.changed())
         self.assertFalse(self.watch.changed())
 
+    def test_a_damaged_deploy_manifest_does_not_blind_the_watch_to_game(self) -> None:
+        self.paths.deploy_manifest.write_text("{nope")
+        self.watch.changed()
+        self.assertFalse(self.watch.changed())
+        self.put("version.dll")
+        self.assertTrue(self.watch.changed())
+        self.assertFalse(self.watch.changed())
+
     def test_a_pass_never_writes_game_or_the_inventory_or_the_manifest(self) -> None:
         self.put("bink2w64.dll")
         before = (tree(self.install), self.paths.vanilla_inventory.read_bytes())
