@@ -68,9 +68,18 @@ class Tree(Entry):
         return self.children[index]
 
     def merge(self, other: "Tree") -> None:
-        # Like IFileTree.merge: an entry of the same name is replaced.
+        # Like IFileTree::mergeTree: an entry of the same name and type is a
+        # match, directories merge recursively, a file replaces a file. The
+        # source's own entry in this tree counts as a destination.
         for child in list(other.children):
-            for clash in [c for c in self.children if c.name() == child.name() and c is not other]:
+            clash = next(
+                (c for c in self.children if c.name() == child.name() and c.isDir() == child.isDir()),
+                None,
+            )
+            if clash is not None and child.isDir():
+                clash.merge(child)
+                continue
+            if clash is not None:
                 self.children.remove(clash)
             child._parent = self
             self.children.append(child)
@@ -129,6 +138,12 @@ class InteractiveTests(unittest.TestCase):
         tree = build({"Wrapper": {"regulation.bin": None, "readme.txt": None}, "readme.txt": None})
         fixed = quick_install(tree, self.check)
         self.assertEqual(names(fixed), ["readme.txt", "regulation.bin"])
+
+    def test_a_wrapper_holding_a_folder_of_its_own_name_keeps_the_mod(self) -> None:
+        tree = build({"Wrapper": {"Wrapper": {"regulation.bin": None, "msg": {"a": None}}}, "readme.txt": None})
+        self.assertEqual(self.check.dataLooksValid(tree), _ModDataChecker.FIXABLE)
+        fixed = quick_install(tree, self.check)
+        self.assertEqual(names(fixed), ["msg", "readme.txt", "regulation.bin"])
 
     def test_a_files_directory_holding_two_option_directories_is_refused(self) -> None:
         tree = build({"Files": {"mod": {"regulation.bin": None}, "CSV 4 Merge": {"a.csv": None}}})

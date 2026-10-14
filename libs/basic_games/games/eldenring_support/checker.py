@@ -75,6 +75,10 @@ class EldenRingModDataChecker(mobase.ModDataChecker):
             if len(folders) != 1:
                 break
             wrapper = folders[0]
-            filetree.merge(wrapper)
+            # Detach first: a wrapper holding a folder of its own name would
+            # otherwise absorb that folder (it is the merge destination's match)
+            # and take the contents with it when detached.
             wrapper.detach()
+            # The binding raises when the merge fails, so a failure is not dropped.
+            filetree.merge(wrapper)
         return filetree
