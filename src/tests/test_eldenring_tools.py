@@ -1433,6 +1433,56 @@ class ImportFromErmToolTests(ModToolCase):
         self.assertIn("move erm's files out of Game/", question[2])
         self.assertIn("nothing is deleted", question[2])
 
+    def existing_profile(self, name: str) -> Path:
+        folder = Path(self.organizer.profilePath()).parent / name
+        folder.mkdir(parents=True)
+        return folder
+
+    def drive_choosing(self, picks, profiles=("a", "b")):
+        with mock.patch.object(tools, "_choose", side_effect=picks) as choose:
+            driven = self.drive(profiles=profiles)
+        return choose, driven
+
+    def test_a_profile_that_already_exists_is_asked_about_before_the_import_and_the_choice_reaches_it(self) -> None:
+        self.existing_profile("a")
+        choose, (_, _, _, import_run) = self.drive_choosing([1])
+        self.assertEqual(choose.call_count, 1)
+        text, labels = choose.call_args.args[2], choose.call_args.args[3]
+        self.assertIn("named a already exists", text)
+        self.assertIn(str(state.InstancePaths(self.organizer).profile_backups), text)
+        self.assertEqual(labels, tools.PROFILE_LABELS)
+        self.assertEqual(choose.call_args.kwargs["default"], 0)
+        self.assertEqual(import_run.call_args.kwargs["profile_choices"], {"a": importer.REPLACE_PROFILE})
+
+    def test_each_existing_profile_gets_its_own_question_and_keep_is_the_first_button(self) -> None:
+        self.existing_profile("a")
+        self.existing_profile("b")
+        choose, (_, _, _, import_run) = self.drive_choosing([0, 2])
+        self.assertEqual(choose.call_count, 2)
+        self.assertEqual(tools.PROFILE_LABELS[0], "Keep and reinstall missing mods")
+        self.assertEqual(
+            import_run.call_args.kwargs["profile_choices"],
+            {"a": importer.KEEP_PROFILE, "b": importer.SKIP_PROFILE},
+        )
+
+    def test_cancelling_a_profile_question_runs_nothing_at_all(self) -> None:
+        self.existing_profile("a")
+        _, (_, _, show, import_run) = self.drive_choosing([None])
+        import_run.assert_not_called()
+        self.finish_mock.assert_not_called()
+        show.assert_not_called()
+
+    def test_with_no_profile_in_the_way_nothing_is_asked_and_the_choices_are_empty(self) -> None:
+        choose, (_, _, _, import_run) = self.drive_choosing([])
+        choose.assert_not_called()
+        self.assertEqual(import_run.call_args.kwargs["profile_choices"], {})
+
+    def test_the_confirmation_says_the_backup_comes_first_and_that_overrides_are_recorded(self) -> None:
+        self.drive()
+        question = next(entry for entry in SHOWN if entry[0] == "question")
+        self.assertIn("backed up first", question[2])
+        self.assertIn("recorded in the instance", question[2])
+
     def test_declining_runs_nothing(self) -> None:
         ANSWER[0] = "no"
         _, _, show, import_run = self.drive()
@@ -1571,6 +1621,38 @@ class ImportUiTests(ModToolCase):
         self.assertEqual(len(choose.call_args.args[3]), 1)
         with mock.patch.object(tools, "_choose", return_value=None):
             self.assertFalse(self.ui.launch_option("it is set"))
+
+    def test_the_ui_carries_the_four_overrides(self) -> None:
+        for name in ("ask_save_route", "confirm_accept", "move_anyway", "ask_launcher"):
+            self.assertIsNotNone(getattr(self.ui, name), name)
+
+    def test_the_save_route_buttons_map_to_the_importers_routes_and_answer_the_questions_is_first(self) -> None:
+        for index, expected in ((0, importsave.ROUTE_QUESTIONS), (1, importsave.ROUTE_ACCEPT), (None, None)):
+            with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index) as choose:
+                self.assertEqual(self.ui.ask_save_route("text"), expected)
+        self.assertEqual(choose.call_args.args[3], tools.SAVE_ROUTE_LABELS)
+        self.assertEqual(choose.call_args.kwargs["default"], 0)
+        self.assertIn("Accept the current ER0000.sl2 as my vanilla save", tools.SAVE_ROUTE_LABELS[1])
+
+    def test_accepting_the_save_is_one_button_and_cancel_means_no(self) -> None:
+        with mock.patch.object(tools, "_choose", return_value=0) as choose:
+            self.assertTrue(self.ui.confirm_accept("text"))
+        self.assertEqual(len(choose.call_args.args[3]), 1)
+        with mock.patch.object(tools, "_choose", return_value=None):
+            self.assertFalse(self.ui.confirm_accept("text"))
+
+    def test_the_move_now_buttons_map_to_the_importers_choices(self) -> None:
+        for index, expected in ((0, importfinish.MOVE_AND_CHECK), (1, importfinish.MOVE_ONLY), (None, None)):
+            with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index):
+                self.assertEqual(self.ui.move_anyway("text"), expected)
+
+    def test_the_launcher_buttons_are_the_offered_actions_then_leave_and_leave_is_the_default(self) -> None:
+        options = [hardening.ACT_REHARDEN, hardening.ACT_UNHARDEN]
+        for index, expected in ((0, hardening.ACT_REHARDEN), (1, hardening.ACT_UNHARDEN), (2, None), (None, None)):
+            with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index) as choose:
+                self.assertEqual(self.ui.ask_launcher("text", options), expected)
+        self.assertEqual(choose.call_args.args[3], [*options, tools.LEAVE_LAUNCHER])
+        self.assertEqual(choose.call_args.kwargs["default"], 2)
 
     def test_the_list_to_move_goes_through_the_scrollable_review(self) -> None:
         with mock.patch.object(tools.qtui, "review", return_value=True) as review:
