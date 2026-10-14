@@ -425,5 +425,311 @@ class AdoptTests(InventoryCase):
             self.adopt("eldenring.exe")
 
 
+def touch(path: Path, seconds: int = 60) -> None:
+    """Move the mtime without changing a byte."""
+    info = path.stat()
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + seconds * 10**9))
+
+
+class CheckCase(InventoryCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.recorded = self.adopt()
+
+    def check(self, recorded=None, **kwargs):
+        return inventory.check(self.game, kwargs.pop("manifest", self.manifest), recorded or self.recorded, BUILD, **kwargs)
+
+
+class CheckTests(CheckCase):
+    def test_a_vanilla_folder_has_nothing_to_report(self) -> None:
+        found = self.check()
+        self.assertFalse(found.blocking())
+        self.assertEqual(found.refreshed, {})
+
+    def test_no_inventory_is_reported_as_missing(self) -> None:
+        found = inventory.check(self.game, self.manifest, None, BUILD)
+        self.assertTrue(found.missing_inventory)
+        self.assertTrue(found.blocking())
+
+    def test_a_file_that_is_not_in_the_inventory_is_a_stray(self) -> None:
+        self.put("bink2w64.dll")
+        self.put("sd/extra.bin")
+        self.assertEqual(self.check().strays, ["bink2w64.dll", "sd/extra.bin"])
+
+    def test_a_removed_entry_is_reported(self) -> None:
+        (self.game / "steam_api64.dll").unlink()
+        found = self.check()
+        self.assertEqual(found.removed, ["steam_api64.dll"])
+        self.assertTrue(found.blocking())
+
+    def test_a_replaced_dll_with_the_same_size_is_changed_by_its_bytes(self) -> None:
+        path = self.put("steam_api64.dll", b"MZ stoam")
+        touch(path)
+        self.assertEqual(self.check().changed, ["steam_api64.dll"])
+
+    def test_a_size_change_on_an_entry_with_no_hash_is_changed(self) -> None:
+        self.put("Data0.bdt", b"x" * 20)
+        with mock.patch.object(inventory, "HASH_CAP", 10):
+            recorded = self.adopt("Data0.bdt", *self.vanilla())
+        self.put("Data0.bdt", b"x" * 21)
+        self.assertEqual(self.check(recorded).changed, ["Data0.bdt"])
+
+    def test_a_moved_mtime_with_the_same_bytes_is_nothing_and_comes_back_refreshed(self) -> None:
+        path = self.game / "steam_api64.dll"
+        touch(path)
+        found = self.check()
+        self.assertFalse(found.blocking())
+        self.assertEqual(
+            found.refreshed, {"steam_api64.dll": inventory.FileEntry(8, path.stat().st_mtime_ns, sha(b"MZ steam"))}
+        )
+        moved = inventory.refresh(self.recorded, found.refreshed)
+        self.assertEqual(self.check(moved).refreshed, {})
+        # The check itself wrote nothing.
+        self.assertEqual(inventory.read(self.paths), self.recorded)
+
+    def test_an_archive_above_the_cap_whose_mtime_moved_is_refreshed_not_hashed_or_reported(self) -> None:
+        self.put("DLC.bdt", b"x" * 20)
+        with mock.patch.object(inventory, "HASH_CAP", 10):
+            recorded = self.adopt("DLC.bdt", *self.vanilla())
+        touch(self.game / "DLC.bdt")
+        with mock.patch.object(inventory.github, "sha256_file") as hashed:
+            found = self.check(recorded)
+        hashed.assert_not_called()
+        self.assertFalse(found.blocking())
+        self.assertEqual(list(found.refreshed), ["DLC.bdt"])
+        self.assertIsNone(found.refreshed["DLC.bdt"].sha256)
+
+    def test_only_entries_whose_stat_moved_are_read(self) -> None:
+        with mock.patch.object(inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+            self.check()
+            self.assertEqual(hashed.call_count, 0)
+            touch(self.game / "steam_api64.dll")
+            self.check()
+        self.assertEqual([call.args[0] for call in hashed.call_args_list], [self.game / "steam_api64.dll"])
+
+    def test_the_hash_cache_keeps_a_second_pass_from_reading_again(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        cache: dict = {}
+        with mock.patch.object(inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+            self.check(cache=cache)
+            self.check(cache=cache)
+        self.assertEqual(hashed.call_count, 1)
+
+    def test_a_verify_that_rewrote_every_file_costs_one_read_each_and_reports_nothing(self) -> None:
+        names = [f"sd/part{n}.bin" for n in range(30)]
+        for n, name in enumerate(names):
+            self.put(name, f"data {n}".encode())
+        recorded = self.adopt(*self.vanilla(), *names)
+        every = names + ["eldenring.exe", "movie/intro.bk2", "sd/sd.bdt", "steam_api64.dll"]
+        for name in every:
+            touch(self.game / name)
+        with mock.patch.object(inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+            found = self.check(recorded)
+            self.assertEqual(hashed.call_count, len(every))
+            self.assertFalse(found.blocking())
+            self.assertEqual(sorted(found.refreshed), sorted(every))
+            settled = inventory.refresh(recorded, found.refreshed)
+            hashed.reset_mock()
+            self.assertEqual(self.check(settled).refreshed, {})
+            self.assertEqual(hashed.call_count, 0)
+
+    def test_wine_ignores_case_so_a_variant_of_an_excluded_name_is_a_stray(self) -> None:
+        variants = ["Regulation.bin", "START_PROTECTED_GAME.EXE", "Start_Protected_Game.exe.ERM-BACKUP", "ReShade2.INI"]
+        for rel in variants:
+            self.put(rel)
+        self.assertEqual(self.check().strays, sorted(variants))
+
+    def test_another_build_is_diffs_question_and_check_refuses_it(self) -> None:
+        with self.assertRaises(ValueError):
+            inventory.check(self.game, self.manifest, self.recorded, "99999")
+
+    def test_empty_folders_are_never_a_finding(self) -> None:
+        (self.game / "mods/Thing").mkdir(parents=True)
+        (self.game / "SeamlessCoop/crashdumps").mkdir(parents=True)
+        self.assertFalse(self.check().blocking())
+
+    def test_runtime_noise_is_not_a_stray(self) -> None:
+        for rel in ("vkd3d-proton.cache", "vkd3d-proton.cache.write", "x_2026.dmp", "ReShade.log", "SeamlessCoop/crashdumps/a.dmp"):
+            self.put(rel)
+        self.assertFalse(self.check().blocking())
+
+    def test_a_log_under_mods_outside_an_owned_folder_is_a_stray(self) -> None:
+        self.put("mods/logs/x.log")
+        self.assertEqual(self.check().strays, ["mods/logs/x.log"])
+
+    def test_the_harden_pair_swapped_for_a_copy_of_the_game_is_not_a_change(self) -> None:
+        self.put("start_protected_game.exe", b"MZ game")
+        self.put("start_protected_game.exe.erm-backup", b"MZ eac")
+        self.assertFalse(self.check().blocking())
+
+    def test_regulation_bin_is_not_this_checks_business(self) -> None:
+        self.put("regulation.bin", b"modified by a mod")
+        self.assertFalse(self.check().blocking())
+
+
+class ManifestOwnedTests(CheckCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.manifest = deploy.Manifest(
+            {"mods/Thing/config.ini": deploy.Entry(sha(b"a=1\n"), 4, "Thing mod")}, ["mods/Thing"]
+        )
+        self.put("mods/Thing/config.ini", b"a=1\n")
+
+    def test_a_deployed_file_is_never_a_finding_whatever_its_bytes(self) -> None:
+        self.put("mods/Thing/config.ini", b"the DLL rewrote this\n")
+        self.assertFalse(self.check().blocking())
+
+    def test_what_the_dll_writes_in_its_own_folder_is_noise_owned_by_that_folder(self) -> None:
+        self.put("mods/Thing/log.txt")
+        self.put("mods/Thing/logs/run_2026.log")
+        self.put("mods/Thing/crash.dmp")
+        self.assertFalse(self.check().blocking())
+
+    def test_anything_else_in_that_folder_is_still_a_stray(self) -> None:
+        self.put("mods/Thing/notes.txt")
+        self.put("mods/Thing/helper.dll")
+        self.assertEqual(self.check().strays, ["mods/Thing/helper.dll", "mods/Thing/notes.txt"])
+
+    def test_a_log_in_a_folder_the_plugin_did_not_create_is_a_stray(self) -> None:
+        self.put("mods/other/log.txt")
+        self.assertEqual(self.check().strays, ["mods/other/log.txt"])
+
+    def test_a_folder_spelled_with_another_case_is_not_the_owned_one(self) -> None:
+        self.put("mods/thing/log.txt")
+        self.assertEqual(self.check().strays, ["mods/thing/log.txt"])
+
+    def test_a_file_with_the_bytes_a_native_wants_there_is_not_a_stray(self) -> None:
+        wanted = {"mods/Fov/config.ini": sha(b"fov=90\n")}
+        self.put("mods/Fov/config.ini", b"fov=90\n")
+        self.assertFalse(self.check(desired=wanted).blocking())
+
+    def test_a_file_at_that_path_with_other_bytes_is_a_stray(self) -> None:
+        wanted = {"mods/Fov/config.ini": sha(b"fov=90\n")}
+        self.put("mods/Fov/config.ini", b"someone else's\n")
+        self.assertEqual(self.check(desired=wanted).strays, ["mods/Fov/config.ini"])
+
+    def test_the_same_bytes_under_another_spelling_of_the_path_are_a_stray(self) -> None:
+        wanted = {"mods/Fov/config.ini": sha(b"fov=90\n")}
+        self.put("mods/fov/Config.ini", b"fov=90\n")
+        self.assertEqual(self.check(desired=wanted).strays, ["mods/fov/Config.ini"])
+
+
+class LinkTests(CheckCase):
+    def test_a_link_to_a_file_is_a_finding_whatever_it_is_called_or_points_at(self) -> None:
+        (self.game / "version.dll").symlink_to(self.tmp / "x.dll")
+        (self.game / "notes.txt").symlink_to(self.game / "eldenring.exe")
+        found = self.check()
+        self.assertEqual(
+            found.symlinks,
+            [("notes.txt", str(self.game / "eldenring.exe")), ("version.dll", str(self.tmp / "x.dll"))],
+        )
+        self.assertTrue(found.blocking())
+
+    def test_a_linked_folder_is_a_finding_and_is_not_entered(self) -> None:
+        elsewhere = self.tmp / "their mods"
+        (elsewhere / "inner").mkdir(parents=True)
+        (elsewhere / "inner/loaded.dll").write_bytes(b"x")
+        (self.game / "mods").symlink_to(elsewhere)
+        found = self.check()
+        self.assertEqual(found.symlinks, [("mods", str(elsewhere))])
+        self.assertEqual(found.strays, [])
+
+    def test_a_linked_folder_inside_a_folder_is_found_too(self) -> None:
+        (self.game / "sd/extra").symlink_to(self.tmp)
+        self.assertEqual(self.check().symlinks, [("sd/extra", str(self.tmp))])
+
+
+class ReshadeTests(InventoryCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.links = self.install_reshade()
+        self.names = sorted(self.links)
+        self.recorded = self.adopt(*self.vanilla(), *self.names)
+
+    def check(self, recorded=None, **kwargs):
+        return inventory.check(self.game, self.manifest, recorded or self.recorded, BUILD, **kwargs)
+
+    def test_the_pinned_links_are_informational_and_reshades_files_are_not_strays(self) -> None:
+        found = self.check()
+        self.assertFalse(found.blocking())
+        self.assertEqual([rel for rel, _ in found.reshade], self.names)
+        self.assertEqual(dict(found.reshade)["dxgi.dll"], str(self.links["dxgi.dll"]))
+
+    def test_a_link_re_pointed_inside_reshades_folder_is_changed(self) -> None:
+        other = self.reshade_dir / "ReShade32.dll"
+        other.write_bytes(b"MZ other")
+        (self.game / "dxgi.dll").unlink()
+        (self.game / "dxgi.dll").symlink_to(other)
+        found = self.check()
+        self.assertEqual(found.changed, ["dxgi.dll"])
+        self.assertEqual(found.symlinks, [])
+
+    def test_a_link_whose_target_bytes_changed_is_changed(self) -> None:
+        (self.reshade_dir / "ReShade64.dll").write_bytes(b"MZ an addon build")
+        self.assertEqual(self.check().changed, ["dxgi.dll"])
+
+    def test_a_link_re_pointed_outside_reshades_folder_is_a_link_finding(self) -> None:
+        (self.game / "d3dcompiler_47.dll").unlink()
+        (self.game / "d3dcompiler_47.dll").symlink_to(self.tmp / "evil.dll")
+        found = self.check()
+        self.assertEqual(found.symlinks, [("d3dcompiler_47.dll", str(self.tmp / "evil.dll"))])
+
+    def test_a_regular_file_at_an_allowlisted_name_is_a_stray(self) -> None:
+        (self.game / "ReShade.ini").unlink()
+        self.put("ReShade.ini")
+        self.assertEqual(self.check().strays, ["ReShade.ini"])
+
+    def test_reshade_installed_after_the_adoption_is_unpinned_until_it_is_recorded(self) -> None:
+        for name in self.names:
+            (self.game / name).unlink()
+        plain = self.adopt("eldenring.exe")
+        links = self.install_reshade()
+        self.assertEqual(self.check(plain).changed, sorted(links))
+
+    def test_the_links_are_findings_when_reshade_is_no_longer_active(self) -> None:
+        (self.game / "dxgi.dll").unlink()
+        found = self.check()
+        self.assertEqual(len(found.symlinks), 3)
+        self.assertEqual(found.reshade, [])
+
+    def test_a_differently_spelled_name_is_not_reshades_and_its_second_ini_is_not_excluded(self) -> None:
+        (self.game / "DXGI.dll").symlink_to(self.reshade_dir / "ReShade64.dll")
+        (self.game / "ReShade2.ini").unlink()
+        self.put("reshade2.ini")
+        found = self.check()
+        self.assertEqual(found.symlinks, [("DXGI.dll", str(self.reshade_dir / "ReShade64.dll"))])
+        self.assertEqual(found.strays, ["reshade2.ini"])
+
+    def test_reshades_log_and_second_ini_are_never_strays(self) -> None:
+        self.assertNotIn("ReShade.log", self.check().strays)
+        self.assertNotIn("ReShade2.ini", self.check().strays)
+
+
+class UnreadableTests(CheckCase):
+    def test_a_folder_that_cannot_be_listed_is_reported_and_blocks(self) -> None:
+        real = os.scandir
+
+        def deny(path):
+            if str(path).endswith("movie"):
+                raise PermissionError(13, "denied", str(path))
+            return real(path)
+
+        with mock.patch.object(os, "scandir", deny):
+            found = self.check()
+        self.assertEqual(found.unreadable, ["movie"])
+        self.assertTrue(found.blocking())
+        # What was under it reads as removed, which is the other half of the same fact.
+        self.assertEqual(found.removed, ["movie/intro.bk2"])
+
+    def test_the_signature_moves_with_every_kind_of_finding(self) -> None:
+        quiet = self.check().signature()
+        self.put("new.bin")
+        self.assertNotEqual(self.check().signature(), quiet)
+        (self.game / "new.bin").unlink()
+        self.assertEqual(self.check().signature(), quiet)
+        (self.game / "version.dll").symlink_to(self.tmp / "x.dll")
+        self.assertNotEqual(self.check().signature(), quiet)
+
+
 if __name__ == "__main__":
     unittest.main()

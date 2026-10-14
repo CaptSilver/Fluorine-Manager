@@ -433,3 +433,131 @@ def adopt(
             raise InventoryError(f"{rel} could not be read from Game/ ({exc.strerror or exc}).") from exc
     write(paths, inventory)
     return inventory
+
+
+# -- checking -----------------------------------------------------------------
+
+_SAME, _REFRESH, _CHANGED = "same", "refresh", "changed"
+
+
+@dataclass
+class Findings:
+    """What check found in Game/ against an inventory recorded at the same build."""
+
+    missing_inventory: bool = False
+    strays: list[str] = field(default_factory=list)
+    symlinks: list[tuple[str, str]] = field(default_factory=list)
+    unreadable: list[str] = field(default_factory=list)
+    changed: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    # ReShade's links that are in place, with their targets: informational.
+    reshade: list[tuple[str, str]] = field(default_factory=list)
+    # Entries whose size or mtime moved with the same bytes. Returned, not
+    # written: only the gate persists them (refresh), the diagnose pass and
+    # the sweep throw them away.
+    refreshed: dict[str, FileEntry] = field(default_factory=dict)
+
+    def blocking(self) -> bool:
+        return bool(
+            self.missing_inventory or self.strays or self.symlinks or self.unreadable or self.changed or self.removed
+        )
+
+    def signature(self) -> tuple:
+        """What the 60 s poll compares between two passes to know something moved."""
+        return (
+            self.missing_inventory, tuple(self.strays), tuple(self.symlinks), tuple(self.unreadable),
+            tuple(self.changed), tuple(self.removed),
+        )
+
+
+def _compare(game_dir, rel: str, info: os.stat_result, entry: FileEntry, cache: dict | None) -> str:
+    """Whether the file on disk is the recorded one.
+
+    Size first, then mtime, and bytes only when the mtime moved on its own: a
+    Steam verify rewrites files with new mtimes and the same bytes, and every
+    launch bumps the mtime of DLC.bdt and DLC.bhd without changing them. An
+    entry above the cap has no hash, so an mtime move with the same size is
+    taken as nothing.
+    """
+    if info.st_size != entry.size:
+        return _CHANGED
+    if info.st_mtime_ns == entry.mtime_ns:
+        return _SAME
+    if entry.sha256 is None:
+        return _REFRESH
+    return _REFRESH if _hash(Path(game_dir) / rel, info.st_size, cache) == entry.sha256 else _CHANGED
+
+
+def _is_wanted_copy(game_dir, rel: str, info: os.stat_result, ctx: Context, cache: dict | None) -> bool:
+    """A file at a path a native wants a config file deployed to, holding exactly its bytes.
+
+    deploy.plan adopts it at the next sync (a crash between the copy and the
+    record), so it is not a stray. Matched on the exact path: Wine ignores
+    case but the manifest does not, and mods/foo/Config.ini beside a wanted
+    mods/Foo/config.ini is a second file.
+    """
+    wanted = ctx.desired.get(rel)
+    return wanted is not None and _hash(Path(game_dir) / rel, info.st_size, cache) == wanted
+
+
+def _links(game_dir, tree: Tree, inventory: Inventory, ctx: Context, cache: dict | None):
+    """(links that are findings, ReShade's links in place, ReShade's links not as pinned)."""
+    bad, shown, moved = [], [], []
+    for rel, target in sorted(tree.links.items()):
+        if not reshade_link_ok(game_dir, rel, ctx):
+            bad.append((rel, target))
+            continue
+        shown.append((rel, target))
+        if inventory.links.get(rel) != _link_entry(game_dir, rel, target, cache):
+            moved.append(rel)
+    return bad, shown, moved
+
+
+def check(
+    game_dir,
+    manifest: deploy.Manifest,
+    inventory: Inventory | None,
+    buildid: str,
+    *,
+    desired: dict[str, str] | None = None,
+    cache: dict | None = None,
+) -> Findings:
+    """Hold Game/ to the inventory at the build it was recorded at. Reads, never writes.
+
+    Raises ValueError for a different build: that is diff's question, and
+    answering it here would call every file the update brought a stray.
+    `desired` is desired_shas(deploy.desired(...)); `cache` is the instance's
+    hash cache (archives.hash_cache), which keeps a re-hash to once per change.
+    """
+    if inventory is None:
+        return Findings(missing_inventory=True)
+    if build_changed(inventory, buildid):
+        raise ValueError(f"the inventory is for build {inventory.steam_buildid}, not {buildid}: use diff")
+    ctx = context(game_dir, manifest, desired)
+    tree = walk(game_dir)
+    found = Findings(unreadable=sorted(tree.unreadable))
+    found.symlinks, found.reshade, found.changed = _links(game_dir, tree, inventory, ctx, cache)
+    for rel, info in sorted(tree.files.items()):
+        if excluded(rel, ctx):
+            continue
+        entry = inventory.files.get(rel)
+        if entry is None:
+            if not _is_wanted_copy(game_dir, rel, info, ctx, cache):
+                found.strays.append(rel)
+            continue
+        verdict = _compare(game_dir, rel, info, entry, cache)
+        if verdict == _CHANGED:
+            found.changed.append(rel)
+        elif verdict == _REFRESH:
+            found.refreshed[rel] = FileEntry(info.st_size, info.st_mtime_ns, entry.sha256)
+    found.removed = sorted(rel for rel in inventory.files if rel not in tree.files and not excluded(rel, ctx))
+    found.changed.sort()
+    return found
+
+
+def refresh(inventory: Inventory, refreshed: dict[str, FileEntry]) -> Inventory:
+    """The inventory with the proven-unchanged entries' size and mtime brought up to date."""
+    return Inventory(
+        inventory.steam_buildid, inventory.adopted, inventory.regulation_sha, inventory.regulation,
+        {**inventory.files, **refreshed}, dict(inventory.links),
+    )
