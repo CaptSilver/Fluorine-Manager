@@ -4,6 +4,11 @@ erm's conflicts module merged by moving files between packages and deleting
 the sources. This one only reads: it indexes the contributors, plans every
 merge in memory and returns the outputs for generated.build to write. The
 contributor folders are never modified.
+
+Two mods shipping one file never stops a launch. A profile's [[merges]] entry
+decides it when there is one; otherwise the engine merges what it has a
+strategy for against the game's own copy, and the highest-priority mod wins the
+rest. Paths are compared the way the game compares them, case-insensitively.
 """
 
 from __future__ import annotations
@@ -51,44 +56,90 @@ def contributors_of(organizer, views: dict[str, Path]) -> list[Contributor]:
     ]
 
 
-def index(contributors: list[Contributor]) -> dict[str, list[str]]:
-    """{game-relative path: the mods providing it, in contributor order}."""
-    found: dict[str, list[str]] = {}
+class Provider(NamedTuple):
+    mod: str
+    rel: str  # the spelling this mod ships, after the profile's renames and prunes
+    path: Path  # the file itself
+
+
+def canonical(rel: str) -> str:
+    """The spelling the game knows `rel` by: lowercase.
+
+    The archive index hashes the lowercased path (bhd5.normalise) and holds no
+    original spellings, so the game cannot tell msg/engUS/x from msg/engus/x and
+    the index cannot be asked which is right. Lowercase is the game's spelling
+    for every path, indexed or not.
+    """
+    return rel.lower()
+
+
+def listings_of(contributors: list[Contributor]) -> dict[str, list[treewalk.Entry]]:
+    return {contributor.mod: treewalk.package_listing(contributor.source) for contributor in contributors}
+
+
+def index(
+    contributors: list[Contributor],
+    listings: dict[str, list[treewalk.Entry]] | None = None,
+    warnings: list[str] | None = None,
+    dropped: dict[str, list[str]] | None = None,
+) -> dict[str, list[Provider]]:
+    """{game path: the providers, in contributor order}, paths in the game's spelling.
+
+    A mod that ships one path under two spellings provides it once: the game's
+    own spelling if it has it, else the first in sorted order. The spellings it
+    loses go in `dropped` ({mod: [spelling]}) so they can be kept out of its
+    view, and are named in `warnings`. `listings` are the contributors' walks
+    when the caller already made them.
+    """
+    listings = listings_of(contributors) if listings is None else listings
+    found: dict[str, list[Provider]] = {}
     for contributor in contributors:
-        for rel, _path in treewalk.package_files(contributor.source):
-            found.setdefault(rel, []).append(contributor.mod)
-    check_no_case_only_collisions(found)
+        own: dict[str, Provider] = {}
+        spellings: dict[str, list[str]] = {}
+        for entry in listings[contributor.mod]:
+            key = canonical(entry.rel)
+            spellings.setdefault(key, []).append(entry.rel)
+            kept = own.get(key)
+            if kept is None or (entry.rel == key and kept.rel != key):
+                own[key] = Provider(contributor.mod, entry.rel, entry.path)
+        for key, provider in own.items():
+            found.setdefault(key, []).append(provider)
+            lost = [rel for rel in spellings[key] if rel != provider.rel]
+            if not lost:
+                continue
+            if dropped is not None:
+                dropped.setdefault(contributor.mod, []).extend(lost)
+            if warnings is not None:
+                warnings.append(
+                    f"{contributor.mod} ships {' and '.join(sorted([provider.rel, *lost]))}, which the game reads as "
+                    f"one path. {provider.rel} is the one used; the other is not loaded."
+                )
     return found
 
 
-def check_no_case_only_collisions(provided: dict[str, list[str]]) -> None:
-    """Refuse paths that collide only under case-folding.
+# The strategies the engine tries on a colliding file the profile declares no
+# merge for. The first table is for exact paths, the second for path endings.
+AUTO_EXACT: dict[str, str] = {REGULATION: "param-rows"}
+AUTO_SUFFIX: dict[str, str] = {".msgbnd.dcx": "fmg-3way", ".talkesdbnd.dcx": "esd-3way"}
 
-    Whether me3 resolves paths case-sensitively is unverified, so which of two
-    differently cased spellings it would mount is a guess. The profile answers
-    it with a rename or a prune. Nothing else notices these: msg/x.dcx and
-    MSG/X.dcx index as two one-provider entries.
-    """
-    by_fold: dict[str, list[str]] = {}
-    for rel in provided:
-        by_fold.setdefault(rel.casefold(), []).append(rel)
-    for variants in by_fold.values():
-        if len(variants) > 1:
-            detail = "; ".join(f"{v!r} (from {', '.join(provided[v])})" for v in sorted(variants))
-            raise ConflictError(
-                f"these paths differ only in case, so it's ambiguous which file me3 "
-                f"would mount: {detail}. Rename one so the paths differ for real, or "
-                "drop one of the mods."
-            )
+
+def auto_strategy(rel: str) -> str | None:
+    """The strategy for `rel` (in the game's spelling), or None when the engine has none."""
+    if rel in AUTO_EXACT:
+        return AUTO_EXACT[rel]
+    for suffix, name in AUTO_SUFFIX.items():
+        if rel.endswith(suffix):
+            return name
+    return None
 
 
 def declare_merges(merges: list[dict]) -> dict[str, dict]:
-    """The merges by path, refusing two different declarations for one path."""
+    """The merges by path in the game's spelling, refusing two different declarations for one path."""
     declared: dict[str, dict] = {}
     for entry in merges:
-        rel = entry["path"]
+        rel = canonical(entry["path"])
         prior = declared.get(rel)
-        if prior is not None and prior != entry:
+        if prior is not None and {**prior, "path": rel} != {**entry, "path": rel}:
             raise ConflictError(
                 f"{rel}: two [[merges]] entries disagree on how to resolve it, "
                 f"{prior!r} against {entry!r}. Profiles compose, so this path picked up "
@@ -96,6 +147,75 @@ def declare_merges(merges: list[dict]) -> dict[str, dict]:
             )
         declared[rel] = entry
     return declared
+
+
+def _merging_paths(provided: dict[str, list[Provider]], merges: list[dict]) -> list[str]:
+    """The paths whose output replaces what mods ship: more than one provider, or a merge that leads with the game."""
+    led_by_game = {canonical(rule["path"]) for rule in merges if rule.get("base") == "game"}
+    return [key for key, providers in sorted(provided.items()) if len(providers) > 1 or key in led_by_game]
+
+
+def shadowed(
+    provided: dict[str, list[Provider]], merges: list[dict], dropped: dict[str, list[str]] | None = None
+) -> dict[str, list[str]]:
+    """{mod: [spelling]} of the files me3 must not load: those a merged output replaces under another spelling.
+
+    The output goes to the game's spelling, and a case-variant copy beside it is
+    exactly the ambiguity the output is there to settle, so the mod's own file is
+    pruned from its view. Depends on names only, so it can be known before any
+    file is read.
+    """
+    found: dict[str, set[str]] = {}
+    for key in _merging_paths(provided, merges):
+        for provider in provided[key]:
+            if provider.rel != key:
+                found.setdefault(provider.mod, set()).add(provider.rel)
+    for mod, rels in (dropped or {}).items():
+        found.setdefault(mod, set()).update(rels)
+    return {mod: sorted(rels) for mod, rels in sorted(found.items())}
+
+
+def game_archives(game_dir) -> list[str]:
+    """The archive files of bhd5.ARCHIVES that exist in the game folder, sorted by name.
+
+    The automatic merges read the game's copy of a file out of these. A DLC
+    archive installed later, or a Data0.bdt gone missing, changes what the
+    engine can decide while no mod and no build id moves.
+    """
+    return sorted(
+        f"{name}{ext}"
+        for name in bhd5.ARCHIVES
+        for ext in (".bhd", ".bdt")
+        if (Path(game_dir) / f"{name}{ext}").is_file()
+    )
+
+
+def collision_map(
+    provided: dict[str, list[Provider]],
+    merges: list[dict],
+    dropped: dict[str, list[str]] | None = None,
+    archives=(),
+) -> dict:
+    """Every colliding path with its providers and spellings, and the strategy that will be tried.
+
+    The generated mod's fingerprint takes this: what the engine decides for a
+    path follows from the providers' files, which the listing digests cover,
+    from this assignment, and from which game archives exist (`archives`), since
+    that decides whether the game has a copy to merge against.
+    """
+    declared = declare_merges(merges)
+    paths = {}
+    for key in _merging_paths(provided, merges):
+        rule = declared.get(key)
+        paths[key] = {
+            "providers": [[provider.mod, provider.rel] for provider in provided[key]],
+            "strategy": rule["strategy"] if rule else auto_strategy(key),
+        }
+    return {
+        "paths": paths,
+        "dropped": {mod: sorted(rels) for mod, rels in sorted((dropped or {}).items())},
+        "archives": sorted(archives),
+    }
 
 
 # -- the vanilla file a three-way merge compares against ----------------------
@@ -191,7 +311,7 @@ def load_game_bases(merges: list[dict], game_dir) -> dict[str, bytes]:
 
 
 def plan(
-    provided: dict[str, list[str]],
+    provided: dict[str, list[Provider]],
     contributors: list[Contributor],
     merges: list[dict],
     vanilla_loader: VanillaLoader,
@@ -208,17 +328,19 @@ def plan(
     what a strategy could not carry over cleanly, tagged with the path.
     """
     strategies = merge.STRATEGIES if strategies is None else strategies
-    sources = {contributor.mod: contributor.source for contributor in contributors}
+    installed = {contributor.mod for contributor in contributors}
     declared = declare_merges(merges)
+    bases = {canonical(rel): blob for rel, blob in (bases or {}).items()}
     if notes is not None:
-        installed = set(sources)
         for rel, rule in sorted(declared.items()):
-            gone = tuple(m for m in rule["mods"] if m in installed and m not in set(provided.get(rel, ())))
+            have = {provider.mod for provider in provided.get(rel, ())}
+            gone = tuple(m for m in rule["mods"] if m in installed and m not in have)
             if gone:
                 notes.append((rel, merge.StaleContributor(rel, gone)))
     planned = []
-    for rel, providers in sorted(provided.items()):
-        if len(providers) < 2 and rel not in (bases or {}):
+    for rel, found in sorted(provided.items()):
+        providers = [provider.mod for provider in found]
+        if len(providers) < 2 and rel not in bases:
             continue
         rule = declared.get(rel)
         if rule is None:
@@ -248,8 +370,9 @@ def plan(
             )
         # `prefer` wins genuine collisions, so it is the base the strategy builds on.
         ordered = [prefer] + [m for m in providers if m != prefer]
-        blobs = [(sources[m] / rel).read_bytes() for m in ordered]
-        lead = (bases or {}).get(rel)
+        files = {provider.mod: provider.path for provider in found}
+        blobs = [files[m].read_bytes() for m in ordered]
+        lead = bases.get(rel)
         if lead is not None:
             blobs = [lead] + blobs
         vanilla = _load_vanilla(rel, rule, vanilla_loader) if rule["strategy"] in merge.NEEDS_VANILLA else None

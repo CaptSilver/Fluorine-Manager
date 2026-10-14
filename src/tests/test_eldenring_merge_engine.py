@@ -53,33 +53,189 @@ class EngineCase(unittest.TestCase):
         )
 
 
+def spelled(provided: dict) -> dict:
+    """{path: [(mod, spelling)]}: an index without the file locations."""
+    return {key: [(p.mod, p.rel) for p in providers] for key, providers in provided.items()}
+
+
 class IndexTests(EngineCase):
     def test_providers_are_listed_in_contributor_order(self) -> None:
         a = self.folder("a", {"msg/x.dcx": "A", "only-a.bin": "A"})
         b = self.folder("b", {"msg/x.dcx": "B"})
         self.assertEqual(
-            merge_engine.index([a, b]), {"msg/x.dcx": ["a", "b"], "only-a.bin": ["a"]}
+            spelled(merge_engine.index([a, b])),
+            {"msg/x.dcx": [("a", "msg/x.dcx"), ("b", "msg/x.dcx")], "only-a.bin": [("a", "only-a.bin")]},
         )
-        self.assertEqual(merge_engine.index([b, a])["msg/x.dcx"], ["b", "a"])
+        self.assertEqual([p.mod for p in merge_engine.index([b, a])["msg/x.dcx"]], ["b", "a"])
 
     def test_meta_ini_and_hidden_files_are_not_provided(self) -> None:
         a = self.folder("a", {"meta.ini": "x", "regulation.bin": "A", "gone.bin.mohidden": "x", "d.mohidden/z.bin": "x"})
-        self.assertEqual(merge_engine.index([a]), {"regulation.bin": ["a"]})
+        self.assertEqual(spelled(merge_engine.index([a])), {"regulation.bin": [("a", "regulation.bin")]})
 
     def test_a_view_is_indexed_instead_of_the_mod_folder(self) -> None:
         a = self.folder("a", {"keep.bin": "A", "drop.bin": "A"})
         view = self.tmp / "view"
         view.mkdir()
         (view / "keep.bin").symlink_to(a.source / "keep.bin")
-        self.assertEqual(merge_engine.index([merge_engine.Contributor("a", view)]), {"keep.bin": ["a"]})
+        provided = merge_engine.index([merge_engine.Contributor("a", view)])
+        self.assertEqual(spelled(provided), {"keep.bin": [("a", "keep.bin")]})
+        self.assertEqual(provided["keep.bin"][0].path, view / "keep.bin")
 
-    def test_paths_that_differ_only_in_case_are_refused_naming_both_mods(self) -> None:
+    def test_paths_that_differ_only_in_case_are_one_path_in_the_games_spelling(self) -> None:
         a = self.folder("a", {"msg/engUS/x.dcx": "A"})
         b = self.folder("b", {"msg/engus/x.dcx": "B"})
-        with self.assertRaises(merge_engine.ConflictError) as caught:
-            merge_engine.index([a, b])
-        self.assertIn("a", str(caught.exception))
-        self.assertIn("engUS", str(caught.exception))
+        self.assertEqual(
+            spelled(merge_engine.index([a, b])),
+            {"msg/engus/x.dcx": [("a", "msg/engUS/x.dcx"), ("b", "msg/engus/x.dcx")]},
+        )
+
+    def test_one_mod_shipping_two_spellings_is_one_provider_and_the_other_spelling_is_dropped(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "upper", "msg/engus/x.dcx": "lower"})
+        warnings, dropped = [], {}
+        provided = merge_engine.index([a], warnings=warnings, dropped=dropped)
+        self.assertEqual(spelled(provided), {"msg/engus/x.dcx": [("a", "msg/engus/x.dcx")]})
+        self.assertEqual(provided["msg/engus/x.dcx"][0].path.read_bytes(), b"lower")
+        self.assertEqual(dropped, {"a": ["msg/engUS/x.dcx"]})
+        self.assertEqual(len(warnings), 1)
+        for text in ("a", "msg/engUS/x.dcx", "msg/engus/x.dcx"):
+            self.assertIn(text, warnings[0])
+
+    def test_when_neither_spelling_is_the_games_the_first_in_sorted_order_is_kept(self) -> None:
+        a = self.folder("a", {"Msg/x.dcx": "1", "MSG/x.dcx": "2"})
+        dropped = {}
+        provided = merge_engine.index([a], dropped=dropped)
+        self.assertEqual(spelled(provided), {"msg/x.dcx": [("a", "MSG/x.dcx")]})
+        self.assertEqual(dropped, {"a": ["Msg/x.dcx"]})
+
+    def test_a_mod_with_one_spelling_adds_no_warning_and_drops_nothing(self) -> None:
+        a = self.folder("a", {"msg/x.dcx": "A"})
+        warnings, dropped = [], {}
+        merge_engine.index([a], warnings=warnings, dropped=dropped)
+        self.assertEqual((warnings, dropped), ([], {}))
+
+
+class CanonicalTests(unittest.TestCase):
+    def test_the_games_spelling_is_lowercase(self) -> None:
+        self.assertEqual(merge_engine.canonical("msg/engUS/Item_DLC02.msgbnd.dcx"), "msg/engus/item_dlc02.msgbnd.dcx")
+        self.assertEqual(merge_engine.canonical("regulation.bin"), "regulation.bin")
+
+    def test_it_is_the_spelling_the_archive_index_hashes(self) -> None:
+        for rel in ("msg/engUS/Item.msgbnd.dcx", "Regulation.BIN"):
+            self.assertEqual("/" + merge_engine.canonical(rel), bhd5.normalise(rel))
+
+
+class DeclareTests(unittest.TestCase):
+    RULE = {"path": "msg/x.dcx", "strategy": "concat", "mods": ["a"], "prefer": "a"}
+
+    def test_declarations_are_keyed_in_the_games_spelling(self) -> None:
+        declared = merge_engine.declare_merges([{**self.RULE, "path": "MSG/X.dcx"}])
+        self.assertEqual(list(declared), ["msg/x.dcx"])
+        self.assertEqual(declared["msg/x.dcx"]["path"], "MSG/X.dcx")
+
+    def test_the_same_rule_written_in_two_spellings_of_the_path_agrees(self) -> None:
+        declared = merge_engine.declare_merges(
+            [{**self.RULE, "path": "msg/engUS/x.dcx"}, {**self.RULE, "path": "msg/engus/x.dcx"}]
+        )
+        self.assertEqual(list(declared), ["msg/engus/x.dcx"])
+
+    def test_two_declarations_that_differ_only_in_the_spelling_of_the_path_still_clash_when_they_disagree(self) -> None:
+        with self.assertRaises(merge_engine.ConflictError):
+            merge_engine.declare_merges([{**self.RULE, "path": "MSG/X.dcx"}, {**self.RULE, "prefer": "b"}])
+
+
+class ShadowTests(EngineCase):
+    def test_a_collision_under_another_spelling_shadows_that_mods_file(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "A"})
+        b = self.folder("b", {"msg/engus/x.dcx": "B"})
+        provided = merge_engine.index([a, b])
+        self.assertEqual(merge_engine.shadowed(provided, []), {"a": ["msg/engUS/x.dcx"]})
+
+    def test_a_path_with_one_provider_is_never_shadowed(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "A"})
+        self.assertEqual(merge_engine.shadowed(merge_engine.index([a]), []), {})
+
+    def test_a_declaration_that_leads_with_the_game_makes_a_single_provider_a_merge(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "A"})
+        merges = [{"path": "msg/engus/x.dcx", "strategy": "concat", "mods": ["a"], "prefer": "a", "base": "game"}]
+        self.assertEqual(merge_engine.shadowed(merge_engine.index([a]), merges), {"a": ["msg/engUS/x.dcx"]})
+
+    def test_dropped_spellings_are_shadowed_whether_or_not_anything_collides(self) -> None:
+        a = self.folder("a", {"only.bin": "A"})
+        provided = merge_engine.index([a])
+        self.assertEqual(
+            merge_engine.shadowed(provided, [], {"a": ["Z/y.bin"], "b": ["Q.bin"]}),
+            {"a": ["Z/y.bin"], "b": ["Q.bin"]},
+        )
+
+    def test_the_result_is_sorted_so_it_is_stable(self) -> None:
+        a = self.folder("a", {"B/x.dcx": "A", "A/x.dcx": "A"})
+        b = self.folder("b", {"b/x.dcx": "B", "a/x.dcx": "B"})
+        self.assertEqual(merge_engine.shadowed(merge_engine.index([a, b]), []), {"a": ["A/x.dcx", "B/x.dcx"]})
+
+
+class CollisionMapTests(EngineCase):
+    def test_it_names_providers_with_their_spellings_and_the_strategy_that_will_be_tried(self) -> None:
+        a = self.folder("a", {"regulation.bin": "A", "msg/engUS/item.msgbnd.dcx": "A", "plain.bin": "A", "solo.bin": "A"})
+        b = self.folder("b", {"regulation.bin": "B", "msg/engus/item.msgbnd.dcx": "B", "plain.bin": "B"})
+        got = merge_engine.collision_map(merge_engine.index([a, b]), [])
+        self.assertEqual(
+            got,
+            {
+                "paths": {
+                    "msg/engus/item.msgbnd.dcx": {
+                        "providers": [["a", "msg/engUS/item.msgbnd.dcx"], ["b", "msg/engus/item.msgbnd.dcx"]],
+                        "strategy": "fmg-3way",
+                    },
+                    "plain.bin": {"providers": [["a", "plain.bin"], ["b", "plain.bin"]], "strategy": None},
+                    "regulation.bin": {
+                        "providers": [["a", "regulation.bin"], ["b", "regulation.bin"]],
+                        "strategy": "param-rows",
+                    },
+                },
+                "dropped": {},
+                "archives": [],
+            },
+        )
+
+    def test_a_declared_strategy_replaces_the_automatic_one(self) -> None:
+        a = self.folder("a", {"regulation.bin": "A"})
+        b = self.folder("b", {"regulation.bin": "B"})
+        merges = [{"path": "regulation.bin", "strategy": "concat", "mods": ["a", "b"], "prefer": "a"}]
+        got = merge_engine.collision_map(merge_engine.index([a, b]), merges)
+        self.assertEqual(got["paths"]["regulation.bin"]["strategy"], "concat")
+
+    def test_it_moves_with_the_order_and_with_a_dropped_spelling(self) -> None:
+        a = self.folder("a", {"x.bin": "A"})
+        b = self.folder("b", {"x.bin": "B"})
+        forward = merge_engine.collision_map(merge_engine.index([a, b]), [])
+        backward = merge_engine.collision_map(merge_engine.index([b, a]), [])
+        dropped = merge_engine.collision_map(merge_engine.index([a, b]), [], {"a": ["X.bin"]})
+        self.assertEqual(len({str(forward), str(backward), str(dropped)}), 3)
+
+    def test_it_moves_with_the_game_archives_present(self) -> None:
+        a = self.folder("a", {"msg/engus/item_dlc02.msgbnd.dcx": "A"})
+        b = self.folder("b", {"msg/engus/item_dlc02.msgbnd.dcx": "B"})
+        provided = merge_engine.index([a, b])
+        base = merge_engine.collision_map(provided, [], None, ["Data0.bdt", "Data0.bhd"])
+        with_dlc = merge_engine.collision_map(provided, [], None, ["DLC.bdt", "DLC.bhd", "Data0.bdt", "Data0.bhd"])
+        self.assertNotEqual(base, with_dlc)
+        self.assertEqual(with_dlc["archives"], ["DLC.bdt", "DLC.bhd", "Data0.bdt", "Data0.bhd"])
+
+
+class GameArchivesTests(EngineCase):
+    def test_it_lists_the_archive_files_present_in_sorted_order(self) -> None:
+        game = self.folder("game", {"Data0.bhd": "x", "Data0.bdt": "x", "DLC.bhd": "x", "regulation.bin": "x"})
+        self.assertEqual(merge_engine.game_archives(game.source), ["DLC.bhd", "Data0.bdt", "Data0.bhd"])
+
+    def test_a_folder_without_archives_lists_none(self) -> None:
+        self.assertEqual(merge_engine.game_archives(self.folder("game", {"regulation.bin": "x"}).source), [])
+
+    def test_the_automatic_strategies_are_chosen_by_the_games_file_kinds(self) -> None:
+        self.assertEqual(merge_engine.auto_strategy("regulation.bin"), "param-rows")
+        self.assertIsNone(merge_engine.auto_strategy("sub/regulation.bin"))
+        self.assertEqual(merge_engine.auto_strategy("msg/engus/item_dlc02.msgbnd.dcx"), "fmg-3way")
+        self.assertEqual(merge_engine.auto_strategy("script/talk/t100.talkesdbnd.dcx"), "esd-3way")
+        self.assertIsNone(merge_engine.auto_strategy("menu/hi/01_common.tpf.dcx"))
 
 
 class ContributorsTests(EngineCase):
