@@ -209,7 +209,10 @@ class LaunchGate:
         return _Veto("Session check", why, fix, SAVE_RESTORE_PENDING)
 
     def _report_veto(self, veto: _Veto) -> None:
-        with contextlib.suppress(OSError, ErmError):
+        # The record is for the diagnose pass; failing to write it must not stop
+        # the dialog or let an exception out of run(). A damaged record is the
+        # expected case (OSError, ErmError); anything else is logged.
+        try:
             paths = state.InstancePaths(self._organizer)
             data = session.load_last_launch(paths)
             data["report"] = {
@@ -220,5 +223,12 @@ class LaunchGate:
                 "text": veto.text(),
             }
             session.save_last_launch(paths, data)
+        except (OSError, ErmError):
+            pass
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._warn(
+                    "Elden Ring launch gate: could not record the veto\n" + traceback.format_exc()
+                )
         with contextlib.suppress(Exception):
             self._show_veto(TITLE, veto.text())

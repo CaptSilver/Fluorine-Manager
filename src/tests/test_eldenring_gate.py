@@ -340,6 +340,13 @@ class WholeBodyTests(GateCase):
         self.up = [(1, "me3")]
         self.assertFalse(self.launch())
 
+    def test_a_veto_whose_record_cannot_be_written_is_still_a_veto(self) -> None:
+        self.up = [(1, "me3")]
+        with mock.patch.object(gate.session, "save_last_launch", side_effect=RuntimeError("deep")):
+            self.assertFalse(self.launch())
+        self.assertIn("me3", self.last_veto())
+        self.assertTrue(any("deep" in w for w in self.warnings))
+
 
 if __name__ == "__main__":
     unittest.main()
