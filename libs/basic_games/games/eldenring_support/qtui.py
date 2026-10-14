@@ -243,3 +243,115 @@ def inform(parent, title: str, text: str) -> None:
         QMessageBox.information(parent, title, text)
     else:
         show_text(parent, title, text)
+
+
+def ask_text(parent, title: str, label: str, default: str = "") -> str | None:
+    """A line of text typed by the user, or None when the dialog is cancelled."""
+    from PyQt6.QtWidgets import QInputDialog
+
+    text, accepted = QInputDialog.getText(parent, title, label, text=default)
+    return text if accepted else None
+
+
+def choose_open_file(parent, title: str, start: str, name_filter: str) -> str | None:
+    from PyQt6.QtWidgets import QFileDialog
+
+    chosen, _selected_filter = QFileDialog.getOpenFileName(parent, title, start, name_filter)
+    return chosen or None
+
+
+def choose_save_file(parent, title: str, start: str, name_filter: str) -> str | None:
+    from PyQt6.QtWidgets import QFileDialog
+
+    chosen, _selected_filter = QFileDialog.getSaveFileName(parent, title, start, name_filter)
+    return chosen or None
+
+
+def run_later(callback) -> None:
+    """Run `callback` from the event loop, after whatever is running now has returned."""
+    from PyQt6.QtCore import QTimer
+
+    QTimer.singleShot(0, callback)
+
+
+def open_url(url: str) -> None:
+    """Open an address in the desktop's browser."""
+    from PyQt6.QtCore import QUrl
+    from PyQt6.QtGui import QDesktopServices
+
+    QDesktopServices.openUrl(QUrl(url))
+
+
+class FetchDialog:
+    """The modal window an import waits in while archives download.
+
+    `lines()` says what is still being waited for and is read twice a second.
+    "Continue with what arrived" and Cancel call back, and closing the window is
+    a Cancel. `exec()` runs the dialog's event loop, so a download completing,
+    a scheduled install pass and the directory refresh all happen inside it.
+    """
+
+    def __init__(self, title: str, parent=None, lines=lambda: []) -> None:
+        from PyQt6.QtCore import Qt, QTimer
+        from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
+
+        self._lines = lines
+        self._finished = False
+        self._on_continue = lambda: None
+        self._on_cancel = lambda: None
+        self.dialog = QDialog(parent)
+        self.dialog.setWindowTitle(title)
+        self.dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.dialog.resize(680, 420)
+        layout = QVBoxLayout(self.dialog)
+        label = QLabel(
+            "Waiting for these archives. Nothing is installed until every one has arrived or been given up on. "
+            "For Nexus downloads in the browser, click \"Download with manager\" on the page that opened."
+        )
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        self._view = QPlainTextEdit()
+        self._view.setReadOnly(True)
+        layout.addWidget(self._view)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        go_on = QPushButton("Continue with what arrived")
+        go_on.clicked.connect(lambda: self._on_continue())
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.dialog.reject)
+        row.addWidget(go_on)
+        row.addWidget(cancel)
+        layout.addLayout(row)
+        self.dialog.rejected.connect(self._rejected)
+        self._timer = QTimer(self.dialog)
+        self._timer.setInterval(500)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start()
+
+    def on_continue(self, callback) -> None:
+        self._on_continue = callback
+
+    def on_cancel(self, callback) -> None:
+        self._on_cancel = callback
+
+    def refresh(self) -> None:
+        self._view.setPlainText("\n".join(self._lines()))
+
+    def exec(self) -> int:
+        self.refresh()
+        return self.dialog.exec()
+
+    def finish(self) -> None:
+        """The import is done: close the window as accepted."""
+        if not self._finished:
+            self._finished = True
+            self._timer.stop()
+            self.dialog.accept()
+
+    def _rejected(self) -> None:
+        if self._finished:
+            return
+        # Marked first, so a callback that ends the run by calling finish() does nothing.
+        self._finished = True
+        self._timer.stop()
+        self._on_cancel()

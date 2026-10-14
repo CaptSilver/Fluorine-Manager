@@ -206,5 +206,128 @@ class StoredWrapperOptionsTests(unittest.TestCase):
         self.assertFalse(missing.exists())
 
 
+class AskTextTests(unittest.TestCase):
+    def test_the_typed_text_is_returned_and_the_default_is_offered(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+
+        with mock.patch.object(QInputDialog, "getText", return_value=("typed", True)) as get:
+            self.assertEqual(qtui.ask_text(None, "t", "label", "preset"), "typed")
+        self.assertEqual(get.call_args.args[1:3], ("t", "label"))
+        self.assertEqual(get.call_args.kwargs["text"], "preset")
+
+    def test_cancel_is_none_and_an_empty_answer_is_an_empty_string(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+
+        with mock.patch.object(QInputDialog, "getText", return_value=("x", False)):
+            self.assertIsNone(qtui.ask_text(None, "t", "label"))
+        with mock.patch.object(QInputDialog, "getText", return_value=("", True)):
+            self.assertEqual(qtui.ask_text(None, "t", "label"), "")
+
+
+class FileDialogTests(unittest.TestCase):
+    def test_a_chosen_file_is_returned_and_cancel_is_none(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+
+        with mock.patch.object(QFileDialog, "getOpenFileName", return_value=("/a/b.erlist.json", "f")) as get:
+            self.assertEqual(qtui.choose_open_file(None, "t", "/start", "Lists (*.json)"), "/a/b.erlist.json")
+        self.assertEqual(get.call_args.args[1:], ("t", "/start", "Lists (*.json)"))
+        with mock.patch.object(QFileDialog, "getOpenFileName", return_value=("", "")):
+            self.assertIsNone(qtui.choose_open_file(None, "t", "/start", "f"))
+        with mock.patch.object(QFileDialog, "getSaveFileName", return_value=("/a/c.erlist.json", "f")) as save:
+            self.assertEqual(qtui.choose_save_file(None, "t", "/start/c.erlist.json", "f"), "/a/c.erlist.json")
+        self.assertEqual(save.call_args.args[1:3], ("t", "/start/c.erlist.json"))
+        with mock.patch.object(QFileDialog, "getSaveFileName", return_value=("", "")):
+            self.assertIsNone(qtui.choose_save_file(None, "t", "/start", "f"))
+
+
+class DeferredTests(unittest.TestCase):
+    def test_run_later_hands_the_callback_to_the_event_loop_with_no_delay(self) -> None:
+        from PyQt6.QtCore import QTimer
+
+        callback = lambda: None  # noqa: E731
+        with mock.patch.object(QTimer, "singleShot") as single:
+            qtui.run_later(callback)
+        single.assert_called_once_with(0, callback)
+
+    def test_open_url_asks_the_desktop_to_open_the_address(self) -> None:
+        from PyQt6.QtGui import QDesktopServices
+
+        with mock.patch.object(QDesktopServices, "openUrl") as opened:
+            qtui.open_url("https://www.nexusmods.com/eldenring/mods/510?tab=files")
+        self.assertEqual(opened.call_args.args[0].toString(), "https://www.nexusmods.com/eldenring/mods/510?tab=files")
+
+
+class FetchDialogTests(unittest.TestCase):
+    def make(self, lines=lambda: ["pack: requested"]):
+        calls = []
+        dialog = qtui.FetchDialog("Import", None, lines)
+        dialog.on_continue(lambda: calls.append("continue"))
+        dialog.on_cancel(lambda: calls.append("cancel"))
+        return dialog, calls
+
+    def button(self, dialog, text: str):
+        from PyQt6.QtWidgets import QPushButton
+
+        return next(b for b in dialog.dialog.findChildren(QPushButton) if b.text() == text)
+
+    def test_it_is_application_modal_and_shows_what_is_being_waited_for(self) -> None:
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        dialog, _calls = self.make(lambda: ["pack: requested", "erdyes: waiting for the browser click"])
+        dialog.refresh()
+        self.assertEqual(dialog.dialog.windowModality(), Qt.WindowModality.ApplicationModal)
+        self.assertEqual(
+            dialog.dialog.findChild(QPlainTextEdit).toPlainText(), "pack: requested\nerdyes: waiting for the browser click"
+        )
+
+    def test_the_two_buttons_are_continue_with_what_arrived_and_cancel(self) -> None:
+        dialog, _calls = self.make()
+        self.assertTrue(self.button(dialog, "Continue with what arrived"))
+        self.assertTrue(self.button(dialog, "Cancel"))
+
+    def test_continue_calls_back_and_leaves_the_dialog_open(self) -> None:
+        dialog, calls = self.make()
+        self.button(dialog, "Continue with what arrived").click()
+        self.assertEqual(calls, ["continue"])
+        self.assertEqual(dialog.dialog.result(), 0)
+
+    def test_cancel_calls_back_once_and_closes_the_dialog(self) -> None:
+        dialog, calls = self.make()
+        dialog.dialog.show()
+        self.button(dialog, "Cancel").click()
+        self.assertEqual(calls, ["cancel"])
+        self.assertFalse(dialog.dialog.isVisible())
+
+    def test_closing_the_window_is_a_cancel(self) -> None:
+        dialog, calls = self.make()
+        dialog.dialog.reject()
+        self.assertEqual(calls, ["cancel"])
+
+    def test_finish_accepts_and_a_later_close_is_not_a_cancel(self) -> None:
+        dialog, calls = self.make()
+        accepted = []
+        dialog.dialog.accepted.connect(lambda: accepted.append("accepted"))
+        dialog.finish()
+        dialog.dialog.reject()
+        self.assertEqual((calls, accepted), ([], ["accepted"]))
+
+    def test_finishing_from_inside_the_cancel_callback_is_harmless(self) -> None:
+        dialog, calls = self.make()
+        dialog.on_cancel(lambda: (calls.append("cancel"), dialog.finish()))
+        accepted = []
+        dialog.dialog.accepted.connect(lambda: accepted.append("accepted"))
+        dialog.dialog.reject()
+        self.assertEqual((calls, accepted), (["cancel"], []))
+
+    def test_exec_refreshes_first_and_returns_the_dialogs_answer(self) -> None:
+        dialog, _calls = self.make(lambda: ["a"])
+        with mock.patch.object(QDialog, "exec", return_value=1) as run:
+            self.assertEqual(dialog.exec(), 1)
+        run.assert_called_once_with()
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        self.assertEqual(dialog.dialog.findChild(QPlainTextEdit).toPlainText(), "a")
+
+
 if __name__ == "__main__":
     unittest.main()
