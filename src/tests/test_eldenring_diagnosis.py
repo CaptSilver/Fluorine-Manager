@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import tempfile
@@ -9,10 +10,12 @@ from pathlib import Path
 from unittest import mock
 
 import eldenring_testsupport as support
+from eldenring_testsupport import synthetic_pe
 
 PACKAGE = support.load_support("_eldenring_diagnosis_tests")
 deploy = support.module(PACKAGE, "deploy")
 diagnosis = support.module(PACKAGE, "diagnosis")
+generated = support.module(PACKAGE, "generated")
 hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
 kinds = support.module(PACKAGE, "kinds")
@@ -21,6 +24,7 @@ session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
 gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 
+TEMPLATE = "[PASSWORD]\ncooppassword = @COOP_PASSWORD@\n[SAVE]\nsave_file_extension = co2\n"
 LIVE = gamebuild.BuildId(
     exe="2.7.1.0", app="1.17.1", regulation="11711000", steam_buildid="25080141", regulation_sha="a" * 64
 )
@@ -70,6 +74,9 @@ class DiagnosisCase(unittest.TestCase):
         self.organizer = support.FakeOrganizer(self.tmp / "instance")
         self.paths = state.InstancePaths(self.organizer)
         self.game = FakeGame(self.install)
+        self.modlist = self.organizer.mod_list
+        self.modlist.add(generated.NAME, kind="generated")
+        self.keep_order = False
         self.identify = mock.patch.object(diagnosis.gamebuild, "identify", return_value=LIVE).start()
         self.addCleanup(mock.patch.stopall)
         self.put("eldenring.exe", b"MZ game")
@@ -94,7 +101,7 @@ class DiagnosisCase(unittest.TestCase):
         """An enabled native mod that asks for its config file to be deployed."""
         stem = Path(dll).stem
         mod = self.organizer.mod_list.add(
-            name, files={dll: b"MZ", f"mods/{stem}/config.ini": "a=1\n", f"mods/{stem}/x.ini": "b=2\n"}
+            name, files={dll: synthetic_pe(), f"mods/{stem}/config.ini": "a=1\n", f"mods/{stem}/x.ini": "b=2\n"}
         )
         kinds.set_kind(mod, kinds.NATIVE, native_dll=dll, deploy_config=list(config))
         return mod
@@ -102,17 +109,24 @@ class DiagnosisCase(unittest.TestCase):
     def adopt(self, *rels: str):
         return inventory.adopt(self.paths, self.game_dir, deploy.Manifest(), LIVE, list(rels))
 
+    def problems(self) -> list:
+        """A pass over the setup, with the generated mod back on top unless a test wants it elsewhere."""
+        if not self.keep_order and generated.NAME in self.modlist.order:
+            self.modlist.order.remove(generated.NAME)
+            self.modlist.order.append(generated.NAME)
+        return self.diagnosis.problems()
+
     def launcher(self, value: str):
         patcher = mock.patch.object(diagnosis.hardening, "state", return_value=value)
         patcher.start()
         return patcher
 
     def keys(self) -> list[str]:
-        return [problem.key for problem in self.diagnosis.problems()]
+        return [problem.key for problem in self.problems()]
 
     def one(self, key: str) -> diagnosis.Problem:
-        found = [problem for problem in self.diagnosis.problems() if problem.key == key]
-        self.assertEqual(len(found), 1, [problem.key for problem in self.diagnosis.problems()])
+        found = [problem for problem in self.problems() if problem.key == key]
+        self.assertEqual(len(found), 1, [problem.key for problem in self.problems()])
         return found[0]
 
 
@@ -145,17 +159,17 @@ class KeyTests(unittest.TestCase):
 
 class FolderRowTests(DiagnosisCase):
     def test_a_vanilla_folder_has_no_problems(self) -> None:
-        self.assertEqual(self.diagnosis.problems(), [])
+        self.assertEqual(self.problems(), [])
 
     def test_no_inventory_is_one_problem_with_the_adopt_fix(self) -> None:
         self.paths.vanilla_inventory.unlink()
-        (problem,) = self.diagnosis.problems()
+        (problem,) = self.problems()
         self.assertEqual((problem.key, problem.fix, problem.informational), ("VANILLA_UNKNOWN", "adopt", False))
         self.assertIn("Verify the game files in Steam first", problem.text)
 
     def test_a_damaged_inventory_says_so_and_offers_the_same_fix(self) -> None:
         self.paths.vanilla_inventory.write_text("{nope")
-        (problem,) = self.diagnosis.problems()
+        (problem,) = self.problems()
         self.assertEqual((problem.key, problem.fix), ("VANILLA_UNKNOWN", "adopt"))
         self.assertIn("vanilla-inventory.json", problem.text)
 
@@ -194,7 +208,7 @@ class FolderRowTests(DiagnosisCase):
     def test_a_moved_mtime_with_the_same_bytes_is_nothing_and_is_not_written_back(self) -> None:
         before = self.paths.vanilla_inventory.read_bytes()
         os.utime(self.game_dir / "eldenring.exe", ns=(1, 1))
-        self.assertEqual(self.diagnosis.problems(), [])
+        self.assertEqual(self.problems(), [])
         self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
 
     def test_reshade_links_are_an_informational_row_and_never_a_stray(self) -> None:
@@ -203,7 +217,7 @@ class FolderRowTests(DiagnosisCase):
         (shared / "ReShade64.dll").write_bytes(b"MZ reshade")
         (self.game_dir / "dxgi.dll").symlink_to(shared / "ReShade64.dll")
         self.recorded = self.adopt("eldenring.exe", "dxgi.dll")
-        (problem,) = self.diagnosis.problems()
+        (problem,) = self.problems()
         self.assertEqual((problem.key, problem.informational, problem.fix), ("RESHADE_PRESENT", True, None))
         self.assertIn(f"dxgi.dll -> {shared / 'ReShade64.dll'}", problem.text)
 
@@ -218,7 +232,7 @@ class FolderRowTests(DiagnosisCase):
         self.put("bink2w64.dll")
         before = (tree(self.install), self.paths.vanilla_inventory.read_bytes())
         with mock.patch.object(inventory, "write") as written, mock.patch.object(inventory, "adopt") as adopted:
-            self.diagnosis.problems()
+            self.problems()
         written.assert_not_called()
         adopted.assert_not_called()
         self.assertEqual((tree(self.install), self.paths.vanilla_inventory.read_bytes()), before)
@@ -236,11 +250,11 @@ class BuildRowTests(DiagnosisCase):
 
     def test_the_recorded_regulation_without_a_stamp_is_fine(self) -> None:
         self.paths.build_stamp.unlink()
-        self.assertEqual(self.diagnosis.problems(), [])
+        self.assertEqual(self.problems(), [])
 
     def test_a_patch_since_the_stamp_is_informational(self) -> None:
         state.write_build_stamp(self.paths, LIVE._replace(exe="2.6.0.0", steam_buildid="1", regulation_sha="c" * 64))
-        (problem,) = self.diagnosis.problems()
+        (problem,) = self.problems()
         self.assertEqual((problem.key, problem.informational), ("GAME_PATCHED", True))
 
     def test_regulation_that_moved_on_its_own_is_tampering_with_no_fix(self) -> None:
@@ -251,7 +265,7 @@ class BuildRowTests(DiagnosisCase):
 
     def test_a_damaged_stamp_adds_no_build_row_because_the_launch_names_it(self) -> None:
         self.paths.build_stamp.write_text("{nope")
-        self.assertEqual(self.diagnosis.problems(), [])
+        self.assertEqual(self.problems(), [])
 
     def test_a_game_outside_a_steam_library_has_no_build_rows(self) -> None:
         self.game = FakeGame(self.tmp / "elsewhere/ELDEN RING")
@@ -260,14 +274,14 @@ class BuildRowTests(DiagnosisCase):
         self.assertEqual(self.keys(), [])
 
     def test_the_build_is_identified_once_until_one_of_its_files_moves(self) -> None:
-        self.diagnosis.problems()
-        self.diagnosis.problems()
+        self.problems()
+        self.problems()
         self.assertEqual(self.identify.call_count, 1)
         self.put("regulation.bin", b"another regulation")
-        self.diagnosis.problems()
+        self.problems()
         self.assertEqual(self.identify.call_count, 2)
         self.set_buildid("25999999")
-        self.diagnosis.problems()
+        self.problems()
         self.assertEqual(self.identify.call_count, 3)
 
     def test_a_build_that_cannot_be_identified_leaves_the_inventory_rows_alone(self) -> None:
@@ -316,7 +330,7 @@ class UpdateRowTests(DiagnosisCase):
 class DeployRowTests(DiagnosisCase):
     def test_no_native_asking_for_anything_means_no_deploy_rows(self) -> None:
         self.put("start_protected_game.exe", b"MZ eac")
-        self.assertEqual(self.diagnosis.problems(), [])
+        self.assertEqual(self.problems(), [])
 
     def test_a_wanted_file_that_is_not_there_is_drift_with_the_sync_tool_and_the_launcher_must_be_hardened(self) -> None:
         self.put("start_protected_game.exe", b"MZ eac")
@@ -332,7 +346,7 @@ class DeployRowTests(DiagnosisCase):
         patcher = self.launcher(hardening.HARDENED)
         self.addCleanup(patcher.stop)
         deploy.sync(deploy.desired(self.organizer), self.paths, self.game_dir, launcher=lambda: hardening.HARDENED)
-        (note,) = self.diagnosis.problems()
+        (note,) = self.problems()
         self.assertEqual((note.key, note.informational), ("LAUNCHER_HARDENED", True))
         self.assertIn("Unharden before a Steam update", note.text)
 
@@ -383,7 +397,7 @@ class DeployRowTests(DiagnosisCase):
         self.native()
         self.put("start_protected_game.exe", b"MZ eac")
         before = tree(self.install)
-        self.diagnosis.problems()
+        self.problems()
         self.assertEqual(tree(self.install), before)
         self.assertFalse(self.paths.deploy_manifest.exists())
 
@@ -407,7 +421,7 @@ class LauncherRowTests(DiagnosisCase):
         for value in (hardening.VANILLA, hardening.ABSENT):
             patcher = self.launcher(value)
             try:
-                self.assertEqual(self.diagnosis.problems(), [])
+                self.assertEqual(self.problems(), [])
             finally:
                 patcher.stop()
 
@@ -463,7 +477,7 @@ class SessionRowTests(DiagnosisCase):
     def test_a_tripped_record_of_the_wrong_shape_is_not_a_row_and_does_not_raise(self) -> None:
         for odd in ("x", None, ["a"]):
             session.save_last_launch(self.paths, {"sentinel_tripped": odd})
-            self.assertEqual(self.diagnosis.problems(), [])
+            self.assertEqual(self.problems(), [])
         session.save_last_launch(self.paths, {"sentinel_tripped": {"quarantined": "x"}})
         self.assertIn("(not recorded)", self.one("SAVE_SENTINEL_TRIPPED").text)
 
@@ -486,7 +500,7 @@ class SessionRowTests(DiagnosisCase):
 
     def test_a_launch_that_went_ahead_is_nothing(self) -> None:
         session.save_last_launch(self.paths, {"report": {"outcome": "launched", "warnings": ["x"]}})
-        self.assertEqual(self.diagnosis.problems(), [])
+        self.assertEqual(self.problems(), [])
 
     def test_a_damaged_record_is_a_row_and_hides_nothing_else(self) -> None:
         self.paths.last_launch.parent.mkdir(parents=True, exist_ok=True)
@@ -497,11 +511,183 @@ class SessionRowTests(DiagnosisCase):
         self.assertIn("GAME_DIR_STRAYS", keys)
 
 
+class ModRowTests(DiagnosisCase):
+    def ersc(self, name: str = "Seamless Co-op", ini: str = TEMPLATE):
+        return self.modlist.add(
+            name, kind="ersc", files={"SeamlessCoop/ersc.dll": synthetic_pe(), "SeamlessCoop/ersc_settings.ini": ini}
+        )
+
+    def test_a_package_and_a_working_native_are_nothing(self) -> None:
+        self.modlist.add("pack", kind="package", files={"msg/x.dcx": b"x"})
+        mod = self.modlist.add("fine", kind="native", files={"mods/fine.dll": synthetic_pe()})
+        mod.setPluginSetting(kinds.PLUGIN, "native_dll", "mods/fine.dll")
+        self.assertEqual(self.problems(), [])
+
+    def test_mods_of_unknown_kind_are_listed_with_set_mod_kind(self) -> None:
+        self.modlist.add("mystery", kind="unknown", files={"readme.txt": b"x"})
+        problem = self.one("UNKNOWN_KIND")
+        self.assertEqual(problem.fix, "tool:kind")
+        self.assertIn("  mystery", problem.text)
+
+    def test_a_native_without_a_usable_dll_is_missing_its_dll(self) -> None:
+        self.modlist.add("broken", kind="native", files={"x.dll": b"MZ"})
+        problem = self.one("NATIVE_DLL_MISSING")
+        self.assertEqual(problem.fix, "tool:kind")
+        self.assertIn("broken", problem.text)
+
+    def test_a_dll_that_is_not_a_64_bit_dll_is_invalid_naming_the_file_and_why(self) -> None:
+        mod = self.modlist.add("bad", kind="native", files={"mods/bad.dll": b"MZ"})
+        mod.setPluginSetting(kinds.PLUGIN, "native_dll", "mods/bad.dll")
+        problem = self.one("NATIVE_DLL_INVALID")
+        self.assertIsNone(problem.fix)
+        self.assertIn("bad:", problem.text)
+        self.assertIn("mods/bad.dll", problem.text)
+
+    def test_the_generated_copy_of_ersc_is_checked_once_there_is_one(self) -> None:
+        self.ersc()
+        self.assertNotIn("NATIVE_DLL_INVALID", self.keys())
+        copy = Path(self.organizer.modsPath()) / generated.NAME / "SeamlessCoop/ersc.dll"
+        copy.parent.mkdir(parents=True)
+        copy.write_bytes(b"")
+        problem = self.one("NATIVE_DLL_INVALID")
+        self.assertIn("Seamless Co-op (generated copy)", problem.text)
+
+    def test_two_ersc_mods_are_a_row_and_no_other_co_op_row(self) -> None:
+        self.ersc("first")
+        self.ersc("second")
+        keys = self.keys()
+        self.assertIn("ERSC_DUPLICATE", keys)
+        self.assertNotIn("COOP_PASSWORD_EMPTY", keys)
+
+    def test_an_empty_co_op_password_is_informational_and_a_set_one_is_nothing(self) -> None:
+        self.ersc()
+        problem = self.one("COOP_PASSWORD_EMPTY")
+        self.assertTrue(problem.informational)
+        self.organizer.plugin_settings[(kinds.PLUGIN, "coop_password")] = "hunter2"
+        self.assertEqual(self.problems(), [])
+
+    def test_a_save_extension_other_than_co2_is_a_row_naming_the_mod(self) -> None:
+        self.organizer.plugin_settings[(kinds.PLUGIN, "coop_password")] = "pw"
+        self.ersc(ini=TEMPLATE.replace("co2", "sl2"))
+        problem = self.one("COOP_SAVE_EXTENSION")
+        self.assertIn("Seamless Co-op", problem.text)
+        self.assertIn("'sl2'", problem.text)
+
+    def test_item_spawners_are_a_row_naming_the_mod_and_file(self) -> None:
+        self.modlist.add("shop", kind="package", files={"mods/ErMerchant.DLL": b"x", "msg/a.dcx": b"x"})
+        problem = self.one("SPAWNER_ENABLED")
+        self.assertIn("shop: mods/ErMerchant.DLL", problem.text)
+
+    def test_a_mod_folder_that_cannot_be_read_says_spawners_were_not_looked_for(self) -> None:
+        self.modlist.add("shop", kind="package", files={"msg/a.dcx": b"x"})
+        real = os.walk
+
+        def deny(folder, onerror=None, **kwargs):
+            if str(folder).endswith("shop") and onerror is not None:
+                onerror(PermissionError(13, "denied", str(folder)))
+                return iter(())
+            return real(folder, onerror=onerror, **kwargs)
+
+        with mock.patch.object(diagnosis.doctor.os, "walk", deny):
+            problem = self.one("DIAGNOSE_FAILED")
+        self.assertIn("shop", problem.text)
+        self.assertIn("not looked for", problem.text)
+
+    def test_runtime_files_beside_a_native_are_informational_and_a_config_file_is_not_one(self) -> None:
+        mod = self.modlist.add(
+            "thing", kind="native",
+            files={"mods/Thing.dll": synthetic_pe(), "mods/Thing/config.ini": "a=1\n", "mods/Thing/log.txt": "run\n"},
+        )
+        mod.setPluginSetting(kinds.PLUGIN, "native_dll", "mods/Thing.dll")
+        mod.setPluginSetting(kinds.PLUGIN, "install_files", json.dumps(["mods/Thing.dll"]))
+        problem = self.one("NATIVE_RUNTIME_FILES")
+        self.assertTrue(problem.informational)
+        self.assertIn("thing: mods/Thing/log.txt", problem.text)
+        self.assertNotIn("config.ini", problem.text)
+
+    def test_a_native_with_nothing_recorded_about_its_install_is_not_judged(self) -> None:
+        mod = self.modlist.add("thing", kind="native", files={"mods/Thing.dll": synthetic_pe(), "mods/Thing/log.txt": "x"})
+        mod.setPluginSetting(kinds.PLUGIN, "native_dll", "mods/Thing.dll")
+        self.assertEqual(self.problems(), [])
+
+
+class RuleRowTests(DiagnosisCase):
+    def write_rules(self, rules: dict) -> None:
+        state.write_profile_rules(self.organizer.profilePath(), rules)
+
+    def test_no_rules_file_is_nothing(self) -> None:
+        self.assertEqual(self.problems(), [])
+
+    def test_rules_naming_mods_that_are_not_in_the_profile_are_listed(self) -> None:
+        self.modlist.add("a", kind="package")
+        self.write_rules({
+            "merges": [{"path": "msg/x.dcx", "strategy": "concat", "mods": ["a", "ghost"], "prefer": "a"}],
+            "prunes": [{"mod": "gone", "paths": ["x"]}],
+            "renames": [{"mod": "a", "paths": {"x": "y"}}],
+        })
+        text = self.one("RULE_NAMES_UNKNOWN_MOD").text
+        self.assertIn("names 'ghost'", text)
+        self.assertIn("a prune names 'gone'", text)
+        self.assertNotIn("'a'", text)
+
+    def test_a_disabled_mod_is_still_in_the_profile(self) -> None:
+        self.modlist.add("off", enabled=False, kind="package")
+        self.write_rules({"prunes": [{"mod": "off", "paths": ["x"]}]})
+        self.assertEqual(self.problems(), [])
+
+    def test_a_vanilla_ancestor_needs_an_entry_in_vanilla_sources_and_not_a_mod(self) -> None:
+        self.modlist.add("a", kind="package")
+        rule = {"path": "regulation.bin", "strategy": "param-rows", "mods": ["a"], "prefer": "a", "vanilla": {"mod": "ancestor"}}
+        self.write_rules({"merges": [rule]})
+        self.assertIn("needs the vanilla source 'ancestor'", self.one("RULE_NAMES_UNKNOWN_MOD").text)
+        self.write_rules({"merges": [rule], "vanilla_sources": {"ancestor": {"archive": "x.zip"}}})
+        self.assertEqual(self.problems(), [])
+
+    def test_a_damaged_rules_file_is_its_own_row(self) -> None:
+        state.profile_rules(self.organizer.profilePath()).write_text("{nope")
+        self.assertIn("eldenring.json", self.one("RULES_DAMAGED").text)
+
+
+class GeneratedRowTests(DiagnosisCase):
+    def build(self) -> Path:
+        mod_dir = Path(self.organizer.modsPath()) / generated.NAME
+        generated.build(mod_dir, self.paths.generated_state, [("msg/x.dcx", b"merged")], "fingerprint")
+        return mod_dir
+
+    def test_a_missing_or_disabled_generated_mod_points_at_the_ensure_fix(self) -> None:
+        self.modlist.active.discard(generated.NAME)
+        problem = self.one("MERGED_MOD_MISSING")
+        self.assertEqual(problem.fix, "ensure-generated")
+        self.assertIn("disabled", problem.text)
+        del self.modlist.mods[generated.NAME]
+        self.modlist.order.remove(generated.NAME)
+        self.assertIn("missing", self.one("MERGED_MOD_MISSING").text)
+
+    def test_an_enabled_mod_above_it_is_misplaced(self) -> None:
+        self.modlist.add("above", kind="package", files={"regulation.bin": b"x"})
+        self.keep_order = True
+        problem = self.one("MERGED_MOD_MISPLACED")
+        self.assertEqual(problem.fix, "ensure-generated")
+
+    def test_a_build_whose_files_are_intact_is_nothing(self) -> None:
+        self.build()
+        self.assertEqual(self.problems(), [])
+
+    def test_an_edited_output_is_corrupt_and_points_at_rebuild(self) -> None:
+        mod_dir = self.build()
+        (mod_dir / "msg/x.dcx").write_bytes(b"edited")
+        problem = self.one("MERGE_CORRUPT")
+        self.assertEqual(problem.fix, "tool:rebuild")
+
+    def test_a_mod_that_was_never_built_is_not_corrupt(self) -> None:
+        self.assertEqual(self.problems(), [])
+
+
 class FailureTests(DiagnosisCase):
     def test_a_check_that_raises_becomes_a_row_naming_it_and_does_not_stop_the_others(self) -> None:
         with mock.patch.object(diagnosis.inventory, "read", side_effect=RuntimeError("boom")):
             with self.assertLogs(diagnosis.log, "ERROR"):
-                (problem,) = self.diagnosis.problems()
+                (problem,) = self.problems()
         self.assertEqual(problem.key, "DIAGNOSE_FAILED")
         self.assertIn("_folder_rows", problem.text)
         self.assertIn("RuntimeError: boom", problem.text)
@@ -512,7 +698,7 @@ class FailureTests(DiagnosisCase):
         os.utime(self.game_dir / "steam_api64.dll", ns=(1, 1))
         with mock.patch.object(diagnosis.archives.state, "write_json", side_effect=OSError("disk full")):
             with self.assertLogs(diagnosis.archives.log, "WARNING"):
-                self.assertEqual(self.diagnosis.problems(), [])
+                self.assertEqual(self.problems(), [])
 
 
 if __name__ == "__main__":

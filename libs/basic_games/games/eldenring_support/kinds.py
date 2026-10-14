@@ -379,6 +379,18 @@ def recorded_deploy_config(mod) -> list[str] | None:
     return None
 
 
+def recorded_install_files(mod) -> list[str] | None:
+    """The files recorded when the mod was installed; None when nothing usable is recorded."""
+    value = _get(mod, KEY_INSTALL_FILES)
+    if not value:
+        return None
+    try:
+        listed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return listed if isinstance(listed, list) and all(isinstance(item, str) for item in listed) else None
+
+
 def install_files(mod_dir) -> list[str]:
     """Every file in the folder, relative and sorted, Mod Organizer's meta.ini left out."""
     base = Path(mod_dir)

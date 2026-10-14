@@ -405,6 +405,15 @@ class RecordOnInstallTests(RecordingCase):
         mod.setPluginSetting(kinds.PLUGIN, "kind", "banana")
         self.assertEqual(kinds.mod_kind(mod), kinds.PACKAGE)
 
+    def test_the_recorded_install_list_is_read_back_and_nothing_usable_reads_as_none(self) -> None:
+        mod = self.fake_mod({"regulation.bin": b"x", "msg/a.dcx": b"x"})
+        self.assertIsNone(kinds.recorded_install_files(mod))
+        kinds.record_on_install(mod)
+        self.assertEqual(kinds.recorded_install_files(mod), ["msg/a.dcx", "regulation.bin"])
+        for damaged in ("{nope", '{"a": 1}', "[1, 2]", ""):
+            mod.setPluginSetting(kinds.PLUGIN, "install_files", damaged)
+            self.assertIsNone(kinds.recorded_install_files(mod), damaged)
+
     def test_the_install_list_leaves_out_meta_ini_at_the_root_only(self) -> None:
         root = self.mod({"meta.ini": "x", "a/meta.ini": "x", "b.txt": "x"})
         self.assertEqual(kinds.install_files(root), ["a/meta.ini", "b.txt"])

@@ -16,7 +16,10 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import archives, deploy, gate, hardening, inventory, prepare, procs, saves, session, state
+from . import (
+    archives, coop_settings, deploy, doctor, fsprobe, gate, generated, hardening, inventory, kinds, mods, pe, prepare,
+    procs, saves, session, state,
+)
 from .ermlib import gamebuild, steam
 from .ermlib import paths as ermpaths
 from .ermlib.errors import ErmError
@@ -54,6 +57,19 @@ KEYS: tuple[str, ...] = (
     "STEAM_UPDATE_PENDING",
     "STEAM_UPDATE_FAILED",
     "SAVE_SENTINEL_TRIPPED",
+    "UNKNOWN_KIND",
+    "NATIVE_DLL_MISSING",
+    "NATIVE_DLL_INVALID",
+    "ERSC_DUPLICATE",
+    "COOP_PASSWORD_EMPTY",
+    "COOP_SAVE_EXTENSION",
+    "SPAWNER_ENABLED",
+    "NATIVE_RUNTIME_FILES",
+    "RULE_NAMES_UNKNOWN_MOD",
+    "RULES_DAMAGED",
+    "MERGED_MOD_MISSING",
+    "MERGED_MOD_MISPLACED",
+    "MERGE_CORRUPT",
 )
 
 TITLES: dict[str, str] = {
@@ -84,12 +100,26 @@ TITLES: dict[str, str] = {
     "STEAM_UPDATE_PENDING": "Steam has an update waiting",
     "STEAM_UPDATE_FAILED": "Steam's last update failed",
     "SAVE_SENTINEL_TRIPPED": "A modded session wrote the vanilla save",
+    "UNKNOWN_KIND": "Enabled mods whose kind is unknown",
+    "NATIVE_DLL_MISSING": "A native mod has no usable DLL",
+    "NATIVE_DLL_INVALID": "A DLL me3 would load is not a 64-bit Windows DLL",
+    "ERSC_DUPLICATE": "Two Seamless Co-op mods are enabled",
+    "COOP_PASSWORD_EMPTY": "The co-op password is empty",
+    "COOP_SAVE_EXTENSION": "Seamless Co-op would write into the vanilla save",
+    "SPAWNER_ENABLED": "An enabled mod can spawn items",
+    "NATIVE_RUNTIME_FILES": "A native mod's folder holds files its install did not",
+    "RULE_NAMES_UNKNOWN_MOD": "A merge rule names a mod that is not in the profile",
+    "RULES_DAMAGED": "The profile's merge rules cannot be read",
+    "MERGED_MOD_MISSING": "The generated mod is missing or disabled",
+    "MERGED_MOD_MISPLACED": "Another mod is above the generated mod",
+    "MERGE_CORRUPT": "The generated mod's files were changed",
 }
 
 # The guided fixes that need no tool of the plugin's own. The diagnose plugin
 # maps each name to the code that runs it; a name that starts with "tool:" opens
 # the Tools-menu entry of that name.
 ADOPT, QUARANTINE, READOPT, ACCEPT_UPDATE, REPIN = "adopt", "quarantine", "re-adopt", "accept-update", "re-pin"
+ENSURE_GENERATED = "ensure-generated"
 TOOL_HARDEN, TOOL_SYNC, TOOL_SAVES, TOOL_KIND, TOOL_REBUILD, TOOL_ME3 = (
     "tool:harden", "tool:sync", "tool:saves", "tool:kind", "tool:rebuild", "tool:me3",
 )
@@ -164,7 +194,7 @@ class Diagnosis:
         found: list[Problem] = []
         with archives.hash_cache(paths) as cache:
             context = self._context(paths, cache)
-            for group in (self._folder_rows, self._deploy_rows, self._session_rows):
+            for group in (self._folder_rows, self._deploy_rows, self._session_rows, self._mod_rows):
                 try:
                     found += group(context)
                 except Exception as exc:  # a broken check must not take the others down
@@ -404,3 +434,210 @@ class Diagnosis:
                 rows.append(Problem("ME3_INSTALL_FAILED", text, TOOL_ME3))
             rows.append(Problem("LAST_LAUNCH_VETOED", text))
         return rows
+
+    # -- the mod list ------------------------------------------------------------
+
+    def _mod_rows(self, context: Context) -> list[Problem]:
+        organizer = self._organizer
+        refs = [ref for ref in mods.enabled_mods(organizer) if ref.name != generated.NAME]
+        rows: list[Problem] = []
+        unknown = [ref.name for ref in refs if ref.kind == kinds.UNKNOWN]
+        if unknown:
+            rows.append(
+                Problem(
+                    "UNKNOWN_KIND",
+                    "These enabled mods are neither a package, a native DLL nor Seamless Co-op as far as the plugin "
+                    "can tell, so me3 does not load them:\n" + "\n".join(f"  {name}" for name in unknown),
+                    TOOL_KIND,
+                )
+            )
+        natives = [ref for ref in refs if ref.kind == kinds.NATIVE]
+        missing = [ref for ref in natives if not kinds.native_dll_ok(ref.path, ref.native_dll)]
+        if missing:
+            rows.append(
+                Problem(
+                    "NATIVE_DLL_MISSING",
+                    "These native mods have no DLL the plugin can use (the file is gone, or the recorded path "
+                    "leaves the mod's folder):\n"
+                    + "\n".join(f"  {ref.name}  (recorded: {ref.native_dll!r})" for ref in missing),
+                    TOOL_KIND,
+                )
+            )
+        invalid = self._invalid_dlls([ref for ref in natives if ref not in missing])
+        if invalid:
+            rows.append(
+                Problem(
+                    "NATIVE_DLL_INVALID",
+                    "me3 gives up on every mod, the save redirect included, when one native will not load. "
+                    "Reinstall these:\n" + "\n".join(f"  {line}" for line in invalid),
+                )
+            )
+        rows += self._coop_rows(refs)
+        listed = [(ref.name, ref.path) for ref in refs]
+        unreadable: list[str] = []
+        spawners = doctor.spawners_in(listed, unreadable)
+        if unreadable:
+            rows.append(
+                Problem(
+                    "DIAGNOSE_FAILED",
+                    "Could not read these, so item spawners in them were not looked for:\n"
+                    + "\n".join(f"  {where}" for where in unreadable),
+                )
+            )
+        if spawners:
+            rows.append(
+                Problem(
+                    "SPAWNER_ENABLED",
+                    "These ship an item spawner. Never take a save they touched to vanilla online:\n"
+                    + "\n".join(f"  {mod}: {rel}" for mod, rel in spawners),
+                )
+            )
+        rows += self._runtime_file_rows(natives)
+        rows += self._rule_rows()
+        rows += self._generated_rows(context)
+        return rows
+
+    def _invalid_dlls(self, natives: list[mods.ModRef]) -> list[str]:
+        """Every DLL me3 would be told to load that is not a non-empty PE32+ x86-64 DLL."""
+        checked = [(ref.name, ref.path / ref.native_dll) for ref in natives]
+        ersc = Path(self._organizer.modsPath()) / generated.NAME / generated.ERSC_DIR / "ersc.dll"
+        # Only once there is a copy to check: before the first Rebuild there is none, and that
+        # is the generated mod's own row.
+        if _enabled_ersc(self._organizer) is not None and fsprobe.kind(ersc) is not None:
+            checked.append(("Seamless Co-op (generated copy)", ersc))
+        lines = []
+        for label, path in checked:
+            verdict = pe.pe_dll_ok(path)
+            if not verdict:
+                lines.append(f"{label}: {path} {verdict.reason}")
+        return lines
+
+    def _coop_rows(self, refs: list[mods.ModRef]) -> list[Problem]:
+        try:
+            ersc = coop_settings.enabled_ersc(self._organizer)
+        except coop_settings.DuplicateErscError as exc:
+            return [Problem("ERSC_DUPLICATE", str(exc))]
+        if ersc is None:
+            return []
+        rows = []
+        if not (self._organizer.pluginSetting(kinds.PLUGIN, prepare.COOP_PASSWORD_SETTING) or ""):
+            rows.append(
+                Problem(
+                    "COOP_PASSWORD_EMPTY",
+                    "The co-op password is empty, so anyone can join your session. Set it in the plugin's "
+                    "settings.",
+                    informational=True,
+                )
+            )
+        try:
+            text = coop_settings.source_ini(self._organizer)
+            extension = coop_settings.save_extension(text) if text is not None else "co2"
+        except coop_settings.CoopSettingsError as exc:
+            return rows + [Problem("COOP_SAVE_EXTENSION", f"The Seamless Co-op settings cannot be checked: {exc}")]
+        if extension != "co2":
+            rows.append(
+                Problem(
+                    "COOP_SAVE_EXTENSION",
+                    f"{ersc.name}'s {coop_settings.INI_NAME} sets save_file_extension to {extension!r}, not co2. "
+                    "The co-op character would be written into the vanilla save file. Set it back in that file.",
+                )
+            )
+        return rows
+
+    def _runtime_file_rows(self, natives: list[mods.ModRef]) -> list[Problem]:
+        """Files a native's folder holds that its install did not bring and that are not config."""
+        modlist = self._organizer.modList()
+        lines = []
+        for ref in natives:
+            recorded = kinds.recorded_install_files(modlist.getMod(ref.name))
+            if recorded is None:
+                continue
+            extra = [
+                rel for rel in kinds.install_files(ref.path)
+                if rel not in recorded and not kinds.is_config_file(rel.rsplit("/", 1)[-1])
+            ]
+            lines += [f"  {ref.name}: {rel}" for rel in extra]
+        if not lines:
+            return []
+        return [
+            Problem(
+                "NATIVE_RUNTIME_FILES",
+                "These were written by the mods while they ran. They are not part of the lockstep digest:\n"
+                + "\n".join(lines),
+                informational=True,
+            )
+        ]
+
+    def _rule_rows(self) -> list[Problem]:
+        try:
+            rules = state.read_profile_rules(self._organizer.profilePath())
+        except state.StateError as exc:
+            return [Problem("RULES_DAMAGED", f"{exc}\nFix or remove the file.")]
+        profile = set(self._organizer.modList().allMods())
+        lines = []
+        for rule in rules["merges"]:
+            for name in rule["mods"] + [rule["prefer"]]:
+                if name not in profile:
+                    lines.append(f"  merge of {rule['path']} names {name!r}, which is not in the profile")
+            vanilla = rule.get("vanilla")
+            ancestor = vanilla.get("mod") if isinstance(vanilla, dict) else None
+            if ancestor and ancestor not in rules["vanilla_sources"]:
+                lines.append(f"  merge of {rule['path']} needs the vanilla source {ancestor!r}, which has no entry")
+        for table in ("prunes", "renames"):
+            for rule in rules[table]:
+                if rule["mod"] not in profile:
+                    lines.append(f"  a {table[:-1]} names {rule['mod']!r}, which is not in the profile")
+        if not lines:
+            return []
+        return [
+            Problem(
+                "RULE_NAMES_UNKNOWN_MOD",
+                "A rule in the profile's eldenring.json names a mod that is not there. A merge with such a rule "
+                "stops at launch:\n" + "\n".join(lines),
+            )
+        ]
+
+    def _generated_rows(self, context: Context) -> list[Problem]:
+        placement = mods.placement(self._organizer, generated.NAME)
+        if placement in (mods.ABSENT, mods.DISABLED):
+            what = "missing" if placement == mods.ABSENT else "disabled"
+            return [
+                Problem(
+                    "MERGED_MOD_MISSING",
+                    f"The {generated.NAME} mod is {what}. Without it the merged files and Seamless Co-op are "
+                    "not loaded.",
+                    ENSURE_GENERATED,
+                )
+            ]
+        if placement == mods.BELOW_ANOTHER:
+            return [
+                Problem(
+                    "MERGED_MOD_MISPLACED",
+                    f"Another enabled mod is above {generated.NAME}, so its copy of a merged file could win.",
+                    ENSURE_GENERATED,
+                )
+            ]
+        recorded = state.read_cache(context.paths.generated_state).get("fingerprint")
+        mod_dir = Path(self._organizer.modsPath()) / generated.NAME
+        # The fingerprint of the inputs needs the views built; what can be told without it
+        # is whether the files are still the ones recorded.
+        verdict = None
+        if isinstance(recorded, str):
+            verdict = generated.verify(mod_dir, context.paths.generated_state, recorded, context.cache)
+        if verdict == generated.CORRUPT:
+            return [
+                Problem(
+                    "MERGE_CORRUPT",
+                    f"The files of the {generated.NAME} mod are not the ones its last build recorded.",
+                    TOOL_REBUILD,
+                )
+            ]
+        return []
+
+
+def _enabled_ersc(organizer):
+    """The enabled Seamless Co-op mod, None when there is none or two (the duplicate has its own row)."""
+    try:
+        return coop_settings.enabled_ersc(organizer)
+    except coop_settings.DuplicateErscError:
+        return None
