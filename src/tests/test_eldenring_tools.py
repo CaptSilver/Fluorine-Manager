@@ -284,7 +284,7 @@ class SaveToolsTests(SaveToolsCase):
 
     def test_keep_moves_the_snapshot_and_warns_about_going_online(self) -> None:
         self.pend()
-        with self.choose(1):
+        with self.choose(1), mock.patch.object(session.procs, "game_running", return_value=[]):
             self.tool.display()
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
         self.assertTrue((self.paths.save_backups / STAMP / "ER0000.sl2").is_file())
