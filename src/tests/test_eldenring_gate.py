@@ -1177,6 +1177,148 @@ class SweepTests(GateCase):
         self.assertEqual(tree(self.install), self.game_tree)
 
 
+class GameFolderSweepTests(GateCase):
+    """After a session the gate holds Game/ to the inventory once more, reading only."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        (self.install / "Game/regulation.bin").write_bytes(b"vanilla regulation")
+        self.live = LIVE._replace(regulation_sha=hashlib.sha256(b"vanilla regulation").hexdigest())
+        (self.library / "steamapps/appmanifest_1245620.acf").write_text(
+            '"AppState"\n{\n\t"buildid"\t\t"%s"\n}\n' % LIVE.steam_buildid
+        )
+        self.recorded = inventory.adopt(
+            self.paths, self.install / "Game", deploy.Manifest(), self.live, ["eldenring.exe"]
+        )
+        self.game_tree = tree(self.install)
+        self.assertTrue(self.launch(), self.vetoes)
+
+    def fake_prepare(self, notify):
+        prepared = super().fake_prepare(notify)
+        prepared.live = self.live
+        return prepared
+
+    def put(self, rel: str, data: bytes = b"x") -> None:
+        path = self.install / "Game" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        self.game_tree = tree(self.install)
+
+    def finish(self) -> None:
+        self.gate.finished(str(self.binary), 0)
+
+    def folder_modals(self) -> list[str]:
+        return [text for title, text in self.modals if title == gate.FOLDER_TITLE]
+
+    def test_a_session_that_left_game_alone_says_nothing(self) -> None:
+        self.finish()
+        self.assertEqual(self.modals, [])
+
+    def test_a_file_written_outside_any_owned_folder_is_reported_and_not_touched(self) -> None:
+        self.put("mods/x.log")
+        self.finish()
+        (text,) = self.folder_modals()
+        self.assertIn("  mods/x.log  (new)", text)
+        self.assertIn("Do not press Play in Steam", text)
+        self.assertIn("quarantine-game", text)
+        self.assertEqual((self.install / "Game/mods/x.log").read_bytes(), b"x")
+
+    def test_what_a_dll_writes_in_a_folder_the_manifest_owns_is_not_reported(self) -> None:
+        manifest = deploy.Manifest({"mods/Thing/config.ini": deploy.Entry("0" * 64, 4, "thing")}, ["mods/Thing"])
+        deploy.write_manifest(self.paths, manifest)
+        self.put("mods/Thing/config.ini", b"rewritten\n")
+        self.put("mods/Thing/log.txt")
+        self.finish()
+        self.assertEqual(self.folder_modals(), [])
+
+    def test_runtime_noise_is_not_reported(self) -> None:
+        self.put("SeamlessCoop/crashdumps/x.dmp")
+        self.put("vkd3d-proton.cache.write")
+        self.finish()
+        self.assertEqual(self.folder_modals(), [])
+
+    def test_a_changed_vanilla_file_and_a_removed_one_are_reported(self) -> None:
+        self.put("eldenring.exe", b"MZ patched under the game")
+        os.utime(self.install / "Game/eldenring.exe", ns=(1, 1))
+        self.game_tree = tree(self.install)
+        self.finish()
+        (text,) = self.folder_modals()
+        self.assertIn("eldenring.exe  (changed)", text)
+
+    def test_regulation_bin_saved_in_place_while_the_game_ran_is_reported(self) -> None:
+        self.put("regulation.bin", b"saved by a tool while the game ran")
+        self.finish()
+        (text,) = self.folder_modals()
+        self.assertIn("regulation.bin  (not the file the launch started with)", text)
+
+    def test_a_removed_regulation_bin_is_reported_too(self) -> None:
+        (self.install / "Game/regulation.bin").unlink()
+        self.game_tree = tree(self.install)
+        self.finish()
+        self.assertIn("regulation.bin", self.folder_modals()[0])
+
+    def test_the_inventory_is_never_written_by_the_sweep_not_even_to_refresh_a_time(self) -> None:
+        before = self.paths.vanilla_inventory.read_bytes()
+        os.utime(self.install / "Game/eldenring.exe", ns=(1, 1))
+        self.game_tree = tree(self.install)
+        self.finish()
+        self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+        self.assertEqual(self.folder_modals(), [])
+
+    def test_a_build_that_moved_during_the_session_is_left_to_the_next_launch(self) -> None:
+        (self.library / "steamapps/appmanifest_1245620.acf").write_text(
+            '"AppState"\n{\n\t"buildid"\t\t"99999999"\n}\n'
+        )
+        self.put("bink2w64.dll")
+        self.finish()
+        self.assertEqual(self.folder_modals(), [])
+
+    def test_no_inventory_means_nothing_to_hold_it_to(self) -> None:
+        self.paths.vanilla_inventory.unlink()
+        self.put("bink2w64.dll")
+        self.finish()
+        self.assertEqual(self.folder_modals(), [])
+
+    def test_it_runs_while_the_game_is_still_up_because_it_only_reads(self) -> None:
+        self.up = [(7, "eldenring.exe")]
+        self.put("bink2w64.dll")
+        self.finish()
+        self.assertEqual(len(self.folder_modals()), 1)
+
+    def test_it_runs_even_when_the_save_check_failed(self) -> None:
+        self.put("bink2w64.dll")
+        with mock.patch.object(session, "compare_sentinel", side_effect=RuntimeError("boom")):
+            self.finish()
+        self.assertEqual(len(self.folder_modals()), 1)
+        self.assertTrue(any("could not check your vanilla save" in text.replace("\n", " ") for _, text in self.modals))
+
+    def test_a_failure_in_it_is_shown_and_never_raised(self) -> None:
+        with mock.patch.object(inventory, "check", side_effect=RuntimeError("boom")):
+            self.finish()
+        (text,) = self.folder_modals()
+        self.assertIn("could not check the game folder", text.replace("\n", " "))
+        self.assertIn("boom", text)
+        self.assertTrue(any("boom" in w for w in self.warnings))
+
+    def test_a_binary_that_is_not_me3_or_a_session_this_process_did_not_start_is_ignored(self) -> None:
+        self.put("bink2w64.dll")
+        self.gate.finished("/usr/bin/xterm", 0)
+        self.new_gate().finished(str(self.binary), 0)
+        self.assertEqual(self.folder_modals(), [])
+
+    def test_the_problems_listeners_are_told_once_the_sweep_is_over(self) -> None:
+        before = self.invalidations
+        self.finish()
+        self.assertEqual(self.invalidations, before + 1)
+
+    def test_game_is_not_written_by_the_sweep(self) -> None:
+        self.put("bink2w64.dll")
+        before = tree(self.install)
+        self.finish()
+        self.assertEqual(tree(self.install), before)
+
+
 class FirstLaunchSweepTests(GateCase):
     def test_a_save_the_session_creates_in_a_folder_that_did_not_exist_is_quarantined(self) -> None:
         # No save folder at all before the launch, as on a machine that never

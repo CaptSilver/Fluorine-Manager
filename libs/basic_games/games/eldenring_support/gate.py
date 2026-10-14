@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, deploy, doctor, hardening, me3, me3_host, pe, prepare as preparing, problems, procs, saves,
-    session, state,
+    archives, deploy, doctor, hardening, inventory, me3, me3_host, pe, prepare as preparing, problems, procs,
+    saves, session, state,
 )
 from .ermlib import steam
 from .ermlib.errors import ErmError
@@ -29,6 +29,7 @@ from .veto import Veto
 
 TITLE = "Elden Ring launch blocked"
 SESSION_TITLE = "Elden Ring: save file"
+FOLDER_TITLE = "Elden Ring: game folder"
 
 # Problem keys. The diagnose plugin gives each a stable integer; the names are
 # what last-launch.json records.
@@ -275,14 +276,24 @@ class LaunchGate:
             stamped = state.read_build_stamp(paths)
         except state.StateError:
             return False  # preparing the mods refuses a damaged stamp
+        buildid = self._buildid()
+        return stamped is not None and buildid is not None and buildid != stamped.steam_buildid
+
+    def _buildid(self) -> str | None:
+        """Steam's build id for the game, None when it cannot be read.
+
+        None is also what a missing or zero id gives: preparing the mods
+        refuses a build it cannot identify, and the callers here only need to
+        know whether the build moved.
+        """
         library = self._library()
-        if stamped is None or library is None:
-            return False
+        if library is None:
+            return None
         try:
             buildid = str(steam.read_appmanifest(library).get("buildid", "") or "")
         except (OSError, ValueError):
-            return False  # preparing the mods refuses a build it cannot identify
-        return buildid not in ("", "0") and buildid != stamped.steam_buildid
+            return None
+        return buildid if buildid not in ("", "0") else None
 
     def _load(self, paths: state.InstancePaths) -> dict:
         try:
@@ -593,7 +604,10 @@ class LaunchGate:
     def finished(self, binary: str, exit_code: int) -> None:
         if not self._game.isActive():
             return
+        ours = False
         try:
+            # Asked before the sweep, which forgets the session it settles.
+            ours = self._session_stamp is not None and self._mode(binary) == ME3
             self._sweep(binary, exit_code)
         except Exception:
             detail = traceback.format_exc()
@@ -605,6 +619,69 @@ class LaunchGate:
                     "not press Play in Steam until you have compared ER0000.sl2 with "
                     "your backup.\n\n" + detail,
                 )
+        if ours:
+            self._sweep_game_folder()
+            self._problems_changed()
+
+    def _sweep_game_folder(self) -> None:
+        """Hold Game/ to the inventory once more, now that the session is over.
+
+        A DLL that wrote somewhere other than its own mods/<Name>/, or a tool
+        that saved regulation.bin in place while the game ran, would otherwise
+        wait for the next me3 launch to be seen, and a Steam Play before that
+        runs Easy Anti-Cheat over it. Reads only: the fix is the Problems
+        list's, on a click.
+        """
+        try:
+            text = self._game_folder_report()
+        except Exception:
+            detail = traceback.format_exc()
+            self._warn(f"Elden Ring: the post-session game folder check failed\n{detail}")
+            text = (
+                "Fluorine could not check the game folder after the session. Do not press Play in Steam "
+                "until you have verified the game files there.\n\n" + detail
+            )
+        if text:
+            with contextlib.suppress(Exception):
+                self._show_modal(FOLDER_TITLE, text)
+
+    def _game_folder_report(self) -> str | None:
+        """What changed in Game/ since the launch, as the modal's text; None when nothing did."""
+        paths = state.InstancePaths(self._organizer)
+        vanilla = inventory.read(paths)
+        buildid = self._buildid()
+        if vanilla is None or buildid is None or inventory.build_changed(vanilla, buildid):
+            return None  # nothing to hold it to, or Steam moved the build: the next launch sorts that out
+        game_dir = Path(self._game.dataDirectory().absolutePath())
+        manifest = deploy.read_manifest(paths)
+        lines: list[str] = []
+        with archives.hash_cache(paths) as cache:
+            found = inventory.check(
+                game_dir, manifest, vanilla, buildid,
+                desired=inventory.desired_shas(self._desired()), cache=cache,
+            )
+            lines += [f"  {rel}  (new)" for rel in found.strays]
+            lines += [f"  {rel} -> {target}  (a link; Wine follows it)" for rel, target in found.symlinks]
+            lines += [f"  {rel}  (cannot be read)" for rel in found.unreadable]
+            lines += [f"  {rel}  (changed)" for rel in found.changed]
+            lines += [f"  {rel}  (gone)" for rel in found.removed]
+            stamped = state.read_build_stamp(paths)
+            expected = stamped.regulation_sha if stamped is not None else vanilla.regulation_sha
+            try:
+                regulation = state.cached_sha256(cache, game_dir / "regulation.bin")
+            except OSError:
+                regulation = None
+            if regulation != expected:
+                lines.append("  regulation.bin  (not the file the launch started with)")
+        if not lines:
+            return None
+        return (
+            "These changed in Game/ while the game ran. A Steam Play starts Easy Anti-Cheat over whatever "
+            "is there, which is how bans happen:\n" + "\n".join(lines) + "\n\n"
+            "Do not press Play in Steam yet. Open the Problems list (the warning icon in the toolbar): its "
+            "fix moves new files to this instance's eldenring/quarantine-game folder, and Steam's \"Verify "
+            "integrity of game files\" puts back what changed."
+        )
 
     def _sweep(self, binary: str, exit_code: int) -> None:
         if self._session_stamp is None or self._mode(binary) != ME3:
