@@ -7,6 +7,7 @@ import unicodedata
 from pathlib import Path
 
 from . import atomic, me3_host
+from .ermlib import paths as ermpaths
 from .state import InstancePaths
 
 PROFILE_VERSION = "v1"
@@ -102,12 +103,15 @@ def _is_vanilla_save(name: str) -> bool:
 
 
 def _checked_savefile(name: str) -> str:
-    # unicodedata "Cc" covers DEL and the C1 range, which me3's is_control also rejects.
+    # unicodedata "Cc" covers DEL and the C1 range, which me3's is_control also
+    # rejects. "Cs" is a lone surrogate: it has no UTF-8 spelling, so it would
+    # pass every other check and then fail in write_profile with a
+    # UnicodeEncodeError that does not name the key.
     bad = sorted(
         {
             char
             for char in name
-            if char in _RESERVED_SAVEFILE_CHARS or unicodedata.category(char) == "Cc"
+            if char in _RESERVED_SAVEFILE_CHARS or unicodedata.category(char) in ("Cc", "Cs")
         }
     )
     if not name or bad:
@@ -121,6 +125,18 @@ def _checked_savefile(name: str) -> str:
             "(ER0000), which a modded session must not write"
         )
     return name
+
+
+def savefile(organizer) -> str:
+    """The save file name every me3 launch writes instead of ER0000.sl2.
+
+    Always the modded save, with or without Seamless Co-op: its own .co2
+    redirect takes precedence when it is loaded, and this name covers the case
+    where it declines the game build. The value is a constant today; it still
+    goes through the checks render applies, so a bad edit fails here, naming
+    the key, and not in me3. `organizer` is not used.
+    """
+    return _checked_savefile(ermpaths.MODDED_SAVE_NAME)
 
 
 def render(
@@ -145,3 +161,47 @@ def render(
 
 def write_profile(path: Path, text: str) -> None:
     atomic.write_bytes_atomic(path, text.encode("utf-8"))
+
+
+_SPACE_CONTROLS = "\t\n\v\f\r\x85"
+
+
+def _is_space(char: str) -> bool:
+    # QChar::isSpace: the separator categories plus these control characters.
+    return char in _SPACE_CONTROLS or unicodedata.category(char).startswith("Z")
+
+
+def split_command(line: str) -> list[str]:
+    """`line` split into arguments the way QProcess::splitCommand does.
+
+    Fluorine hands the entry's arguments to QProcess, and the launch gate has
+    to compare what arrives with entry_args. PyQt6 does not bind
+    splitCommand, so this follows its rules: arguments are separated by
+    whitespace outside double quotes, quotes group and are dropped, an empty
+    pair of quotes makes no argument, and three quotes in a row are one
+    literal quote.
+    """
+    arguments: list[str] = []
+    current: list[str] = []
+    in_quote = False
+    quotes = 0
+    for char in line:
+        if char == '"':
+            quotes += 1
+            if quotes == 3:
+                quotes = 0
+                current.append('"')
+            continue
+        if quotes:
+            if quotes == 1:
+                in_quote = not in_quote
+            quotes = 0
+        if not in_quote and _is_space(char):
+            if current:
+                arguments.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+    if current:
+        arguments.append("".join(current))
+    return arguments

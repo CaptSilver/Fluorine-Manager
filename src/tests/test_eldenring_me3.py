@@ -17,6 +17,7 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_me3_tests")
 me3 = support.module(PACKAGE, "me3")
+paths = support.module(PACKAGE, "ermlib.paths")
 state = support.module(PACKAGE, "state")
 
 
@@ -122,7 +123,7 @@ class RenderTests(Me3Case):
             me3.render([("Mod", Path("/tmp/mods/a\x7fb"))], [], None)
 
     def test_unusable_savefile_names_are_refused_and_the_key_is_named(self) -> None:
-        for bad in ("", "a/b", "a:b", 'a"b', "a|b", "a\nb", "a\x7fb", "a\x85b"):
+        for bad in ("", "a/b", "a:b", 'a"b', "a|b", "a\nb", "a\x7fb", "a\x85b", "a\ud800b", "\udcff"):
             with self.assertRaises(ValueError, msg=repr(bad)) as caught:
                 me3.render([], [], bad)
             self.assertIn("savefile", str(caught.exception))
@@ -208,6 +209,81 @@ class WriteProfileTests(Me3Case):
         me3.write_profile(self.paths.current_me3, "two\n")
         self.assertEqual(self.paths.current_me3.read_text(), "two\n")
         self.assertEqual([p.name for p in self.paths.root.iterdir()], ["current.me3"])
+
+
+class SavefileTests(Me3Case):
+    def test_it_is_the_modded_save_with_no_extension(self) -> None:
+        self.assertEqual(me3.savefile(object()), "ER0000_modded")
+        self.assertEqual(me3.savefile(object()), paths.MODDED_SAVE_NAME)
+
+    def test_it_does_not_depend_on_the_organizer_or_on_seamless_coop(self) -> None:
+        # The key stays when ERSC is enabled: ERSC's own .co2 redirect wins
+        # when it loads, and this name covers an ERSC that declines the build.
+        self.assertEqual(me3.savefile(None), me3.savefile(types.SimpleNamespace(ersc=True)))
+
+    def test_the_value_is_checked_when_asked_not_when_rendered(self) -> None:
+        for bad in ("ER0000", "ER0000.sl2", "a/b", "", "a\ud800b"):
+            with mock.patch.object(paths, "MODDED_SAVE_NAME", bad):
+                with self.assertRaises(ValueError, msg=repr(bad)) as caught:
+                    me3.savefile(object())
+            self.assertIn("savefile", str(caught.exception))
+
+    def test_a_lone_surrogate_is_refused_before_it_can_reach_the_file(self) -> None:
+        with mock.patch.object(paths, "MODDED_SAVE_NAME", "ER0000_\ud800"):
+            with self.assertRaises(ValueError) as caught:
+                me3.savefile(object())
+        self.assertIn("savefile", str(caught.exception))
+        # And render alone would have raised a ValueError naming the key, not
+        # the UnicodeEncodeError write_profile used to be the first to raise.
+        with self.assertRaises(ValueError):
+            me3.render([], [], "ER0000_\ud800")
+
+    def test_the_rendered_profile_carries_it(self) -> None:
+        text = me3.render([], [], me3.savefile(object()))
+        self.assertEqual(tomllib.loads(text)["savefile"], "ER0000_modded")
+
+
+class SplitCommandTests(Me3Case):
+    LINES = [
+        "",
+        "   ",
+        "a",
+        "a b  c",
+        "\ta\tb\n",
+        '"a b" c',
+        'a "b c" d',
+        'x"a b"y z',
+        '""',
+        'a "" b',
+        '"a b',
+        'a"',
+        '"""',
+        'a """ b',
+        '"""a b"""',
+        '""""',
+        'a\u00a0b',
+        'a\u2028b "c\u00a0d"',
+        '--windows-binaries-dir "/d/with space/me3/windows-bin" launch -p "/i/My Instance/eldenring/current.me3"',
+    ]
+
+    def test_it_splits_like_qt_does(self) -> None:
+        for line in self.LINES:
+            with self.subTest(line=line):
+                self.assertEqual(me3.split_command(line), split_like_fluorine(line, self.tmp))
+
+    def test_the_canonical_entry_line_splits_into_unquoted_paths(self) -> None:
+        line = " ".join(me3.entry_args(self.paths, self.game_dir))
+        self.assertEqual(
+            me3.split_command(line),
+            [
+                "--windows-binaries-dir", str(self.data_home / "me3/windows-bin"),
+                "launch",
+                "-p", str(self.base / "eldenring/current.me3"),
+                "-g", "eldenring",
+                "-e", str(self.game_dir / "eldenring.exe"),
+                "--online", "false",
+            ],
+        )
 
 
 if __name__ == "__main__":
