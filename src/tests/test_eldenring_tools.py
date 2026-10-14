@@ -141,7 +141,7 @@ class CreatePluginsTests(ToolCase):
             [type(plugin).__name__ for plugin in plugins],
             [
                 "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
-                "HardenTool",
+                "HardenTool", "SyncDeployedTool",
             ],
         )
 
@@ -861,6 +861,84 @@ class HardenToolDeployedTests(HardenToolCase):
         self.drive(pick=0)
         self.assertTrue(self.deployed.exists())
         self.assertEqual((self.launcher_bytes(), self.locked), (GAME, True))
+
+
+
+class SyncDeployedToolTests(HardenToolCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.tool = tools.SyncDeployedTool()
+        self.tool.init(self.organizer)
+        self.paths = state.InstancePaths(self.organizer)
+        self.mod = self.modlist.add(
+            "Thing mod", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n"}
+        )
+        kinds.set_kind(self.mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=["mods/Thing/config.ini"])
+        self.deployed = self.game_dir / "mods/Thing/config.ini"
+
+    def run_tool(self) -> None:
+        self.tool.display()
+
+    def test_it_is_named_and_limited_to_the_game(self) -> None:
+        self.assertEqual(self.tool.displayName(), "Elden Ring: Sync deployed files…")
+        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
+
+    def test_with_nothing_to_do_it_says_so_and_changes_nothing(self) -> None:
+        self.modlist.active.discard("Thing mod")
+        self.run_tool()
+        self.assertIn("already holds exactly", self.shown()[0])
+        self.assertFalse((self.game_dir / "mods").exists())
+
+    def test_under_a_hardened_launcher_it_copies_and_lists_what_it_did(self) -> None:
+        self.harden_by_hand()
+        self.run_tool()
+        self.assertEqual(self.deployed.read_text(), "a=1\n")
+        self.assertIn("Copied mods/Thing/config.ini", self.shown()[0])
+        self.assertEqual(list(deploy.read_manifest(self.paths).files), ["mods/Thing/config.ini"])
+        self.assertEqual(self.heard, [1])
+
+    def test_an_unhardened_launcher_is_refused_with_the_harden_tool_named_and_nothing_copied(self) -> None:
+        self.run_tool()
+        [text] = self.shown("critical")
+        self.assertIn("Harden/Unharden launcher", text)
+        self.assertFalse((self.game_dir / "mods").exists())
+        self.assertEqual(self.heard, [1])
+
+    def test_a_file_the_dll_rewrote_is_kept_and_copied_again(self) -> None:
+        self.harden_by_hand()
+        self.run_tool()
+        self.deployed.write_text("written by the DLL\n")
+        SHOWN.clear()
+        self.run_tool()
+        self.assertEqual(self.deployed.read_text(), "a=1\n")
+        self.assertIn("Kept mods/Thing/config.ini", self.shown()[0])
+
+    def test_a_disabled_native_is_removed_without_a_hardened_launcher(self) -> None:
+        self.harden_by_hand()
+        self.run_tool()
+        self.modlist.active.discard("Thing mod")
+        self.harden_by_hand(locked=False, launcher=EAC)
+        SHOWN.clear()
+        self.run_tool()
+        self.assertFalse(self.deployed.exists())
+        self.assertIn("Removed mods/Thing/config.ini", self.shown()[0])
+
+    def test_a_running_game_is_refused_and_nothing_is_touched(self) -> None:
+        self.harden_by_hand()
+        self.up = [(4242, "eldenring.exe")]
+        with mock.patch.object(tools.procs, "game_running", return_value=self.up):
+            self.run_tool()
+        self.assertIn("eldenring.exe (pid 4242)", self.shown("critical")[0])
+        self.assertFalse((self.game_dir / "mods").exists())
+        self.assertEqual(self.heard, [1])
+
+    def test_a_mod_list_that_cannot_be_deployed_is_explained(self) -> None:
+        self.harden_by_hand()
+        self.mod.setPluginSetting(kinds.PLUGIN, "deploy_config", json.dumps(["mods/Thing/x.dll"]))
+        self.run_tool()
+        [text] = self.shown("critical")
+        self.assertIn("x.dll", text)
+        self.assertIn("Set mod kind", text)
 
 
 if __name__ == "__main__":

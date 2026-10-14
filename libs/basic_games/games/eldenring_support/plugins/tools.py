@@ -13,8 +13,8 @@ from PyQt6.QtWidgets import QMessageBox
 import mobase
 
 from .. import (
-    archives, deploy, fsprobe, gate, generated, hardening, importer, kinds, me3_host, problems, qtui, saves,
-    session, state,
+    archives, deploy, fsprobe, gate, generated, hardening, importer, kinds, me3_host, problems, procs, qtui,
+    saves, session, state,
 )
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
@@ -323,6 +323,53 @@ class HardenTool(EldenRingTool):
         outcome = hardening.unharden(game_dir, paths, deployed=0, cache=cache)
         outcome.lines[:0] = applied.lines()
         return outcome
+
+
+class SyncDeployedTool(EldenRingTool):
+    def name(self) -> str:
+        return "Elden Ring Sync deployed files"
+
+    def description(self) -> str:
+        return "Make Game/mods/ hold exactly the config files the enabled native mods ask for."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Sync deployed files…"
+
+    def tooltip(self) -> str:
+        return "Copy, update and remove the config files natives read from Game/mods/<Name>/."
+
+    def run(self) -> None:
+        title = self.displayName()
+        busy = None
+        try:
+            # Inside the try so a refused run tells the listeners too.
+            up = procs.game_running()
+            if up:
+                names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+                raise ErmError(f"{names} is running. Game/ is not edited under a running game; quit it and try again.")
+            game_dir = Path(self._organizer.managedGame().dataDirectory().absolutePath())
+            paths = state.InstancePaths(self._organizer)
+            busy = Busy(title, self._parent)
+            with archives.hash_cache(paths) as cache:
+                applied = deploy.sync(
+                    deploy.desired(self._organizer), paths, game_dir,
+                    launcher=lambda: hardening.state(game_dir, cache),
+                )
+        except gate.Veto as veto:
+            if busy is not None:
+                busy.close()
+            QMessageBox.critical(self._parent, title, veto.text())
+            return
+        finally:
+            if busy is not None:
+                busy.close()
+            problems.invalidate()
+        QMessageBox.information(
+            self._parent,
+            title,
+            "\n".join(applied.lines())
+            or "Game/mods/ already holds exactly the config files the enabled mods ask for. Nothing was changed.",
+        )
 
 
 def describe_rebuild(prepared) -> str:
