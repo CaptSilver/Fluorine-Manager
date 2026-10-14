@@ -21,6 +21,7 @@ neither shows a dialog.
 
 from __future__ import annotations
 
+import glob
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -220,6 +221,28 @@ def survey(organizer, installed: dict, game_dir) -> Survey:
             found.left.append(f"{item.rel}: not a file or a link, so it is left where it is")
     found.rest = _rest(game_dir, {item.rel for item in owned}, found.left)
     found.carries = _carries(organizer, game_dir, found.left)
+    return found
+
+
+def quarantined(paths: state.InstancePaths, rels: list[str]) -> list[str]:
+    """The paths among `rels` that an earlier move left in quarantine-game/, under any import's folder.
+
+    A recorded file missing from Game/ is not necessarily one we moved: a person may have
+    deleted it, or it may never have been installed. A copy in quarantine says Game/ was
+    changed from erm's layout by an import.
+    """
+    root = paths.quarantine_game
+    try:
+        folders = [folder for folder in root.iterdir() if folder.is_dir()]
+    except OSError:
+        return []
+    found = []
+    for rel in rels:
+        for folder in folders:
+            target = folder / rel
+            if os.path.lexists(target) or any(target.parent.glob(glob.escape(target.name) + ".[0-9]*")):
+                found.append(rel)
+                break
     return found
 
 

@@ -702,6 +702,45 @@ class LaunchOptionOrderTests(FinishCase):
         self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
         self.assertIsNone(self.done())
 
+    def _partial_move_then_rerun(self, rerun) -> importer.Report:
+        """First run moves ersc.dll and fails on the settings file; `rerun` is the second run's setup."""
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        quarantine = importfinish.importgame.quarantine
+        real = quarantine.move_out
+
+        def flaky(paths, game_dir, rel, stamp):
+            if rel == "SeamlessCoop/ersc_settings.ini":
+                raise quarantine.QuarantineError("denied")
+            return real(paths, game_dir, rel, stamp)
+
+        with mock.patch.object(quarantine, "move_out", flaky):
+            self.finish("20260101-000000")
+            self.assertFalse(os.path.lexists(self.game / "SeamlessCoop/ersc.dll"))
+            return rerun()
+
+    def test_a_rerun_whose_remaining_move_fails_again_still_warns_against_steams_play(self) -> None:
+        report = self._partial_move_then_rerun(lambda: self.finish("20260102-000000"))
+        self.assertTrue(os.path.lexists(self.game / "SeamlessCoop/ersc_settings.ini"))
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+
+    def test_a_rerun_whose_list_is_declined_still_warns_against_steams_play(self) -> None:
+        def declined():
+            self.script.accept = False
+            return self.finish("20260102-000000")
+
+        report = self._partial_move_then_rerun(declined)
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+
+    def test_a_recorded_file_that_was_never_moved_by_the_import_does_not_warn(self) -> None:
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        (self.game / "SeamlessCoop/ersc.dll").unlink()
+        self.script.accept = False
+        report = self.finish()
+        self.assertIn("already gone from Game/", report.text())
+        self.assertNotIn("Do not press Play", report.text())
+
     def test_no_play_warning_when_nothing_was_moved(self) -> None:
         self.run_import()
         self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]

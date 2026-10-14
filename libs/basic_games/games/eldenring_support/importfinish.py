@@ -332,8 +332,10 @@ def clean_game(
     """Move erm's files out of Game/ after the user accepts the list. Returns (ok, moved).
 
     `ok` is False when the list was declined or a move failed. `moved` is True
-    when at least one file left Game/, including in a run where a later move
-    failed: Game/ is then part-way between erm's and vanilla.
+    when an erm file has left Game/ in this run or an earlier import (a copy
+    of a recorded file is in quarantine), including in a run where a later
+    move failed or the list was declined: Game/ is then part-way between
+    erm's and vanilla.
 
     Refuses, moving nothing, while the deploy manifest holds files or
     folders: on a re-run after a gated launch, installed.json still names the
@@ -343,6 +345,8 @@ def clean_game(
     config file is carried into its mod folder first; if that fails the file
     still goes to quarantine with the edit in it.
     """
+    found = importgame.survey(organizer, installed, host.game_dir)
+    earlier = bool(importgame.quarantined(paths, found.gone))
     manifest = deploy.read_manifest(paths)
     if manifest.files or manifest.dirs:
         report.warn(
@@ -350,21 +354,20 @@ def clean_game(
             "files that are gone. Undeploy them first (Sync deployed files), then run the import again. Nothing "
             "was moved."
         )
-        return False, False
-    found = importgame.survey(organizer, installed, host.game_dir)
+        return False, earlier
     for line in found.left:
         report.warn(line)
     if found.gone:
         report.info(f"{len(found.gone)} of the files erm recorded were already gone from Game/")
     if not found.moves() and not found.carries:
         report.ok("none of erm's files are in Game/")
-        return True, False
+        return True, earlier
     where = paths.quarantine_game / importgame.folder_name(stamp)
     if not ui.review(TITLE, importgame.review_text(found, where), "Move them to quarantine"):
         report.warn(
             "Game/ was not touched: the list of files to move was not accepted. Run the import again to be asked."
         )
-        return False, False
+        return False, earlier
     with ui.busy("Elden Ring: moving erm's files out of Game/"):
         done = importgame.execute(found, paths, host.game_dir, stamp)
     for carry, aside in done.carried:
@@ -383,7 +386,7 @@ def clean_game(
         report.info("removed the folders that were left empty: " + ", ".join(done.removed))
     for text in done.failed:
         report.fail(text)
-    return not done.failed, bool(done.moved)
+    return not done.failed, bool(done.moved) or earlier
 
 
 # -- the whole of it ------------------------------------------------------------
