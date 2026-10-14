@@ -107,7 +107,7 @@ class LaunchGate:
 
     `show_veto(title, text)` and `show_modal(title, text)` display a message,
     `busy(title)` returns a context manager with `update(message)`,
-    `prepare(notify)` returns the Prepared result (preparing.prepare over the
+    `prepare(notify, *, force=False)` returns the Prepared result (preparing.prepare over the
     organizer and the game unless a caller supplies its own), `desired()`
     returns the config files the enabled natives want in Game/mods/
     (deploy.desired over the organizer unless supplied), `running()` is
@@ -131,7 +131,7 @@ class LaunchGate:
         show_veto: Callable[[str, str], None],
         show_modal: Callable[[str, str], None],
         busy: Callable[[str], object] | None = None,
-        prepare: Callable[[Callable[[str], None]], Prepared] | None = None,
+        prepare: Callable[..., Prepared] | None = None,
         running: Callable[[], list[tuple[int, str]]] = procs.game_running,
         warn: Callable[[str], None] | None = None,
         desired: Callable[[], deploy.Desired] | None = None,
@@ -146,7 +146,9 @@ class LaunchGate:
         self._show_modal = show_modal
         self._busy = busy or (lambda title: _NoBusy())
         self._prepare = prepare or (
-            lambda notify: preparing.prepare(self._organizer, self._game, notify=notify)
+            lambda notify, *, force=False: preparing.prepare(
+                self._organizer, self._game, notify=notify, force=force
+            )
         )
         self._running = running
         self._warn = warn or (lambda message: None)
@@ -230,17 +232,18 @@ class LaunchGate:
         """Everything a launch checks and builds, without launching. Raises Veto.
 
         The Rebuild tool runs this, so it meets the same session checks and the
-        same preparation as a Run. It writes the generated mod and the views,
+        same preparation as a Run, except that it merges again even when the
+        recorded fingerprint is fresh. It writes the generated mod and the views,
         never the profile, the stamp or the save snapshot.
         """
         paths = state.InstancePaths(self._organizer)
         data = self._load(paths)
         self._session_checks(paths, data)
-        return self._prepared()
+        return self._prepared(force=True)
 
-    def _prepared(self) -> Prepared:
+    def _prepared(self, *, force: bool = False) -> Prepared:
         with self._busy("Elden Ring: preparing the mods") as busy:
-            return self._prepare(busy.update)
+            return self._prepare(busy.update, force=force)
 
     # A profile with an active list launches only when this setup is the list's:
     # co-op partners have to run the same mods, in the same order, merged the same

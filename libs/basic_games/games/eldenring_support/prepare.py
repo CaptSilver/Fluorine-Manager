@@ -336,13 +336,16 @@ def _vanilla_archives(merges: list[dict], sources: dict, downloads: Path, cache:
 
 
 def prepare(
-    organizer, game, *, notify: Callable[[str], None] = lambda message: None
+    organizer, game, *, notify: Callable[[str], None] = lambda message: None, force: bool = False
 ) -> Prepared:
     """Identify the build, check the mod list, rebuild the generated mod if stale.
 
     Raises Veto. The generated mod is rebuilt only when its fingerprint, the
     listing of a contributor, or a file of its own moved; the co-op ini is
-    written either way.
+    written either way. `force` merges again whatever the fingerprint says: a
+    fallback caused by the environment (an unreadable game archive, a kept
+    baseline that does not match the install) is recorded under a fingerprint
+    that does not change when the user fixes the cause, so Rebuild forces it.
     """
     paths = state.InstancePaths(organizer)
     game_dir = Path(game.dataDirectory().absolutePath())
@@ -425,7 +428,7 @@ def prepare(
                     provided, rules["merges"], dropped, merge_engine.game_archives(game_dir)
                 ),
             )
-            if generated.verify(mod_dir, paths.generated_state, fp, cache) != generated.FRESH:
+            if force or generated.verify(mod_dir, paths.generated_state, fp, cache) != generated.FRESH:
                 notify("Merging the mods")
                 loader = merge_engine.make_vanilla_loader(
                     paths, organizer.downloadsPath(), rules["vanilla_sources"]

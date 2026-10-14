@@ -116,6 +116,7 @@ class GateCase(unittest.TestCase):
         self.warnings_out: list[str] = []
         self.merged_out: list[str] = []
         self.prepared_calls = 0
+        self.forced: list[bool] = []
         self.deployables = deploy.Desired()
         self.invalidations = 0
         self.busy_titles: list[str] = []
@@ -134,10 +135,11 @@ class GateCase(unittest.TestCase):
     def assert_game_dir_untouched(self) -> None:
         self.assertEqual(tree(self.install), self.game_tree, "a gate run wrote to Game/")
 
-    def fake_prepare(self, notify):
+    def fake_prepare(self, notify, *, force=False):
         """What preparing the mods hands the gate; the real one has its own tests."""
         self.prepared_calls += 1
         self.notify = notify
+        self.forced.append(force)
         return gate.Prepared(
             packages=list(self.packages), natives=list(self.natives), live=LIVE,
             warnings=list(self.warnings_out), merged=list(self.merged_out),
@@ -1458,8 +1460,8 @@ class GameFolderSweepTests(GateCase):
         self.game_tree = tree(self.install)
         self.assertTrue(self.launch(), self.vetoes)
 
-    def fake_prepare(self, notify):
-        prepared = super().fake_prepare(notify)
+    def fake_prepare(self, notify, *, force=False):
+        prepared = super().fake_prepare(notify, force=force)
         prepared.live = self.live
         return prepared
 
@@ -1730,7 +1732,7 @@ class PreparedLaunchTests(GateCase):
         self.assertIn("Merging the mods", self.progress)
 
     def test_a_veto_from_preparing_is_shown_recorded_and_launches_nothing(self) -> None:
-        def refuse(notify):
+        def refuse(notify, *, force=False):
             raise gate.Veto("Generated mod", "it is missing", "make it", "MERGED_MOD_MISSING")
 
         self.gate = gate.LaunchGate(
@@ -1937,6 +1939,12 @@ class RebuildTests(GateCase):
         self.assertFalse(self.paths.save_snapshots.exists())
         self.assertNotIn("sentinel", session.load_last_launch(self.paths))
 
+    def test_a_rebuild_forces_the_merge_and_a_launch_does_not(self) -> None:
+        self.gate.rebuild()
+        self.assertEqual(self.forced, [True])
+        self.launch()
+        self.assertEqual(self.forced, [True, False])
+
     def test_a_rebuild_meets_the_same_session_checks_as_a_launch(self) -> None:
         self.up = [(7, "me3")]
         with self.assertRaises(gate.Veto) as caught:
@@ -1958,7 +1966,7 @@ class RebuildTests(GateCase):
         self.assertEqual(caught.exception.key, gate.SAVE_RESTORE_PENDING)
 
     def test_a_veto_from_preparing_reaches_the_caller(self) -> None:
-        def refuse(notify):
+        def refuse(notify, *, force=False):
             raise gate.Veto("Generated mod", "it is missing", key="MERGED_MOD_MISSING")
 
         self.gate = gate.LaunchGate(

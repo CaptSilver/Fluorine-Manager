@@ -482,6 +482,16 @@ class MergeTests(PrepareCase):
             prepared = self.run_prepare()
         self.assertFalse(prepared.rebuilt)
 
+    def test_a_forced_run_merges_again_although_the_fingerprint_is_fresh(self) -> None:
+        self.two_providers()
+        self.run_prepare()
+        self.move_generated_to_top()
+        with mock.patch.object(merge_engine, "plan", wraps=merge_engine.plan) as plan:
+            prepared = prepare.prepare(self.organizer, self.game, force=True)
+        plan.assert_called_once()
+        self.assertTrue(prepared.rebuilt)
+        self.assertEqual((self.organizer.modsPath_ / generated.NAME / "msg/x.dcx").read_bytes(), b"A|B")
+
     def test_a_changed_contributor_is_rebuilt(self) -> None:
         a, _b = self.two_providers()
         self.run_prepare()
