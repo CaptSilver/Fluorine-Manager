@@ -129,6 +129,7 @@ class ReservedReasonTests(unittest.TestCase):
             "../x.ini", "/etc/x.ini", "mods/Thing/../../x.ini", "other/x.ini", "mods/Other/x.ini",
             "mods/Thing/x.dll", "mods/Thing/X.EXE", "mods/Thing/x.txt", "mods/Thing/log.txt",
             "mods/Thing/LOG.TXT", "mods/Thing/x.log", "mods/Thing/x.dmp", "x.ini", "", None, 5,
+            "mods/Thing/a\\b.ini", "mods/Thing/a\nb.ini", "mods/Thing/a\tb.ini",
         ):
             with self.subTest(path):
                 self.assertIsInstance(deploy.reserved_reason("mods/Thing.dll", path), str)
@@ -215,6 +216,18 @@ class DesiredTests(ModListCase):
         mod.setPluginSetting(kinds.PLUGIN, "native_dll", "")
         [finding] = deploy.desired(self.organizer).findings
         self.assertIn("no DLL", finding.text)
+
+    def test_one_mod_listing_two_case_variants_of_a_target_is_a_finding_naming_both(self) -> None:
+        self.native(
+            "Thing mod",
+            config=("mods/Thing/config.ini", "mods/thing/config.ini"),
+        )
+        result = deploy.desired(self.organizer)
+        self.assertEqual(result.files, {})
+        [finding] = result.findings
+        self.assertEqual((finding.key, finding.mod), (deploy.DEPLOY_COLLISION, "Thing mod"))
+        self.assertIn("mods/Thing/config.ini", finding.text)
+        self.assertIn("mods/thing/config.ini", finding.text)
 
     def test_one_path_wanted_by_two_mods_is_refused_for_both_without_regard_to_case(self) -> None:
         self.native("First")

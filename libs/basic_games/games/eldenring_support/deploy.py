@@ -177,6 +177,8 @@ def reserved_reason(native_dll: str, config_path: object) -> str | None:
     if not is_safe_relpath(config_path):
         return "it leaves the mod folder"
     name = PurePosixPath(config_path).name
+    if not name_ok(name):
+        return "its file name cannot be one file name under Game/mods/"
     lowered = name.lower()
     if PurePosixPath(lowered).suffix in _PROGRAM_EXTS:
         return "a program is never deployed"
@@ -208,11 +210,17 @@ def _wanted_from(ref: mods.ModRef, listed: list[str]) -> tuple[dict[str, Wanted]
     if not kinds.deploy_config_ok(ref.path, ref.native_dll, listed):
         why = "a listed file is missing from the mod folder, or the DLL or a file resolves outside it"
         return {}, [_finding(DEPLOY_CONFIG_INVALID, ref.name, listed, why)]
-    found = {}
+    found: dict[str, Wanted] = {}
+    listed_as: dict[str, str] = {}
     for path in listed:
         source = Path(os.path.realpath(ref.path / path))
+        target = target_rel(ref.native_dll, path)
+        if (earlier := listed_as.get(target.lower())) is not None:
+            why = f"it lands on the same file as {earlier!r}"
+            return {}, [_finding(DEPLOY_COLLISION, ref.name, path, why)]
+        listed_as[target.lower()] = path
         try:
-            found[target_rel(ref.native_dll, path)] = Wanted(
+            found[target] = Wanted(
                 ref.name, source, github.sha256_file(source), os.stat(source).st_size
             )
         except OSError as exc:
