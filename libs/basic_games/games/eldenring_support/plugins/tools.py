@@ -12,7 +12,10 @@ from PyQt6.QtWidgets import QMessageBox
 
 import mobase
 
-from .. import gate, generated, importer, kinds, me3_host, qtui, saves, session, state
+from .. import (
+    archives, deploy, fsprobe, gate, generated, hardening, importer, kinds, me3_host, problems, qtui, saves,
+    session, state,
+)
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
 
@@ -216,6 +219,110 @@ class SaveToolsTool(EldenRingTool):
                 f"The save in the Steam folder was kept. {kept}If a modded session wrote "
                 "it, it must not go online.",
             )
+
+
+HARDEN = "Harden"
+REHARDEN = "Re-harden"
+UNHARDEN = "Unharden"
+
+
+def launcher_choices(current: str, has_backup: bool) -> list[str]:
+    """The actions that make sense for a launcher in state `current`."""
+    if current == hardening.VANILLA:
+        return [HARDEN]
+    if current == hardening.HARDENED:
+        return [UNHARDEN]
+    if current in (hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED):
+        return [REHARDEN, UNHARDEN]
+    return [UNHARDEN] if has_backup else []
+
+
+def describe_launcher(current: str, deployed: int, choices: list[str]) -> str:
+    lines = [hardening.describe(current), ""]
+    if deployed:
+        lines += [f"{deployed} config file(s) are deployed in Game/mods/, which needs the launcher hardened.", ""]
+    notes = {
+        HARDEN: "Harden: backs up the real launcher once, swaps in a copy of the game and locks it. "
+        "Asks for your password through the system prompt.",
+        REHARDEN: "Re-harden: puts the copy of the game back and locks it again. The backup of the real "
+        "launcher is never touched; a launcher nobody can vouch for is kept in quarantine-game first.",
+        UNHARDEN: "Unharden: unlocks the launcher and puts the real one back. Do this before a Steam update.",
+    }
+    return "\n".join(lines + [notes[choice] for choice in choices])
+
+
+class HardenTool(EldenRingTool):
+    def name(self) -> str:
+        return "Elden Ring Harden launcher"
+
+    def description(self) -> str:
+        return "Swap start_protected_game.exe for a locked copy of the game, or put the real launcher back."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Harden/Unharden launcher…"
+
+    def tooltip(self) -> str:
+        return "Needed while config files are deployed into Game/mods/; undo it before a Steam update."
+
+    def run(self) -> None:
+        title = self.displayName()
+        game_dir = Path(self._organizer.managedGame().dataDirectory().absolutePath())
+        paths = state.InstancePaths(self._organizer)
+        try:
+            with archives.hash_cache(paths) as cache:
+                current = hardening.state(game_dir, cache)
+                deployed = len(deploy.read_manifest(paths).files)
+                choices = launcher_choices(current, fsprobe.kind(game_dir / hardening.BACKUP) == fsprobe.FILE)
+                if not choices:
+                    QMessageBox.information(self._parent, title, hardening.describe(current))
+                    return
+                picked = _choose(self._parent, title, describe_launcher(current, deployed, choices), choices)
+                if picked is None:
+                    return
+                outcome = self._act(choices[picked], game_dir, paths, deployed, cache)
+        finally:
+            problems.invalidate()
+        if outcome is not None:
+            QMessageBox.information(
+                self._parent, title, "\n".join(outcome.lines) + "\n\n" + hardening.describe(outcome.state)
+            )
+
+    def _act(self, action: str, game_dir: Path, paths, deployed: int, cache: dict):
+        busy = Busy(self.displayName(), self._parent)
+        busy.update("Waiting for the system password prompt, if one appears")
+        try:
+            if action == HARDEN:
+                return hardening.harden(game_dir, paths, cache=cache)
+            if action == REHARDEN:
+                return hardening.reharden(game_dir, paths, cache=cache)
+            try:
+                return hardening.unharden(game_dir, paths, deployed=deployed, cache=cache)
+            except hardening.DeployedFilesError:
+                busy.close()
+                return self._undeploy_then_unharden(game_dir, paths, deployed, cache)
+        finally:
+            busy.close()
+
+    def _undeploy_then_unharden(self, game_dir: Path, paths, deployed: int, cache: dict):
+        answer = QMessageBox.question(
+            self._parent,
+            self.displayName(),
+            f"{deployed} config file(s) are deployed in Game/mods/. They would be left under a launcher "
+            "that starts Easy Anti-Cheat.\n\nRemove them first, then unharden?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return None
+        applied = deploy.undeploy_all(paths, game_dir)
+        left = deploy.read_manifest(paths).files
+        if left:
+            raise ErmError(
+                "Some deployed files could not be removed, so the launcher was left as it is:\n"
+                + "\n".join(f"  {rel}" for rel in sorted(left))
+                + ("\n" + "\n".join(applied.left) if applied.left else "")
+            )
+        outcome = hardening.unharden(game_dir, paths, deployed=0, cache=cache)
+        outcome.lines[:0] = applied.lines()
+        return outcome
 
 
 def describe_rebuild(prepared) -> str:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import sys
 import tempfile
@@ -104,8 +106,11 @@ PACKAGE = support.load_support("_eldenring_tools_tests")
 PLUGINS = support.module(PACKAGE, "plugins")
 tools = support.module(PACKAGE, "plugins.tools")
 me3_host = support.module(PACKAGE, "me3_host")
+deploy = support.module(PACKAGE, "deploy")
 generated = support.module(PACKAGE, "generated")
 gate = support.module(PACKAGE, "gate")
+hardening = support.module(PACKAGE, "hardening")
+problems = support.module(PACKAGE, "problems")
 importer = support.module(PACKAGE, "importer")
 kinds = support.module(PACKAGE, "kinds")
 errors = support.module(PACKAGE, "ermlib.errors")
@@ -134,7 +139,10 @@ class CreatePluginsTests(ToolCase):
         plugins = PLUGINS.createPlugins()
         self.assertEqual(
             [type(plugin).__name__ for plugin in plugins],
-            ["InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool"],
+            [
+                "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
+                "HardenTool",
+            ],
         )
 
     def test_the_tool_is_named_and_limited_to_the_game(self) -> None:
@@ -663,6 +671,196 @@ class ImportFromErmToolTests(ModToolCase):
         self.drive(run=mock.Mock(side_effect=RuntimeError("boom")))
         self.assertEqual(SHOWN[-1][0], "critical")
         self.assertTrue(DIALOGS[-1].closed)
+
+
+
+EAC = b"MZ real easy anti cheat launcher"
+GAME = b"MZ the game itself"
+
+
+class HardenToolCase(ModToolCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.game_dir = self.tmp / "game/Game"
+        self.game_dir.mkdir(parents=True)
+        (self.game_dir / "eldenring.exe").write_bytes(GAME)
+        (self.game_dir / "start_protected_game.exe").write_bytes(EAC)
+        self.organizer.managedGame = lambda: types.SimpleNamespace(
+            dataDirectory=lambda: types.SimpleNamespace(absolutePath=lambda: str(self.game_dir))
+        )
+        self.tool = tools.HardenTool()
+        self.tool.init(self.organizer)
+        self.locked = False
+        self.lock_error = None
+        self.lock_calls: list = []
+        self.up: list = []
+        self.heard: list = []
+        self.addCleanup(problems.subscribe(lambda: self.heard.append(1)))
+        for patcher in (
+            mock.patch.object(hardening, "is_immutable", side_effect=lambda path: self.locked),
+            mock.patch.object(hardening.ermharden, "set_immutable", side_effect=self.fake_lock),
+            mock.patch.object(hardening.ermharden.subprocess, "run", side_effect=AssertionError("real pkexec")),
+            mock.patch.object(hardening.procs, "game_running", side_effect=lambda: list(self.up)),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def fake_lock(self, path, on) -> None:
+        self.lock_calls.append(on)
+        if self.lock_error is not None:
+            raise self.lock_error
+        self.locked = on
+
+    def harden_by_hand(self, locked=True, launcher=GAME) -> None:
+        (self.game_dir / "start_protected_game.exe.erm-backup").write_bytes(EAC)
+        (self.game_dir / "start_protected_game.exe").write_bytes(launcher)
+        self.locked = locked
+
+    def drive(self, pick=0):
+        with mock.patch.object(tools, "_choose", return_value=pick) as choose:
+            self.tool.display()
+        return choose
+
+    def shown(self, kind="information") -> list:
+        return [text for k, title, text in SHOWN if k == kind]
+
+    def launcher_bytes(self) -> bytes:
+        return (self.game_dir / "start_protected_game.exe").read_bytes()
+
+
+class HardenToolTests(HardenToolCase):
+    def test_it_is_named_and_limited_to_the_game(self) -> None:
+        self.assertEqual(self.tool.displayName(), "Elden Ring: Harden/Unharden launcher…")
+        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
+
+    def test_a_vanilla_launcher_offers_only_harden_and_describes_it(self) -> None:
+        choose = self.drive(pick=None)
+        self.assertEqual(choose.call_args.args[3], ["Harden"])
+        self.assertIn("real Easy Anti-Cheat launcher", choose.call_args.args[2])
+
+    def test_harden_swaps_locks_and_says_so(self) -> None:
+        self.drive()
+        self.assertEqual((self.launcher_bytes(), self.locked), (GAME, True))
+        [text] = self.shown()
+        self.assertIn("Backed up start_protected_game.exe", text)
+        self.assertIn("locked copy of eldenring.exe", text)
+
+    def test_a_dismissed_prompt_is_reported_as_swapped_but_not_locked(self) -> None:
+        self.lock_error = errors.ErmError("pkexec authentication dialog was dismissed (rc 126)")
+        self.drive()
+        [text] = self.shown()
+        self.assertIn("rc 126", text)
+        self.assertIn("is not locked", text)
+
+    def test_each_state_offers_the_actions_that_fit_it(self) -> None:
+        cases = {
+            "hardened": (GAME, True, ["Unharden"]),
+            "swapped-unlocked": (GAME, False, ["Re-harden", "Unharden"]),
+            "restored": (EAC, False, ["Re-harden", "Unharden"]),
+            "stale": (b"MZ older", False, ["Re-harden", "Unharden"]),
+        }
+        for name, (launcher, locked, expected) in cases.items():
+            with self.subTest(name):
+                self.harden_by_hand(locked=locked, launcher=launcher)
+                self.assertEqual(self.drive(pick=None).call_args.args[3], expected)
+
+    def test_a_launcher_that_is_missing_gets_a_message_and_no_choice(self) -> None:
+        (self.game_dir / "start_protected_game.exe").unlink()
+        choose = self.drive()
+        choose.assert_not_called()
+        self.assertIn("missing", self.shown()[0])
+
+    def test_a_missing_launcher_beside_a_backup_can_be_restored(self) -> None:
+        (self.game_dir / "start_protected_game.exe").unlink()
+        (self.game_dir / "start_protected_game.exe.erm-backup").write_bytes(EAC)
+        self.assertEqual(self.drive(pick=None).call_args.args[3], ["Unharden"])
+
+    def test_reharden_fixes_a_restored_launcher_and_leaves_the_backup(self) -> None:
+        self.harden_by_hand(locked=False, launcher=EAC)
+        self.drive(pick=0)
+        self.assertEqual((self.launcher_bytes(), self.locked), (GAME, True))
+        self.assertEqual((self.game_dir / "start_protected_game.exe.erm-backup").read_bytes(), EAC)
+
+    def test_unharden_unlocks_and_puts_the_real_launcher_back(self) -> None:
+        self.harden_by_hand()
+        self.drive(pick=0)
+        self.assertEqual((self.launcher_bytes(), self.lock_calls), (EAC, [False]))
+
+    def test_cancelling_changes_nothing_and_shows_nothing(self) -> None:
+        self.drive(pick=None)
+        self.assertEqual((self.launcher_bytes(), self.lock_calls, SHOWN), (EAC, [], []))
+
+    def test_a_running_game_is_refused_with_its_pid_and_nothing_changes(self) -> None:
+        self.up = [(4242, "eldenring.exe")]
+        self.drive()
+        self.assertEqual(self.launcher_bytes(), EAC)
+        self.assertIn("eldenring.exe (pid 4242)", self.shown("critical")[0])
+
+    def test_the_listeners_are_told_after_every_run_and_the_hash_cache_is_saved(self) -> None:
+        self.harden_by_hand()
+        self.drive(pick=None)
+        self.assertEqual(self.heard, [1])
+        cached = json.loads(state.InstancePaths(self.organizer).archive_hashes.read_text())
+        self.assertTrue(any(key.endswith("eldenring.exe") for key in cached))
+
+    def test_a_failure_while_acting_still_tells_the_listeners(self) -> None:
+        self.up = [(1, "me3")]
+        self.drive()
+        self.assertEqual(self.heard, [1])
+
+
+class HardenToolDeployedTests(HardenToolCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.harden_by_hand()
+        self.paths = state.InstancePaths(self.organizer)
+        self.deployed = self.game_dir / "mods/Thing/config.ini"
+        self.deployed.parent.mkdir(parents=True)
+        self.deployed.write_bytes(b"x")
+        deploy.write_manifest(
+            self.paths,
+            deploy.Manifest(
+                {"mods/Thing/config.ini": deploy.Entry(hashlib.sha256(b"x").hexdigest(), 1, "Thing mod")},
+                ["mods/Thing"],
+            ),
+        )
+
+    def test_the_dialog_says_how_many_files_are_deployed(self) -> None:
+        choose = self.drive(pick=None)
+        self.assertIn("1 config file(s) are deployed", choose.call_args.args[2])
+
+    def test_unharden_asks_and_a_yes_undeploys_everything_first(self) -> None:
+        self.drive(pick=0)
+        question = [text for kind, _, text in SHOWN if kind == "question"]
+        self.assertEqual(len(question), 1)
+        self.assertIn("Remove them first", question[0])
+        self.assertFalse(self.deployed.exists())
+        self.assertFalse((self.game_dir / "mods/Thing").exists())
+        self.assertEqual(deploy.read_manifest(self.paths), deploy.Manifest())
+        self.assertEqual(self.launcher_bytes(), EAC)
+        self.assertIn("Removed mods/Thing/config.ini", self.shown()[0])
+
+    def test_a_no_leaves_the_files_and_the_launcher_as_they_were(self) -> None:
+        ANSWER[0] = "no"
+        self.drive(pick=0)
+        self.assertTrue(self.deployed.exists())
+        self.assertEqual((self.launcher_bytes(), self.lock_calls), (GAME, []))
+        self.assertEqual(self.shown(), [])
+
+    def test_files_that_cannot_be_removed_stop_the_unharden_and_are_listed(self) -> None:
+        self.deployed.unlink()
+        self.deployed.symlink_to(self.tmp)
+        self.drive(pick=0)
+        self.assertEqual((self.launcher_bytes(), self.lock_calls), (GAME, []))
+        [text] = self.shown("critical")
+        self.assertIn("mods/Thing/config.ini", text)
+        self.assertIn("left as it is", text)
+
+    def test_reharden_works_with_files_deployed(self) -> None:
+        self.harden_by_hand(locked=False, launcher=EAC)
+        self.drive(pick=0)
+        self.assertTrue(self.deployed.exists())
+        self.assertEqual((self.launcher_bytes(), self.locked), (GAME, True))
 
 
 if __name__ == "__main__":
