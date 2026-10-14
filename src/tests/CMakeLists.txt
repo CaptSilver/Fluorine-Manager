@@ -1422,6 +1422,11 @@ add_test(
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_me3.py
 )
 add_test(
+    NAME test_eldenring_qtui
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_qtui.py
+)
+set_tests_properties(test_eldenring_qtui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+add_test(
     NAME test_eldenring_game_metadata
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_game_metadata.py
 )

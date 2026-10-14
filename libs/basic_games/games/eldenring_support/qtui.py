@@ -63,10 +63,13 @@ def choose_folder(parent, title: str, start: str) -> str | None:
     return chosen or None
 
 
-def pick_profiles(parent, title: str, names: list[str]) -> list[str] | None:
-    """The ticked names in the order the list shows them, or None when cancelled.
+def _checklist(
+    parent, title: str, text: str, items: list[str], checked: list[str], reorder: bool = False
+) -> list[str] | None:
+    """A dialog of tickable rows. Returns the ticked texts in list order, None when cancelled.
 
-    The rows can be dragged to reorder them; every row starts ticked.
+    `checked` says which rows start ticked; `reorder` lets the user drag rows.
+    An empty list is a real answer (tick nothing), which is why cancelling is None.
     """
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
@@ -76,41 +79,12 @@ def pick_profiles(parent, title: str, names: list[str]) -> list[str] | None:
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
     layout = QVBoxLayout(dialog)
-    layout.addWidget(QLabel("Profiles to import, in this order (drag to reorder):"))
-    listing = QListWidget()
-    listing.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-    for name in names:
-        item = QListWidgetItem(name)
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-        item.setCheckState(Qt.CheckState.Checked)
-        listing.addItem(item)
-    layout.addWidget(listing)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.accepted.connect(dialog.accept)
-    buttons.rejected.connect(dialog.reject)
-    layout.addWidget(buttons)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return None
-    rows = [listing.item(index) for index in range(listing.count())]
-    return [row.text() for row in rows if row.checkState() == Qt.CheckState.Checked]
-
-
-def pick_files(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:
-    """The ticked names of `items` in list order, or None when the dialog is cancelled.
-
-    `checked` says which rows start ticked. An empty answer is a real answer
-    (tick nothing to deploy nothing), which is why cancelling is None.
-    """
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
-
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(title)
-    layout = QVBoxLayout(dialog)
     label = QLabel(text)
     label.setWordWrap(True)
     layout.addWidget(label)
     listing = QListWidget()
+    if reorder:
+        listing.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
     for name in items:
         item = QListWidgetItem(name)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -125,6 +99,23 @@ def pick_files(parent, title: str, text: str, items: list[str], checked: list[st
         return None
     rows = [listing.item(index) for index in range(listing.count())]
     return [row.text() for row in rows if row.checkState() == Qt.CheckState.Checked]
+
+
+def pick_profiles(parent, title: str, names: list[str]) -> list[str] | None:
+    """The ticked names in the order the list shows them, or None when cancelled.
+
+    The rows can be dragged to reorder them; every row starts ticked.
+    """
+    return _checklist(parent, title, "Profiles to import, in this order (drag to reorder):", names, names, reorder=True)
+
+
+def pick_files(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:
+    """The ticked names of `items` in list order, or None when the dialog is cancelled.
+
+    `checked` says which rows start ticked.
+    """
+    return _checklist(parent, title, text, items, checked)
+
 
 
 def show_text(parent, title: str, text: str) -> None:
