@@ -409,18 +409,6 @@ def _read_snapshot(path: Path, recorded: dict | None) -> bytes | None:
     return data
 
 
-def _refuse_while_running(running: Callable[[], list] | None, then: str) -> None:
-    """Raise while the game or me3 is up. `running` defaults to the process scan,
-    looked up at call time."""
-    up = (running or procs.game_running)()
-    if up:
-        raise ErmError(
-            "Elden Ring or me3 is still running ("
-            + ", ".join(f"{name} pid {pid}" for pid, name in up)
-            + f"). Quit the game, then {then}."
-        )
-
-
 def restore_pending(
     paths: state.InstancePaths, running: Callable[[], list] | None = None
 ) -> Restored:
@@ -434,7 +422,7 @@ def restore_pending(
     pending = data.get("pending_restore")
     if not pending:
         raise ErmError("No save restore is pending.")
-    _refuse_while_running(running, "restore")
+    procs.refuse_while_running(running, "restore")
     earlier = list(pending.get("quarantined", []))
     try:
         result = restore_changed(paths, pending["sentinel"])
@@ -467,7 +455,7 @@ def keep_session_save(
     pending = data.get("pending_restore")
     if not pending:
         raise ErmError("No save restore is pending.")
-    _refuse_while_running(running, "keep the session's save")
+    procs.refuse_while_running(running, "keep the session's save")
     snapshot = Path(pending["sentinel"]["snapshot_dir"])
     moved = None
     if os.path.isdir(snapshot):

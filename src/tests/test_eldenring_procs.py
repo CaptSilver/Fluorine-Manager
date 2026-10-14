@@ -11,6 +11,7 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_procs_tests")
 procs = support.module(PACKAGE, "procs")
+errors = support.module(PACKAGE, "ermlib.errors")
 
 ME = 1000
 
@@ -177,6 +178,26 @@ class StartTicksTests(FakeProc):
 
     def test_this_process_has_a_start_time(self) -> None:
         self.assertIsInstance(procs.start_ticks(os.getpid()), int)
+
+
+class RefuseWhileRunningTests(unittest.TestCase):
+    def test_nothing_running_returns_quietly(self) -> None:
+        self.assertIsNone(procs.refuse_while_running(lambda: [], "restore"))
+
+    def test_a_running_game_is_refused_with_every_process_and_what_to_do_next(self) -> None:
+        with self.assertRaises(errors.ErmError) as caught:
+            procs.refuse_while_running(lambda: [(8, "me3"), (9, "eldenring.exe")], "restore")
+        text = str(caught.exception)
+        self.assertIn("me3 pid 8", text)
+        self.assertIn("eldenring.exe pid 9", text)
+        self.assertTrue(text.endswith("Quit the game, then restore."))
+
+    def test_the_default_is_the_process_scan_looked_up_when_called(self) -> None:
+        with mock.patch.object(procs, "game_running", return_value=[(3, "me3")]):
+            with self.assertRaises(errors.ErmError):
+                procs.refuse_while_running(None, "back up")
+        with mock.patch.object(procs, "game_running", return_value=[]):
+            procs.refuse_while_running(None, "back up")
 
 
 if __name__ == "__main__":

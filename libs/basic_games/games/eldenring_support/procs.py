@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Callable
+
+from .ermlib.errors import ErmError
 
 # What to look for, lowercased. me3 is in the list because it runs as long as
 # the game it launched, and a me3 with no game window yet is a launch in flight.
@@ -52,6 +55,21 @@ def game_running(root: Path | str = "/proc", uid: int | None = None) -> list[tup
         if name is not None:
             found.append((pid, name))
     return found
+
+
+def refuse_while_running(running: Callable[[], list] | None, then: str) -> None:
+    """Raise while the game or me3 is up.
+
+    `running` defaults to game_running, looked up at call time so a test that
+    patches it is honoured. `then` finishes the sentence "Quit the game, then ...".
+    """
+    up = (running or game_running)()
+    if up:
+        raise ErmError(
+            "Elden Ring or me3 is still running ("
+            + ", ".join(f"{name} pid {pid}" for pid, name in up)
+            + f"). Quit the game, then {then}."
+        )
 
 
 def start_ticks(pid: int, root: Path | str = "/proc") -> int | None:
