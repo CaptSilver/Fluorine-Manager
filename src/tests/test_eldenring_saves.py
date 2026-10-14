@@ -657,6 +657,37 @@ class MoveToModdedTests(SaveFolderCase):
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
         self.assertEqual(placed.destination, self.folder / "ER0000_modded")
 
+    def test_a_source_that_is_a_link_is_refused_and_nothing_moves(self) -> None:
+        real = self.tmp / "other" / "ER0000.sl2"
+        real.parent.mkdir()
+        real.write_bytes(SL2)
+        (self.folder / "ER0000.sl2").unlink()
+        (self.folder / "ER0000.sl2").symlink_to(real)
+        link = self.folder / "quarantine" / f"ER0000.sl2.{LATER}-modded-session"
+        link.parent.mkdir(exist_ok=True)
+        link.symlink_to(self.folder / "ER0000.sl2")
+        for source in (self.folder / "ER0000.sl2", link):
+            with self.assertRaises(errors.SafetyError):
+                self.move(source)
+        self.assertTrue((self.folder / "ER0000.sl2").is_symlink())
+        self.assertTrue(link.is_symlink())
+        self.assertFalse(os.path.lexists(self.folder / "ER0000_modded"))
+        self.assertEqual(real.read_bytes(), SL2)
+
+    def test_a_modded_save_that_is_a_link_or_a_folder_is_refused_and_nothing_moves(self) -> None:
+        other = self.tmp / "other" / "ER0000.sl2"
+        other.parent.mkdir()
+        other.write_bytes(b"somewhere else")
+        destination = self.folder / "ER0000_modded"
+        for make in (lambda: destination.symlink_to(other), destination.mkdir):
+            make()
+            with self.assertRaises(errors.SafetyError):
+                self.move(self.folder / "ER0000.sl2")
+            self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+            self.assertEqual(other.read_bytes(), b"somewhere else")
+            self.assertEqual(list(self.backups.glob("*pre-move-to-modded")) if self.backups.exists() else [], [])
+            destination.unlink() if destination.is_symlink() else destination.rmdir()
+
     def test_anything_else_is_refused_and_nothing_moves(self) -> None:
         plain = self.put(f"quarantine/ER0000.sl2.{STAMP}", SL2)
         bak = self.put(f"quarantine/ER0000.sl2.bak.{STAMP}-modded-session", BAK)

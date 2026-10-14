@@ -376,11 +376,15 @@ def move_to_modded(
     procs.refuse_while_running(running, "move a save to the modded name")
     if in_folder and (steam_running or steam.steam_running)():
         raise SafetyError("Close Steam first: it would sync the move of ER0000.sl2 as a deletion. Nothing was moved.")
+    if os.path.islink(source):
+        raise SafetyError(f"{source} is a link; moving it would make the modded save a link to another file. Nothing was moved.")
     if not os.path.isfile(source):
         raise ErmError(f"There is no file {source} to move.")
     if os.path.getsize(source) == 0:
         raise ErmError(f"{source} is empty, so it is not made the modded save.")
     destination = folder / MODDED
+    if os.path.lexists(destination) and (os.path.islink(destination) or not os.path.isfile(destination)):
+        raise SafetyError(f"{destination} is a link or not a regular file, so it is not replaced. Nothing was moved.")
     safety = _copy_aside([destination], backups_dir, "pre-move-to-modded", stamp)[0] if os.path.lexists(destination) else None
     try:
         atomic.move_durably(source, destination)
