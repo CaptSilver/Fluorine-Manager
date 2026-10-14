@@ -286,5 +286,97 @@ class SplitCommandTests(Me3Case):
         )
 
 
+class PlanProfileTests(Me3Case):
+    def setUp(self) -> None:
+        super().setUp()
+        self.organizer = support.FakeOrganizer(self.base)
+        self.modlist = self.organizer.mod_list
+        self.generated = self.modlist.add("Elden Ring Generated", kind="generated")
+
+    def plan(self, views=None):
+        return me3.plan_profile(self.organizer, views or {})
+
+    def test_packages_follow_priority_order_and_the_generated_mod_goes_last(self) -> None:
+        a = self.modlist.add("Clever's Moveset", kind="package")
+        b = self.modlist.add("Other", kind="package")
+        self.modlist.order.remove("Elden Ring Generated")
+        self.modlist.order.append("Elden Ring Generated")
+        plan = self.plan()
+        self.assertEqual(
+            plan.packages,
+            [
+                ("Clever's Moveset", Path(a.absolutePath())),
+                ("Other", Path(b.absolutePath())),
+                ("Elden Ring Generated", Path(self.generated.absolutePath())),
+            ],
+        )
+        self.assertEqual(plan.natives, [])
+
+    def test_the_generated_position_has_two_values(self) -> None:
+        self.modlist.add("A", kind="package")
+        self.assertEqual(me3.GENERATED_POSITION, "last")
+        self.assertEqual([name for name, _ in self.plan().packages], ["A", "Elden Ring Generated"])
+        with mock.patch.object(me3, "GENERATED_POSITION", "first"):
+            self.assertEqual([name for name, _ in self.plan().packages], ["Elden Ring Generated", "A"])
+
+    def test_disabled_mods_and_mods_of_other_kinds_are_not_packages(self) -> None:
+        self.modlist.add("off", enabled=False, kind="package")
+        self.modlist.add("unknown one", kind="unknown")
+        self.modlist.add("a native", kind="native", files={"x.dll": b"MZ"})
+        self.modlist.mods["a native"].setPluginSetting("Elden Ring Support Plugin", "native_dll", "x.dll")
+        self.assertEqual([name for name, _ in self.plan().packages], ["Elden Ring Generated"])
+
+    def test_a_mod_with_rules_is_loaded_through_its_view(self) -> None:
+        self.modlist.add("Ruled", kind="package")
+        view = self.base / "eldenring/views/Ruled"
+        self.assertEqual(self.plan({"Ruled": view}).packages[0], ("Ruled", view))
+
+    def test_a_disabled_generated_mod_is_not_listed(self) -> None:
+        self.modlist.active.discard("Elden Ring Generated")
+        self.assertEqual(self.plan().packages, [])
+
+    def test_natives_load_from_each_mods_recorded_dll_including_one_in_mods(self) -> None:
+        for name, dll in (("erdyes", "mods/erdyes.dll"), ("radial", "RadialMenu/RadialMenu.dll")):
+            mod = self.modlist.add(name, kind="native", files={dll: b"MZ"})
+            mod.setPluginSetting("Elden Ring Support Plugin", "native_dll", dll)
+        natives = self.plan().natives
+        self.assertEqual(
+            natives,
+            [
+                ("erdyes", self.organizer.modsPath_ / "erdyes/mods/erdyes.dll"),
+                ("radial", self.organizer.modsPath_ / "radial/RadialMenu/RadialMenu.dll"),
+            ],
+        )
+
+    def test_ersc_loads_first_from_the_generated_mod_and_never_from_its_own_folder(self) -> None:
+        self.modlist.add("seamless-coop", kind="ersc", files={"SeamlessCoop/ersc.dll": b"MZ"})
+        native = self.modlist.add("erdyes", kind="native", files={"mods/erdyes.dll": b"MZ"})
+        native.setPluginSetting("Elden Ring Support Plugin", "native_dll", "mods/erdyes.dll")
+        natives = self.plan().natives
+        self.assertEqual(natives[0][1], self.organizer.modsPath_ / "Elden Ring Generated/SeamlessCoop/ersc.dll")
+        self.assertEqual(natives[1][0], "erdyes")
+        self.assertNotIn("seamless-coop", str(natives[0][1]))
+
+    def test_no_ersc_native_when_none_is_enabled(self) -> None:
+        self.modlist.add("seamless-coop", enabled=False, kind="ersc", files={"SeamlessCoop/ersc.dll": b"MZ"})
+        self.assertEqual(self.plan().natives, [])
+
+    def test_a_native_without_a_usable_dll_is_refused_with_its_key(self) -> None:
+        self.modlist.add("broken", kind="native", files={"x.dll": b"MZ"})
+        with self.assertRaises(me3.ProfileError) as caught:
+            self.plan()
+        self.assertEqual(caught.exception.key, "NATIVE_DLL_MISSING")
+        self.assertIn("broken", str(caught.exception))
+        self.modlist.mods["broken"].setPluginSetting("Elden Ring Support Plugin", "native_dll", "../escape.dll")
+        with self.assertRaises(me3.ProfileError):
+            self.plan()
+
+    def test_the_plan_renders_into_a_profile(self) -> None:
+        self.modlist.add("A", kind="package")
+        plan = self.plan()
+        document = tomllib.loads(me3.render(plan.packages, [path for _, path in plan.natives], "ER0000_modded"))
+        self.assertEqual([p["id"] for p in document["packages"]], ["A", "Elden Ring Generated"])
+
+
 if __name__ == "__main__":
     unittest.main()

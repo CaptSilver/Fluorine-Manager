@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import unicodedata
 from pathlib import Path
+from typing import NamedTuple
 
-from . import atomic, me3_host
+from . import atomic, generated, kinds, me3_host, mods
 from .ermlib import paths as ermpaths
+from .ermlib.errors import ErmError
 from .state import InstancePaths
 
 PROFILE_VERSION = "v1"
@@ -157,6 +159,72 @@ def render(
     for name, directory in packages:
         lines += ["[[packages]]", f"id = {_toml_string(name)}", f"path = {_toml_path(directory)}", ""]
     return "\n".join(lines)
+
+
+# Where the generated mod goes in the package list: "last" or "first". me3
+# maps one file per game path and picks a winner without saying so; whether the
+# last or the first listed package wins is the one thing the in-game check of
+# the merge pins, and this constant is the only place that answer lives.
+GENERATED_POSITION = "last"
+
+
+class ProfileError(ErmError):
+    """A mod cannot go into the me3 profile as recorded."""
+
+    def __init__(self, key: str, message: str) -> None:
+        super().__init__(message)
+        self.key = key
+
+
+class ProfilePlan(NamedTuple):
+    # (package id, folder): the mod's own folder, or its view when it has rules.
+    packages: list[tuple[str, Path]]
+    # (label for messages, DLL path), in load order.
+    natives: list[tuple[str, Path]]
+
+
+def plan_profile(organizer, views: dict[str, Path]) -> ProfilePlan:
+    """What the me3 profile loads: the enabled mods, in priority order.
+
+    Packages are the enabled package mods, lowest priority first, each through
+    its view when the profile has rules for it, then the generated mod at
+    GENERATED_POSITION. Natives are the ERSC copy first, as erm emitted it, then
+    every enabled native mod's recorded DLL. ERSC loads from the generated
+    mod's copy, never from the ERSC mod's own folder: it reads its settings next
+    to its DLL, and the password-injected ini lives in the generated mod.
+
+    The generated mod is added only when it is enabled; the gate's placement
+    check has already proved it is there and on top.
+    """
+    packages: list[tuple[str, Path]] = []
+    natives: list[tuple[str, Path]] = []
+    generated_ref = None
+    has_ersc = False
+    for ref in mods.enabled_mods(organizer):
+        if ref.name == generated.NAME:
+            generated_ref = ref
+        elif ref.kind == kinds.PACKAGE:
+            packages.append((ref.name, views.get(ref.name, ref.path)))
+        elif ref.kind == kinds.ERSC:
+            has_ersc = True
+        elif ref.kind == kinds.NATIVE:
+            if not kinds.native_dll_ok(ref.path, ref.native_dll):
+                raise ProfileError(
+                    "NATIVE_DLL_MISSING",
+                    f"{ref.name} is a native mod without a usable DLL (recorded: {ref.native_dll!r}). "
+                    'Open Tools > "Elden Ring: Set mod kind…" and choose the DLL.',
+                )
+            natives.append((ref.name, ref.path / ref.native_dll))
+    if generated_ref is not None:
+        entry = (generated.NAME, generated_ref.path)
+        if GENERATED_POSITION == "first":
+            packages.insert(0, entry)
+        else:
+            packages.append(entry)
+    if has_ersc:
+        ersc_dll = Path(organizer.modsPath()) / generated.NAME / generated.ERSC_DIR / "ersc.dll"
+        natives.insert(0, ("Seamless Co-op", ersc_dll))
+    return ProfilePlan(packages, natives)
 
 
 def write_profile(path: Path, text: str) -> None:
