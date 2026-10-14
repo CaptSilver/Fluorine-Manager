@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import doctor, me3, me3_host, pe, prepare as preparing, procs, saves, session, state
+from . import (
+    archives, deploy, doctor, hardening, me3, me3_host, pe, prepare as preparing, problems, procs, saves,
+    session, state,
+)
+from .ermlib import steam
 from .ermlib.errors import ErmError
 from .prepare import Prepared
 from .veto import Veto
@@ -32,7 +36,7 @@ GAME_RUNNING = "GAME_RUNNING"
 SAVE_RESTORE_PENDING = "SAVE_RESTORE_PENDING"
 NATIVE_DLL_INVALID = "NATIVE_DLL_INVALID"
 ME3_INSTALL_FAILED = "ME3_INSTALL_FAILED"
-GAME_DIR_STRAYS = "GAME_DIR_STRAYS"
+GAME_DIR_STRAYS = deploy.GAME_DIR_STRAYS
 
 ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
 
@@ -95,8 +99,11 @@ class LaunchGate:
     `show_veto(title, text)` and `show_modal(title, text)` display a message,
     `busy(title)` returns a context manager with `update(message)`,
     `prepare(notify)` returns the Prepared result (preparing.prepare over the
-    organizer and the game unless a caller supplies its own), `running()` is
-    procs.game_running and `warn(message)` logs.
+    organizer and the game unless a caller supplies its own), `desired()`
+    returns the config files the enabled natives want in Game/mods/
+    (deploy.desired over the organizer unless supplied), `running()` is
+    procs.game_running, `warn(message)` logs and `invalidate()` tells the
+    problems listeners that something they report may have changed.
     """
 
     def __init__(
@@ -110,6 +117,8 @@ class LaunchGate:
         prepare: Callable[[Callable[[str], None]], Prepared] | None = None,
         running: Callable[[], list[tuple[int, str]]] = procs.game_running,
         warn: Callable[[str], None] | None = None,
+        desired: Callable[[], deploy.Desired] | None = None,
+        invalidate: Callable[[], None] | None = None,
     ) -> None:
         self._organizer = organizer
         self._game = game
@@ -121,6 +130,9 @@ class LaunchGate:
         )
         self._running = running
         self._warn = warn or (lambda message: None)
+        self._desired = desired or (lambda: deploy.desired(self._organizer))
+        # Looked up at call time, so a listener subscribed later is heard.
+        self._invalidate = invalidate or (lambda: problems.invalidate())
         self._session_stamp: str | None = None
 
     def run(self, binary: str, cwd, args: str) -> bool:
@@ -142,6 +154,7 @@ class LaunchGate:
                     "game from Steam for a vanilla run.",
                 )
             self._launch_me3(binary, _dir_text(cwd), args)
+            self._problems_changed()
             return True
         except _Veto as veto:
             self._report_veto(veto)
@@ -153,6 +166,7 @@ class LaunchGate:
             self._record_veto(None, "Unexpected failure", text)
             with contextlib.suppress(Exception):
                 self._show_veto(TITLE, text)
+            self._problems_changed()
             return False
 
     def _mode(self, binary: str) -> str:
@@ -169,8 +183,10 @@ class LaunchGate:
         data = self._load(paths)
         self._session_checks(paths, data)
         self._game_dir_checks()
+        notes = self._deploy(paths)
         self._ensure_host()
         prepared = self._prepared()
+        prepared.warnings[:0] = notes
         self._write_profile(paths, binary, cwd, args, prepared)
         self._snapshot(paths, data, prepared)
         # Last, so a vetoed launch leaves the old stamp and the next run
@@ -219,6 +235,54 @@ class LaunchGate:
                 "files, erm will not work until they are moved back.",
                 GAME_DIR_STRAYS,
             )
+
+    # Config files a native mod reads from Game/mods/<Name>/, and the hardened
+    # launcher that has to be in place before the first of them is copied.
+    # Launch only: a Rebuild neither writes into Game/ nor needs the lock.
+    def _deploy(self, paths: state.InstancePaths) -> list[str]:
+        game_dir = Path(self._game.dataDirectory().absolutePath())
+        seen: list[str] = []
+
+        def launcher() -> str:
+            if not seen:
+                with archives.hash_cache(paths) as cache:
+                    seen.append(hardening.state(game_dir, cache))
+            return seen[0]
+
+        with self._busy("Elden Ring: deploying config files"):
+            applied = deploy.sync(
+                self._desired(), paths, game_dir, launcher=launcher, verify_first=self._build_changed(paths)
+            )
+        for line in applied.lines():
+            self._warn(f"Elden Ring deploy: {line}")
+        notes = applied.attention()
+        current = launcher()
+        if current in (hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED):
+            # None of these touches a me3 launch, which runs eldenring.exe; they
+            # matter to a Steam Play, which is why they are reported.
+            notes.append(f"Launcher: {hardening.describe(current)}")
+        return notes
+
+    def _build_changed(self, paths: state.InstancePaths) -> bool:
+        """Whether Steam's build id is not the one the last launch stamped.
+
+        A patch is the moment a deployed file is most likely not what was
+        recorded. Preparing the mods identifies the build properly but runs
+        after this step, so this reads just the build id from Steam's app
+        manifest.
+        """
+        try:
+            stamped = state.read_build_stamp(paths)
+        except state.StateError:
+            return False  # preparing the mods refuses a damaged stamp
+        library = self._library()
+        if stamped is None or library is None:
+            return False
+        try:
+            buildid = str(steam.read_appmanifest(library).get("buildid", "") or "")
+        except (OSError, ValueError):
+            return False  # preparing the mods refuses a build it cannot identify
+        return buildid not in ("", "0") and buildid != stamped.steam_buildid
 
     def _load(self, paths: state.InstancePaths) -> dict:
         try:
@@ -448,6 +512,14 @@ class LaunchGate:
         self._record_veto(veto.key, veto.step, veto.text())
         with contextlib.suppress(Exception):
             self._show_veto(TITLE, veto.text())
+        self._problems_changed()
+
+    def _problems_changed(self) -> None:
+        # An exception out of the callback reaches the core uncaught.
+        try:
+            self._invalidate()
+        except Exception:
+            self._warn(f"Elden Ring launch gate: a problems listener failed\n{traceback.format_exc()}")
 
     def _record_veto(self, key: str | None, step: str, text: str) -> None:
         # The record is for the diagnose pass; failing to write it must not stop

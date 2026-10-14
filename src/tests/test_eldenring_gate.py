@@ -15,7 +15,10 @@ import eldenring_testsupport as support
 from eldenring_testsupport import synthetic_pe
 
 PACKAGE = support.load_support("_eldenring_gate_tests")
+deploy = support.module(PACKAGE, "deploy")
 gate = support.module(PACKAGE, "gate")
+hardening = support.module(PACKAGE, "hardening")
+kinds = support.module(PACKAGE, "kinds")
 me3 = support.module(PACKAGE, "me3")
 me3_host = support.module(PACKAGE, "me3_host")
 saves = support.module(PACKAGE, "saves")
@@ -101,6 +104,8 @@ class GateCase(unittest.TestCase):
         self.packages: list[tuple[str, Path]] = []
         self.warnings_out: list[str] = []
         self.prepared_calls = 0
+        self.deployables = deploy.Desired()
+        self.invalidations = 0
         self.busy_titles: list[str] = []
         self.progress: list[str] = []
         self.gate = self.new_gate()
@@ -150,7 +155,12 @@ class GateCase(unittest.TestCase):
             prepare=self.fake_prepare,
             running=lambda: list(self.up),
             warn=self.warnings.append,
+            desired=lambda: self.deployables,
+            invalidate=self.count_invalidation,
         )
+
+    def count_invalidation(self) -> None:
+        self.invalidations += 1
 
     # -- the save folder ------------------------------------------------------
 
@@ -1319,6 +1329,7 @@ class PreparedLaunchTests(GateCase):
         self.gate = gate.LaunchGate(
             self.organizer, self.game, show_veto=lambda t, x: self.vetoes.append((t, x)),
             show_modal=lambda t, x: None, prepare=refuse, running=lambda: [],
+            desired=lambda: deploy.Desired(),
         )
         self.assertFalse(self.launch())
         self.assert_vetoed("MERGED_MOD_MISSING", "it is missing", "make it")
@@ -1417,6 +1428,27 @@ class RealPrepareTests(GateCase):
         self.assert_vetoed(gate.NATIVE_DLL_INVALID, "A native")
         self.assertFalse(self.paths.current_me3.exists())
 
+    def test_a_natives_config_file_is_deployed_from_the_real_mod_list_under_a_hardened_launcher(self) -> None:
+        thing = self.mods.add(
+            "Thing mod", files={"mods/Thing.dll": synthetic_pe(), "mods/Thing/config.ini": "a=1\n"}
+        )
+        kinds.set_kind(thing, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=["mods/Thing/config.ini"])
+        self.mods.order.remove("Elden Ring Generated")
+        self.mods.order.append("Elden Ring Generated")
+        game = self.install / "Game"
+        (game / "start_protected_game.exe.erm-backup").write_bytes(b"MZ eac")
+        (game / "start_protected_game.exe").write_bytes(b"MZ game")
+        self.game_tree = tree(self.install)
+        with mock.patch.object(gate.hardening, "is_immutable", return_value=True):
+            self.assertTrue(self.launch(), self.vetoes)
+        self.assertEqual((game / "mods/Thing/config.ini").read_text(), "a=1\n")
+        self.assertEqual(
+            sorted(n["path"] for n in tomllib.loads(self.paths.current_me3.read_text())["natives"]),
+            sorted(str(Path(m.absolutePath()) / dll) for m, dll in ((self.native, "mods/n.dll"), (thing, "mods/Thing.dll"))),
+        )
+        # The one test in this class that writes Game/mods/: the check on exit compares with what it left.
+        self.game_tree = tree(self.install)
+
     def test_a_missing_generated_mod_is_a_veto_from_the_real_preparation(self) -> None:
         self.mods.order.remove("Elden Ring Generated")
         del self.mods.mods["Elden Ring Generated"]
@@ -1509,6 +1541,360 @@ class RebuildTests(GateCase):
     def test_a_rebuild_does_not_need_the_game_to_be_the_active_one(self) -> None:
         self.game.active = False
         self.assertEqual(self.gate.rebuild().live, LIVE)
+
+
+
+class DeployGateCase(GateCase):
+    """A launch that may write Game/mods/<Name>/ and nothing else in Game/."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.locked = True
+        flag = mock.patch.object(gate.hardening, "is_immutable", side_effect=lambda path: self.locked)
+        flag.start()
+        self.addCleanup(flag.stop)
+        self.source = self.tmp / "sources/config.ini"
+        self.source.parent.mkdir()
+        self.source.write_text("a=1\n")
+
+    def assert_game_dir_untouched(self) -> None:
+        self.assertEqual(
+            outside_mods_of(tree(self.install)), outside_mods_of(self.game_tree), "a gate run wrote outside Game/mods/"
+        )
+
+    def want(self, rel="mods/Thing/config.ini", mod="Thing mod") -> None:
+        text = self.source.read_text()
+        wanted = deploy.Wanted(mod, self.source, hashlib.sha256(text.encode()).hexdigest(), len(text))
+        self.deployables.files[rel] = wanted
+
+    def harden_by_hand(self) -> None:
+        """The state erm's harden leaves: the real launcher in the backup, the game in its place."""
+        game = self.install / "Game"
+        (game / "start_protected_game.exe.erm-backup").write_bytes(b"MZ eac")
+        (game / "start_protected_game.exe").write_bytes(b"MZ game")
+        self.game_tree = tree(self.install)
+
+    def deployed(self) -> Path:
+        return self.install / "Game/mods/Thing/config.ini"
+
+    def manifest(self):
+        return deploy.read_manifest(self.paths)
+
+
+def outside_mods_of(snapshot: dict) -> dict:
+    return {key: value for key, value in snapshot.items() if not key.startswith("Game/mods")}
+
+
+class DeployStepTests(DeployGateCase):
+    def test_a_hardened_launcher_lets_the_config_file_into_game_and_the_manifest(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        self.assertTrue(self.launch())
+        self.assertEqual(self.deployed().read_text(), "a=1\n")
+        self.assertEqual(list(self.manifest().files), ["mods/Thing/config.ini"])
+        self.assertEqual(self.manifest().dirs, ["mods/Thing"])
+        self.assertEqual(self.vetoes, [])
+
+    def test_a_launcher_that_is_not_hardened_vetoes_before_a_file_is_copied_or_the_host_touched(self) -> None:
+        self.want()
+        with mock.patch.object(gate.deploy, "apply_copies", wraps=deploy.apply_copies) as copies:
+            self.assertFalse(self.launch())
+        self.assert_vetoed(hardening.HARDEN_REQUIRED, "Harden/Unharden launcher", "start_protected_game.exe")
+        copies.assert_not_called()
+        self.assertFalse((self.install / "Game/mods").exists())
+        self.ensure.assert_not_called()
+        self.assertEqual(self.prepared_calls, 0)
+        self.assertFalse(self.paths.current_me3.exists())
+
+    def test_every_unsafe_launcher_state_vetoes_a_deploy(self) -> None:
+        self.want()
+        game = self.install / "Game"
+        cases = {
+            "swapped-unlocked": (b"MZ eac", b"MZ game", False),
+            "restored": (b"MZ eac", b"MZ eac", True),
+            "stale": (b"MZ eac", b"MZ older game", True),
+        }
+        for name, (backup, launcher, locked) in cases.items():
+            with self.subTest(name):
+                self.vetoes.clear()
+                (game / "start_protected_game.exe.erm-backup").write_bytes(backup)
+                (game / "start_protected_game.exe").write_bytes(launcher)
+                self.game_tree = tree(self.install)
+                self.locked = locked
+                self.assertFalse(self.launch())
+                self.assertEqual(self.last_launch()["report"]["key"], hardening.HARDEN_REQUIRED)
+                self.assertIn(hardening.describe(name), self.last_veto())
+
+    def test_the_deploy_comes_before_the_host_and_the_mods_are_prepared_after_both(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        order = []
+        real_sync = deploy.sync
+        with mock.patch.object(gate.deploy, "sync", side_effect=lambda *a, **k: (order.append("deploy"), real_sync(*a, **k))[1]):
+            self.ensure.side_effect = lambda *a, **k: (order.append("host"), self.ensure.return_value)[1]
+            self.launch()
+        self.assertEqual(order, ["deploy", "host"])
+        self.assertEqual(self.prepared_calls, 1)
+
+    def test_a_native_that_is_no_longer_wanted_leaves_game_even_with_the_launcher_unhardened(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        self.launch()
+        (self.install / "Game/start_protected_game.exe").write_bytes(b"MZ eac")
+        self.game_tree = tree(self.install)
+        self.deployables = deploy.Desired()
+        self.assertTrue(self.launch())
+        self.assertFalse((self.install / "Game/mods/Thing").exists())
+        self.assertEqual(self.manifest().files, {})
+
+    def test_what_the_dll_rewrote_is_kept_and_the_source_copied_again(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        self.launch()
+        self.deployed().write_text("written by the DLL\n")
+        self.assertTrue(self.launch())
+        self.assertEqual(self.deployed().read_text(), "a=1\n")
+        [kept] = list(self.paths.quarantine_game.rglob("config.ini"))
+        self.assertEqual(kept.read_text(), "written by the DLL\n")
+        self.assertTrue(any("Kept mods/Thing/config.ini" in w for w in self.last_launch()["report"]["warnings"]))
+
+    def test_findings_veto_with_their_key_and_nothing_is_written(self) -> None:
+        self.harden_by_hand()
+        for key in (deploy.DEPLOY_COLLISION, deploy.DEPLOY_RESERVED, deploy.DEPLOY_CONFIG_INVALID):
+            with self.subTest(key):
+                self.vetoes.clear()
+                self.deployables = deploy.Desired(findings=[deploy.Finding(key, "Thing mod", "Thing mod: it is wrong.")])
+                self.assertFalse(self.launch())
+                self.assert_vetoed(key, "Thing mod: it is wrong.")
+        self.assertFalse((self.install / "Game/mods").exists())
+        self.ensure.assert_not_called()
+
+    def test_a_symlinked_game_mods_folder_vetoes_the_launch_and_nothing_is_written_through_it(self) -> None:
+        elsewhere = self.tmp / "their mods"
+        elsewhere.mkdir()
+        (self.install / "Game/mods").symlink_to(elsewhere)
+        self.game_tree = tree(self.install)
+        self.harden_by_hand()
+        self.want()
+        with mock.patch.object(gate.deploy, "sync", wraps=deploy.sync) as sync:
+            self.assertFalse(self.launch())
+        self.assert_vetoed(gate.GAME_DIR_STRAYS, "mods")
+        sync.assert_not_called()
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_a_stray_in_the_way_vetoes_with_the_strays_key_and_is_not_touched(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        self.deployed().parent.mkdir(parents=True)
+        self.deployed().write_text("someone else's\n")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.GAME_DIR_STRAYS, "mods/Thing/config.ini")
+        self.assertEqual(self.deployed().read_text(), "someone else's\n")
+
+    def test_the_strays_key_is_the_one_the_game_folder_scan_uses(self) -> None:
+        self.assertEqual(gate.GAME_DIR_STRAYS, "GAME_DIR_STRAYS")
+
+    def test_a_file_in_place_with_the_wanted_bytes_is_adopted(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        self.deployed().parent.mkdir(parents=True)
+        self.deployed().write_text("a=1\n")
+        self.assertTrue(self.launch())
+        self.assertEqual(list(self.manifest().files), ["mods/Thing/config.ini"])
+
+    def test_a_damaged_manifest_vetoes_and_is_left_for_the_user(self) -> None:
+        self.paths.root.mkdir(parents=True)
+        self.paths.deploy_manifest.write_text("{")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(deploy.DEPLOY_MANIFEST_DAMAGED, "deploy-manifest.json")
+        self.assertEqual(self.paths.deploy_manifest.read_text(), "{")
+
+    def test_a_copy_that_fails_vetoes_with_the_drift_key_and_the_reason(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        real = deploy.atomic.write_bytes_atomic
+
+        def full_for_the_config(path, data, *args, **kwargs):
+            if Path(path).name == "config.ini":
+                raise OSError("disk full")
+            return real(path, data, *args, **kwargs)
+
+        with mock.patch.object(deploy.atomic, "write_bytes_atomic", side_effect=full_for_the_config):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(deploy.DEPLOY_DRIFT, "disk full")
+
+    def test_the_progress_dialog_names_the_deploy(self) -> None:
+        self.launch()
+        self.assertIn("Elden Ring: deploying config files", self.busy_titles)
+
+    def test_a_rebuild_never_deploys_or_ensures_the_host(self) -> None:
+        self.harden_by_hand()
+        self.want()
+        with mock.patch.object(gate.deploy, "sync") as sync, mock.patch.object(gate.deploy, "apply_copies") as copies:
+            self.gate.rebuild()
+        sync.assert_not_called()
+        copies.assert_not_called()
+        self.ensure.assert_not_called()
+        self.assertFalse((self.install / "Game/mods").exists())
+
+    def test_without_a_desired_callable_the_gate_asks_deploy_for_the_organizers_natives(self) -> None:
+        plain = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: None, show_modal=lambda t, x: None,
+            prepare=self.fake_prepare, running=lambda: [], invalidate=lambda: None,
+        )
+        with mock.patch.object(gate.deploy, "desired", return_value=deploy.Desired()) as asked:
+            plain.run(str(self.binary), str(self.paths.root), self.args)
+        asked.assert_called_once_with(self.organizer)
+
+
+class LauncherWarningTests(DeployGateCase):
+    def report_warnings(self) -> list:
+        return self.last_launch()["report"]["warnings"]
+
+    def test_an_unsafe_launcher_with_nothing_deployed_is_a_warning_and_the_launch_goes_on(self) -> None:
+        game = self.install / "Game"
+        cases = {
+            "swapped-unlocked": (b"MZ eac", b"MZ game", False),
+            "restored": (b"MZ eac", b"MZ eac", True),
+            "stale": (b"MZ eac", b"MZ older game", True),
+        }
+        for name, (backup, launcher, locked) in cases.items():
+            with self.subTest(name):
+                (game / "start_protected_game.exe.erm-backup").write_bytes(backup)
+                (game / "start_protected_game.exe").write_bytes(launcher)
+                self.game_tree = tree(self.install)
+                self.locked = locked
+                self.assertTrue(self.launch())
+                self.assertIn(f"Launcher: {hardening.describe(name)}", self.report_warnings())
+
+    def test_vanilla_and_hardened_launchers_add_no_warning(self) -> None:
+        self.assertTrue(self.launch())
+        self.assertEqual(self.report_warnings(), [])
+        self.harden_by_hand()
+        self.assertTrue(self.launch())
+        self.assertEqual(self.report_warnings(), [])
+
+    def test_the_hashes_of_the_executables_go_through_the_instance_cache(self) -> None:
+        self.harden_by_hand()
+        self.launch()
+        cached = json.loads(self.paths.archive_hashes.read_text())
+        self.assertTrue(any(key.endswith("eldenring.exe") for key in cached))
+
+    def test_prepares_own_warnings_follow_the_launcher_ones(self) -> None:
+        game = self.install / "Game"
+        (game / "start_protected_game.exe.erm-backup").write_bytes(b"MZ eac")
+        (game / "start_protected_game.exe").write_bytes(b"MZ game")
+        self.game_tree = tree(self.install)
+        self.locked = False
+        self.warnings_out = ["a mod is unknown"]
+        self.launch()
+        self.assertEqual(self.report_warnings()[-1], "a mod is unknown")
+        self.assertTrue(self.report_warnings()[0].startswith("Launcher: "))
+
+
+class BuildChangeTests(DeployGateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.harden_by_hand()
+        self.want()
+        self.manifest_file = self.library / "steamapps/appmanifest_1245620.acf"
+        self.set_buildid("25080141")
+        state.write_build_stamp(self.paths, LIVE)
+        self.launch()
+
+    def set_buildid(self, buildid: str) -> None:
+        self.manifest_file.write_text('"AppState"\n{\n\t"buildid"\t\t"%s"\n}\n' % buildid)
+
+    def test_the_same_build_copies_a_rewritten_file_again_without_asking(self) -> None:
+        self.deployed().write_text("written by the DLL\n")
+        self.assertTrue(self.launch())
+        self.assertEqual(self.deployed().read_text(), "a=1\n")
+
+    def test_a_new_build_with_a_changed_deployed_file_vetoes_before_anything_else(self) -> None:
+        self.set_buildid("25999999")
+        self.deployed().write_text("changed by the update\n")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(deploy.DEPLOY_DRIFT, "mods/Thing/config.ini: its bytes changed", "Sync deployed files")
+        self.assertEqual(self.deployed().read_text(), "changed by the update\n")
+        self.assertFalse(self.paths.quarantine_game.exists())
+
+    def test_a_new_build_with_an_intact_deploy_goes_on(self) -> None:
+        self.set_buildid("25999999")
+        self.assertTrue(self.launch())
+
+    def test_no_stamp_or_no_library_means_the_build_did_not_change(self) -> None:
+        self.paths.build_stamp.unlink()
+        self.set_buildid("25999999")
+        self.deployed().write_text("changed\n")
+        self.assertTrue(self.launch())
+
+    def test_a_damaged_stamp_is_left_to_preparing_the_mods(self) -> None:
+        self.paths.build_stamp.write_text("{nope")
+        self.deployed().write_text("changed\n")
+        self.assertTrue(self.launch())
+
+    def test_an_app_manifest_that_cannot_be_parsed_is_not_a_change_and_does_not_escape(self) -> None:
+        self.manifest_file.write_text('"AppState"\n{\n\t"SizeOnDisk"\t\t"many"\n\t"buildid"\t\t"25999999"\n}\n')
+        self.deployed().write_text("changed\n")
+        self.assertTrue(self.launch())
+
+    def test_a_missing_or_zero_build_id_is_not_a_change(self) -> None:
+        self.deployed().write_text("changed\n")
+        for text in ('"AppState"\n{\n}\n', '"AppState"\n{\n\t"buildid"\t\t"0"\n}\n'):
+            with self.subTest(text):
+                self.manifest_file.write_text(text)
+                self.assertTrue(self.launch())
+                self.deployed().write_text("changed\n")
+
+
+class ProblemsListenerTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def test_a_launch_that_passes_tells_the_listeners_once(self) -> None:
+        self.assertTrue(self.launch())
+        self.assertEqual(self.invalidations, 1)
+
+    def test_a_veto_tells_them_once_after_the_veto_is_recorded(self) -> None:
+        self.up = [(1, "me3")]
+        seen = []
+        self.gate._invalidate = lambda: seen.append(self.last_launch()["report"]["outcome"])
+        self.assertFalse(self.launch())
+        self.assertEqual(seen, ["vetoed"])
+
+    def test_an_unexpected_failure_tells_them_too(self) -> None:
+        self.ensure.side_effect = None
+        with mock.patch.object(gate.deploy, "sync", side_effect=RuntimeError("boom")):
+            self.assertFalse(self.launch())
+        self.assertEqual(self.invalidations, 1)
+
+    def test_a_tool_outside_the_game_or_another_game_does_not(self) -> None:
+        self.launch(binary="/usr/bin/xterm")
+        self.game.active = False
+        self.launch()
+        self.assertEqual(self.invalidations, 0)
+
+    def test_a_listener_that_raises_never_escapes_the_gate(self) -> None:
+        def broken() -> None:
+            raise RuntimeError("listener")
+
+        self.gate._invalidate = broken
+        self.assertTrue(self.launch())
+        self.up = [(1, "me3")]
+        self.assertFalse(self.launch())
+        self.assertTrue(any("listener" in warning for warning in self.warnings))
+
+    def test_the_default_listener_is_the_problems_hub_looked_up_at_call_time(self) -> None:
+        plain = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: None, show_modal=lambda t, x: None,
+            prepare=self.fake_prepare, running=lambda: [], desired=lambda: deploy.Desired(),
+        )
+        heard = []
+        self.addCleanup(support.module(PACKAGE, "problems").subscribe(lambda: heard.append(1)))
+        plain.run(str(self.binary), str(self.paths.root), self.args)
+        self.assertEqual(heard, [1])
 
 
 if __name__ == "__main__":
