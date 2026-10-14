@@ -1473,3 +1473,7 @@ add_test(
     NAME test_eldenring_mods
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_mods.py
 )
+add_test(
+    NAME test_eldenring_coop_settings
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_coop_settings.py
+)
