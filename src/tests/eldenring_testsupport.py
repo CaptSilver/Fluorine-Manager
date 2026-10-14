@@ -98,6 +98,8 @@ def synthetic_pe(
 # -- fakes for the mobase objects the plugin talks to -------------------------
 
 import json  # noqa: E402
+import os  # noqa: E402
+import posixpath  # noqa: E402
 import zipfile  # noqa: E402
 
 STATE_EXISTS = 0x01
@@ -255,6 +257,34 @@ class FakeModList:
         shutil.rmtree(mod.absolutePath(), ignore_errors=True)
         return True
 
+    def renameMod(self, mod, name):  # noqa: N802
+        """Rename a mod the way ModList::renameMod does, in every profile.
+
+        The core emits modRenamed, MainWindow::modRenamed calls
+        Profile::renameModInAllProfiles, and that rewrites each profile's
+        modlist.txt, so every profile follows the old copy under its new name.
+        """
+        old = mod.name()
+        if name in self.mods:
+            raise AssertionError(f"{name} is taken")
+        source = Path(mod.absolutePath())
+        target = source.with_name(name)
+        source.rename(target)
+        mod._name, mod._path = name, target
+        del self.mods[old]
+        self.mods[name] = mod
+        self.order[self.order.index(old)] = name
+        if old in self.active:
+            self.active.discard(old)
+            self.active.add(name)
+        for modlist in sorted(self.organizer.profiles.glob("*/modlist.txt")):
+            lines = modlist.read_bytes().decode("utf-8").splitlines(keepends=True)
+            for index, line in enumerate(lines):
+                if line[:1] in ("+", "-", "*") and line[1:].rstrip("\r\n") == old:
+                    lines[index] = line[0] + name + line[1 + len(old):]
+            modlist.write_bytes("".join(lines).encode("utf-8"))
+        return mod
+
     def onModInstalled(self, callback) -> bool:  # noqa: N802
         self.installed_callbacks.append(callback)
         return True
@@ -277,6 +307,80 @@ class FakeModList:
         for mod in queued:
             for callback in self.installed_callbacks:
                 callback(mod)
+
+
+class FakeDownloadManager:
+    """IDownloadManager over the organizer's downloads folder; nothing is fetched.
+
+    A start records the request and returns an id, or 0 when `refuse` is set
+    (what startDownloadURLs returns when addDownload fails). Like
+    DownloadManager::startDownload, a start whose file name is already in
+    downloads/ is a test failure: the real one opens a modal "Download again?"
+    box there. The test says what each request will be saved as through
+    `names` (an URL, or (game, mod id, file id)), then calls `deliver`.
+    """
+
+    def __init__(self, organizer) -> None:
+        self.organizer = organizer
+        self.started: list[tuple] = []
+        self.names: dict[object, str] = {}
+        self.files: dict[int, Path] = {}
+        self.complete_callbacks: list = []
+        self.failed_callbacks: list = []
+        self.refuse = False
+        self._next = 1
+
+    def _begin(self, name: str) -> int:
+        if os.path.lexists(self.organizer.downloads / name):
+            raise AssertionError(f"{name} is already in downloads/; DownloadManager would ask 'Download again?'")
+        number = self._next
+        self._next += 1
+        self.files[number] = self.organizer.downloads / name
+        return number
+
+    def startDownloadURLs(self, urls) -> int:  # noqa: N802
+        self.started.append(("urls", list(urls)))
+        if self.refuse:
+            return 0
+        return self._begin(self.names.get(urls[0]) or posixpath.basename(urls[0]))
+
+    def startDownloadNexusFileForGame(self, game_name, mod_id, file_id) -> int:  # noqa: N802
+        self.started.append(("nexus", game_name, mod_id, file_id))
+        name = self.names.get((game_name, mod_id, file_id))
+        if name is None:
+            raise AssertionError(f"say what {(game_name, mod_id, file_id)} is saved as in `names`")
+        return self._begin(name)
+
+    def downloadPath(self, id) -> str:  # noqa: N802
+        return str(self.files[id]) if id in self.files else ""
+
+    def onDownloadComplete(self, callback) -> bool:  # noqa: N802
+        self.complete_callbacks.append(callback)
+        return True
+
+    def onDownloadFailed(self, callback) -> bool:  # noqa: N802
+        self.failed_callbacks.append(callback)
+        return True
+
+    def deliver(self, id, data: bytes, name: str | None = None) -> None:
+        """Finish download `id`: write its bytes, under `name` when the manager renamed it, and tell the listeners."""
+        path = self.files[id] if name is None else self.organizer.downloads / name
+        self.files[id] = path
+        path.write_bytes(data)
+        for callback in list(self.complete_callbacks):
+            callback(id)
+
+    def arrive(self, name: str, data: bytes) -> int:
+        """A download nobody asked this plugin for (the browser route): a new id, finished."""
+        number = self._next
+        self._next += 1
+        self.files[number] = self.organizer.downloads / name
+        self.deliver(number, data)
+        return number
+
+    def fail(self, id) -> None:
+        for callback in list(self.failed_callbacks):
+            callback(id)
 
 
 class FakeOrganizer:
@@ -305,6 +409,8 @@ class FakeOrganizer:
         self.install_hook = None  # (filename, name) -> FakeMod | None
         self.refuse_create = False
         self.profile_callbacks: list = []
+        self.download_manager = FakeDownloadManager(self)
+        self.installing = False
 
     # -- paths
     def basePath(self) -> str:  # noqa: N802
@@ -328,6 +434,9 @@ class FakeOrganizer:
     def onProfileChanged(self, callback) -> bool:  # noqa: N802
         self.profile_callbacks.append(callback)
         return True
+
+    def downloadManager(self) -> FakeDownloadManager:  # noqa: N802
+        return self.download_manager
 
     # -- settings
     def pluginSetting(self, plugin, key):  # noqa: N802
@@ -380,7 +489,13 @@ class FakeOrganizer:
     def installMod(self, filename, name_suggestion=""):  # noqa: N802
         record = {"filename": str(filename), "name": name_suggestion}
         self.install_calls.append(record)
-        return (self.install_hook or self.default_install)(filename, name_suggestion)
+        # The core extracts inside a nested event loop (installationmanager.cpp:243), so
+        # anything that completes meanwhile is delivered while this is set.
+        self.installing = True
+        try:
+            return (self.install_hook or self.default_install)(filename, name_suggestion)
+        finally:
+            self.installing = False
 
     def default_install(self, filename, name_suggestion):
         """Extract the whole archive, as the Quick installer does in import mode."""

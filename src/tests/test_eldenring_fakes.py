@@ -108,5 +108,101 @@ class OrganizerTests(FakeCase):
         self.assertTrue((Path(elsewhere.profilePath()) / "modlist.txt").is_file())
 
 
+class RenameTests(FakeCase):
+    def test_a_renamed_mod_moves_on_disk_and_keeps_its_place_and_state(self) -> None:
+        self.modlist.add("low")
+        old = self.modlist.add("Mod", files={"regulation.bin": b"x"})
+        self.modlist.add("high", enabled=False)
+        renamed = self.modlist.renameMod(old, "Mod (replaced 1)")
+        self.assertIs(renamed, old)
+        self.assertEqual(old.name(), "Mod (replaced 1)")
+        self.assertEqual(self.modlist.allModsByProfilePriority(), ["low", "Mod (replaced 1)", "high"])
+        self.assertIsNone(self.modlist.getMod("Mod"))
+        self.assertTrue(self.modlist.state("Mod (replaced 1)") & support.STATE_ACTIVE)
+        self.assertEqual((self.organizer.modsPath_ / "Mod (replaced 1)" / "regulation.bin").read_bytes(), b"x")
+        self.assertFalse((self.organizer.modsPath_ / "Mod").exists())
+
+    def test_every_profile_follows_the_old_copy_under_its_new_name(self) -> None:
+        self.modlist.add("Mod")
+        other = self.organizer.profiles / "Other"
+        other.mkdir()
+        (other / "modlist.txt").write_bytes(b"# generated\r\n-Mod\r\n+Modest\r\n")
+        self.modlist.renameMod(self.modlist.getMod("Mod"), "Mod (replaced 1)")
+        self.assertEqual((other / "modlist.txt").read_bytes(), b"# generated\r\n-Mod (replaced 1)\r\n+Modest\r\n")
+
+    def test_renaming_onto_a_taken_name_fails_loudly(self) -> None:
+        self.modlist.add("a")
+        self.modlist.add("b")
+        with self.assertRaises(AssertionError):
+            self.modlist.renameMod(self.modlist.getMod("a"), "b")
+
+
+class DownloadManagerTests(FakeCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.manager = self.organizer.downloadManager()
+
+    def test_the_organizer_hands_out_one_manager(self) -> None:
+        self.assertIs(self.organizer.downloadManager(), self.manager)
+
+    def test_a_started_download_lands_when_the_test_delivers_it(self) -> None:
+        done = []
+        self.manager.onDownloadComplete(done.append)
+        number = self.manager.startDownloadURLs(["https://example.invalid/dl/a.zip"])
+        self.assertGreater(number, 0)
+        self.assertEqual(self.manager.started, [("urls", ["https://example.invalid/dl/a.zip"])])
+        self.assertEqual(self.manager.downloadPath(number), str(self.organizer.downloads / "a.zip"))
+        self.manager.deliver(number, b"bytes")
+        self.assertEqual((self.organizer.downloads / "a.zip").read_bytes(), b"bytes")
+        self.assertEqual(done, [number])
+
+    def test_a_name_the_manager_renamed_is_what_downloadpath_reports(self) -> None:
+        number = self.manager.startDownloadURLs(["https://example.invalid/dl/a.zip"])
+        self.manager.deliver(number, b"bytes", name="1_a.zip")
+        self.assertEqual(self.manager.downloadPath(number), str(self.organizer.downloads / "1_a.zip"))
+
+    def test_starting_over_a_name_already_in_downloads_fails_like_the_download_again_box(self) -> None:
+        (self.organizer.downloads / "a.zip").write_bytes(b"old")
+        with self.assertRaises(AssertionError):
+            self.manager.startDownloadURLs(["https://example.invalid/dl/a.zip"])
+
+    def test_a_nexus_start_needs_the_test_to_name_the_file(self) -> None:
+        with self.assertRaises(AssertionError):
+            self.manager.startDownloadNexusFileForGame("eldenring", 6927, 37187)
+        self.manager.names[("eldenring", 6927, 37187)] = "erdyes.zip"
+        number = self.manager.startDownloadNexusFileForGame("eldenring", 6927, 37187)
+        self.assertEqual(self.manager.downloadPath(number), str(self.organizer.downloads / "erdyes.zip"))
+        self.assertEqual(self.manager.started[-1], ("nexus", "eldenring", 6927, 37187))
+
+    def test_a_refused_start_returns_zero_like_startdownloadurls(self) -> None:
+        self.manager.refuse = True
+        self.assertEqual(self.manager.startDownloadURLs(["https://example.invalid/a.zip"]), 0)
+
+    def test_a_failure_reaches_the_failure_listeners(self) -> None:
+        failed = []
+        self.manager.onDownloadFailed(failed.append)
+        number = self.manager.startDownloadURLs(["https://example.invalid/a.zip"])
+        self.manager.fail(number)
+        self.assertEqual(failed, [number])
+
+    def test_a_browser_download_arrives_under_a_new_id(self) -> None:
+        done = []
+        self.manager.onDownloadComplete(done.append)
+        number = self.manager.arrive("picked.zip", b"by hand")
+        self.assertEqual(done, [number])
+        self.assertEqual((self.organizer.downloads / "picked.zip").read_bytes(), b"by hand")
+        self.assertEqual(self.manager.downloadPath(number), str(self.organizer.downloads / "picked.zip"))
+
+    def test_an_unknown_id_has_no_path(self) -> None:
+        self.assertEqual(self.manager.downloadPath(99), "")
+
+    def test_an_install_is_marked_in_flight_while_the_hook_runs(self) -> None:
+        seen = []
+        self.organizer.install_hook = lambda filename, name: seen.append(self.organizer.installing)
+        self.organizer.installMod("x.zip", "X")
+        self.assertEqual(seen, [True])
+        self.assertFalse(self.organizer.installing)
+
+
 if __name__ == "__main__":
     unittest.main()
