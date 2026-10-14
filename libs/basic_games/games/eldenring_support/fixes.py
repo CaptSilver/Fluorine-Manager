@@ -250,6 +250,13 @@ class Fixes:
         vanilla = self._recorded(paths)
         manifest = deploy.load_manifest(paths)
         live = self._live(paths, game_dir, library)
+        # The diagnosis only offers this on a build change, but the row can be stale: at the
+        # recorded build a changed file is a modified one, not an update.
+        if not inventory.build_changed(vanilla, live.steam_buildid or self._buildid(library)):
+            raise ErmError(
+                "Steam's build is the one that was recorded, so nothing here is an update. Use the fix "
+                "for changed game files to record or restore what differs."
+            )
         with archives.hash_cache(paths) as cache:
             found = inventory.diff(game_dir, manifest, vanilla, desired=self._desired(), cache=cache)
             labels = {

@@ -424,6 +424,16 @@ class AcceptUpdateTests(FixCase):
         self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
         self.assertTrue((self.game_dir / "version.dll").exists())
 
+    def test_at_the_recorded_build_a_changed_plain_file_is_not_recorded(self) -> None:
+        (self.library / "steamapps/appmanifest_1245620.acf").write_text('"AppState"\n{\n\t"buildid"\t\t"25080141"\n}\n')
+        self.identified = LIVE
+        self.put("sd/sd.bdt", b"a modified archive")
+        before = self.paths.vanilla_inventory.read_bytes()
+        self.fixes.run("accept-update")
+        self.assertEqual(self.choices, [])
+        self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+        self.assertIn("changed game files", self.last_text())
+
     def test_nothing_suspect_says_nothing_needs_an_answer(self) -> None:
         (self.game_dir / "version.dll").unlink()
         self.put("steam_api64.dll", b"MZ steam")
