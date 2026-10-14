@@ -20,11 +20,10 @@ import re
 import shutil
 import tomllib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import archives, atomic, generated, kinds, state
+from . import archives, atomic, generated, kinds, session, state
 from .ermlib import gamebuild, manifest, me3pkg
 from .ermlib import paths as ermpaths
 from .ermlib import saves as ermsaves
@@ -93,6 +92,21 @@ def _read_json(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ImportStopped(f"{path} does not hold a JSON object")
     return data
+
+
+def read_installed(erm_dir) -> dict:
+    """installed.json of an erm checkout. ImportStopped when it is missing or damaged."""
+    path = Path(erm_dir) / "installed.json"
+    if not os.path.isfile(path):
+        raise ImportStopped(f"{erm_dir} has no installed.json; choose the erm checkout folder")
+    return _read_json(path)
+
+
+def _recorded_files(installed: dict, mod_id: str) -> list[str]:
+    """The paths installed.json lists for `mod_id`; nothing when the entry is not an object with a list."""
+    entry = installed.get(mod_id)
+    files = entry.get("files") if isinstance(entry, dict) else None
+    return [item for item in files if isinstance(item, str)] if isinstance(files, list) else []
 
 
 _OLD_SHAPE = re.compile(
@@ -354,7 +368,7 @@ def _dll_sources(entry: Entry, files: list[str], mod_dir: Path):
 
 def _deploy_proposal(files: list[str], native_dll: str) -> list[str]:
     """The config files erm put in mods/<Name>/ for this DLL, from installed.json."""
-    folder = f"{Path(native_dll).parent.as_posix()}/{Path(native_dll).stem}/".lstrip("./")
+    folder = f"{Path(native_dll).parent.as_posix()}/{Path(native_dll).stem}/".removeprefix("./")
     return sorted(
         f for f in files
         if f.startswith(folder) and "/" not in f[len(folder):] and kinds.is_config_file(f[len(folder):])
@@ -527,7 +541,9 @@ def _carry_password(organizer, erm_dir: Path, report: Report) -> None:
         for line in secrets.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line.startswith("COOP_PASSWORD="):
+                # The first line wins, as in erm's own read_secret.
                 value = line.split("=", 1)[1].strip()
+                break
     except OSError:
         report.info("no secrets.env, so the co-op password was not carried over")
         return
@@ -551,17 +567,20 @@ def run(
     guessed=None,
     version_info: Callable[[str], object] = lambda text: text,
     stamp: str | None = None,
+    report: Report | None = None,
 ) -> Report:
     """Import the erm checkout at `erm_dir`; the Report says what happened.
 
     `profiles` are the erm profile names to import, in order; the default is
-    all of them. `save_dir` is the folder holding the save files. Raises
-    ImportStopped when it cannot go on, with everything done up to there kept
-    and the Report of it on the exception. An ErmError or OSError from deeper
-    in (the generated mod could not be created, a write failed) ends the same
-    way, so the caller never has an error without the report.
+    all of them. `save_dir` is the folder holding the save files. `report` is
+    filled and returned when the caller has one already, so the second part of
+    the import can carry on in the same report. Raises ImportStopped when it
+    cannot go on, with everything done up to there kept and the Report of it on
+    the exception. Any other error from deeper in (the generated mod could not
+    be created, a write failed, an unexpected exception) ends the same way, so
+    the caller never has an error without the report.
     """
-    report = Report()
+    report = report if report is not None else Report()
     try:
         return _run(
             organizer, Path(erm_dir), report, save_dir=save_dir, profiles=profiles, guessed=guessed,
@@ -574,16 +593,16 @@ def run(
         raise ImportStopped(str(exc), report) from exc
     except OSError as exc:
         raise ImportStopped(f"{type(exc).__name__}: {exc}", report) from exc
+    except Exception as exc:
+        raise ImportStopped(f"unexpected {type(exc).__name__}: {exc}", report) from exc
 
 
 def _run(
     organizer, erm_dir: Path, report: Report, *, save_dir, profiles, guessed, version_info, stamp,
 ) -> Report:
-    if not os.path.isfile(erm_dir / "installed.json"):
-        raise ImportStopped(f"{erm_dir} has no installed.json; choose the erm checkout folder")
-    installed = _read_json(erm_dir / "installed.json")
+    installed = read_installed(erm_dir)
     paths = state.InstancePaths(organizer)
-    stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = stamp or session.now_stamp()
 
     _backup_saves(paths, Path(save_dir), stamp, report)
     _carry_build_knowledge(erm_dir, installed, paths, report)
@@ -639,7 +658,7 @@ def _run(
             report.info(f"{entry.id}: install mode {entry.install!r} is not imported")
             continue
         lock_entry = lock.get(entry.id) or {}
-        files = [str(f) for f in (installed.get(entry.id) or {}).get("files", [])]
+        files = _recorded_files(installed, entry.id)
         if entry.install in ("game", "mods") and any(f.lower() == "dinput8.dll" for f in files):
             report.info(f"{entry.id}: Elden Mod Loader is not needed any more and is not installed")
             continue

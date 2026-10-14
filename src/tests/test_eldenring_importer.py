@@ -18,6 +18,7 @@ kinds = support.module(PACKAGE, "kinds")
 generated = support.module(PACKAGE, "generated")
 state = support.module(PACKAGE, "state")
 errors = support.module(PACKAGE, "ermlib.errors")
+saves = support.module(PACKAGE, "saves")
 
 sys.path.insert(0, str(support.ROOT / "src/tests/eldenring"))
 from tests.build_fixtures import _regulation_blob  # noqa: E402  (needs the aliased ermlib)
@@ -148,7 +149,7 @@ class ImporterCase(unittest.TestCase):
     def run_import(self, **kwargs) -> importer.Report:
         kwargs.setdefault("save_dir", self.save_dir)
         kwargs.setdefault("guessed", lambda name: name)
-        kwargs.setdefault("stamp", "20261014T010203Z")
+        kwargs.setdefault("stamp", "20261014T010203000001Z")
         return importer.run(self.organizer, self.erm, **kwargs)
 
     def mod(self, name):
@@ -217,7 +218,7 @@ class SaveBackupTests(ImporterCase):
         self.run_import()
         self.assertEqual(tree(self.save_dir), before)
         for name, data in files.items():
-            copy = self.paths.save_backups / f"{name}.20261014T010203Z-pre-erm-import"
+            copy = self.paths.save_backups / f"{name}.20261014T010203000001Z-pre-erm-import"
             self.assertEqual(copy.read_bytes(), data, name)
 
     def test_no_save_files_is_a_note_not_an_error(self) -> None:
@@ -352,10 +353,9 @@ class InstallTests(ImporterCase):
         del installed["elden-mod-loader"]
         (self.erm / "installed.json").write_text(json.dumps(installed))
         report = self.run_import(profiles=["base"])
-        mod = self.modlist.getMod("elden-mod-loader")
-        if mod is not None:
-            self.assertEqual(self.setting("elden-mod-loader", "kind"), "unknown")
-            self.assertFalse(self.setting("elden-mod-loader", "native_dll"))
+        self.assertIsNotNone(self.modlist.getMod("elden-mod-loader"))
+        self.assertEqual(self.setting("elden-mod-loader", "kind"), "unknown")
+        self.assertFalse(self.setting("elden-mod-loader", "native_dll"))
         self.assertNotIn("elden-mod-loader: installed as native", report.text())
 
     def test_the_kinds_survive_the_install_callbacks_that_arrive_after_the_loop(self) -> None:
@@ -785,6 +785,66 @@ class StoppedReportTests(ImporterCase):
         self.assertEqual(caught.exception.report.lines, [])
 
 
+class RobustnessTests(ImporterCase):
+    def test_the_default_stamp_is_the_shape_the_save_tools_read(self) -> None:
+        (self.save_dir / "ER0000.co2").write_bytes(b"coop")
+        self.run_import(stamp=None)
+        [backup] = saves.restorable_backups(self.paths.save_backups)
+        self.assertEqual((backup.base, backup.label), ("ER0000.co2", "pre-erm-import"))
+
+    def test_an_unexpected_exception_ends_as_a_stop_that_carries_the_report(self) -> None:
+        (self.save_dir / "ER0000.co2").write_bytes(b"coop")
+        with mock.patch.object(importer, "_carry_build_knowledge", side_effect=AttributeError("odd")):
+            with self.assertRaises(importer.ImportStopped) as caught:
+                self.run_import()
+        self.assertIn("AttributeError", str(caught.exception))
+        self.assertTrue(any("backed up ER0000.co2" in text for _, text in caught.exception.report.lines))
+
+    def test_a_report_handed_in_is_the_one_filled_and_returned(self) -> None:
+        mine = importer.Report()
+        mine.info("earlier")
+        returned = self.run_import(report=mine)
+        self.assertIs(returned, mine)
+        self.assertEqual(mine.lines[0], ("info", "earlier"))
+        self.assertGreater(len(mine.lines), 1)
+
+    def test_an_installed_json_entry_that_is_not_an_object_or_has_no_file_list_is_not_fatal(self) -> None:
+        installed = json.loads((self.erm / "installed.json").read_text())
+        installed["adjust-the-fov"] = ["mods/AdjustTheFov.dll"]
+        installed["erdyes"] = {"files": "mods/erdyes.dll"}
+        (self.erm / "installed.json").write_text(json.dumps(installed))
+        self.run_import()
+        self.assertIsNotNone(self.modlist.getMod("adjust-the-fov"))
+        self.assertIsNotNone(self.modlist.getMod("erdyes"))
+
+    def test_recorded_files_tolerates_any_shape(self) -> None:
+        installed = {"a": {"files": ["x", 3, "y"]}, "b": ["x"], "c": {"files": "x"}, "d": None}
+        self.assertEqual(importer._recorded_files(installed, "a"), ["x", "y"])
+        for mod_id in ("b", "c", "d", "missing"):
+            self.assertEqual(importer._recorded_files(installed, mod_id), [], mod_id)
+
+    def test_the_first_password_line_wins_as_in_erm(self) -> None:
+        (self.erm / "secrets.env").write_text("COOP_PASSWORD=first\nCOOP_PASSWORD=second\n")
+        self.run_import()
+        self.assertEqual(self.organizer.pluginSetting(kinds.PLUGIN, "coop_password"), "first")
+
+    def test_a_dot_folder_keeps_its_dot_in_the_config_proposal(self) -> None:
+        self.assertEqual(
+            importer._deploy_proposal([".x/config.ini", "x/other.ini"], ".x.dll"), [".x/config.ini"]
+        )
+        self.assertEqual(importer._deploy_proposal(["a/b/x/config.ini"], "a/b/x.dll"), ["a/b/x/config.ini"])
+
+    def test_installed_json_is_read_by_one_function_that_refuses_a_missing_or_damaged_file(self) -> None:
+        self.assertIn("_build", importer.read_installed(self.erm))
+        (self.erm / "installed.json").write_text("[1]")
+        with self.assertRaises(importer.ImportStopped):
+            importer.read_installed(self.erm)
+        (self.erm / "installed.json").unlink()
+        with self.assertRaises(importer.ImportStopped) as caught:
+            importer.read_installed(self.erm)
+        self.assertIn("installed.json", str(caught.exception))
+
+
 class PasswordTests(ImporterCase):
     def test_the_password_is_carried_and_never_printed(self) -> None:
         report = self.run_import()
@@ -817,7 +877,7 @@ class NothingElseIsTouchedTests(ImporterCase):
         instance_before = tree(self.organizer.base)
         profiles_before = tree(self.profiles_dir)
         installs = len(self.organizer.install_calls)
-        report = self.run_import(stamp="20261014T999999Z")
+        report = self.run_import(stamp="20261014T999999000001Z")
         self.assertEqual(len(self.organizer.install_calls), installs)
         self.assertEqual(tree(self.profiles_dir), profiles_before)
         after = tree(self.organizer.base)
