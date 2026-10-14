@@ -1,12 +1,15 @@
 """The problems the plugin reports between launches, and the numbers the core knows them by.
 
-No Qt and no mobase in here: plugins/diagnose.py renders what Diagnosis.problems
-returns and runs the fixes with dialogs of its own.
+No Qt and no mobase in here, bar the default reader of the me3 entry's wrapper
+options (qtui.stored_wrapper_options, which imports QSettings only when it runs).
+plugins/diagnose.py renders what Diagnosis.problems returns and runs the fixes
+with dialogs of its own.
 
 Everything in this module reads. Game/, the inventory and the deploy manifest
 change only through a fix the user clicked (fixes.py) or a launch (gate.py,
-prepare.py). The only file written here is the instance's hash cache, which
-keeps a re-hash to once per change.
+prepare.py). The only files written here are the instance's caches,
+archive-hashes.json for file hashes and me3-host-state.json for the me3 check,
+each of which keeps work to once per change.
 """
 
 from __future__ import annotations
@@ -15,10 +18,11 @@ import html
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from . import (
-    archives, coop_settings, deploy, doctor, fsprobe, gate, generated, hardening, inventory, kinds, mods, pe, prepare,
-    procs, saves, session, state,
+    archives, coop_settings, deploy, doctor, environment, fsprobe, gate, generated, hardening, inventory, kinds, me3_host,
+    mods, pe, prepare, procs, qtui, saves, session, state,
 )
 from .ermlib import gamebuild, steam
 from .ermlib import paths as ermpaths
@@ -70,6 +74,13 @@ KEYS: tuple[str, ...] = (
     "MERGED_MOD_MISSING",
     "MERGED_MOD_MISPLACED",
     "MERGE_CORRUPT",
+    "ME3_MISSING",
+    "ME3_OFF_PIN",
+    "ME3_WINDOWS_BIN",
+    "ENTRY_WRAPPER_OPTIONS",
+    "ME3_CONFIG_OVERRIDE",
+    "ME3_CONFIG_STEAM_DIR",
+    "STEAM_LAUNCH_OPTION",
 )
 
 TITLES: dict[str, str] = {
@@ -113,6 +124,13 @@ TITLES: dict[str, str] = {
     "MERGED_MOD_MISSING": "The generated mod is missing or disabled",
     "MERGED_MOD_MISPLACED": "Another mod is above the generated mod",
     "MERGE_CORRUPT": "The generated mod's files were changed",
+    "ME3_MISSING": "me3 is not installed",
+    "ME3_OFF_PIN": "me3 is not the build this plugin is tested with",
+    "ME3_WINDOWS_BIN": "me3's Windows parts are missing or not the pinned ones",
+    "ENTRY_WRAPPER_OPTIONS": "The me3 entry carries wrapper options",
+    "ME3_CONFIG_OVERRIDE": "A me3 config file sets keys that matter to a launch",
+    "ME3_CONFIG_STEAM_DIR": "A me3 config file moves the Steam folder",
+    "STEAM_LAUNCH_OPTION": "Steam has a launch option set for Elden Ring",
 }
 
 # The guided fixes that need no tool of the plugin's own. The diagnose plugin
@@ -181,9 +199,17 @@ def _stat(path) -> tuple | None:
 class Diagnosis:
     """Reads the setup and says what is wrong with it. `problems()` is the whole interface."""
 
-    def __init__(self, organizer, game) -> None:
+    def __init__(
+        self, organizer, game, wrapper_options: Callable[[], list[tuple[str, str]]] | None = None
+    ) -> None:
         self._organizer = organizer
         self._game = game
+        # QSettings over ModOrganizer.ini, unless a test hands in its own.
+        self._wrapper_options = wrapper_options or (
+            lambda: qtui.stored_wrapper_options(
+                Path(organizer.basePath()) / "ModOrganizer.ini", binary_real=me3_host.binary_path()
+            )
+        )
         self._identity_key: tuple | None = None
         self._identity_value: gamebuild.BuildId | None = None
 
@@ -194,7 +220,7 @@ class Diagnosis:
         found: list[Problem] = []
         with archives.hash_cache(paths) as cache:
             context = self._context(paths, cache)
-            for group in (self._folder_rows, self._deploy_rows, self._session_rows, self._mod_rows):
+            for group in (self._folder_rows, self._deploy_rows, self._session_rows, self._mod_rows, self._me3_rows):
                 try:
                     found += group(context)
                 except Exception as exc:  # a broken check must not take the others down
@@ -630,6 +656,98 @@ class Diagnosis:
                     "MERGE_CORRUPT",
                     f"The files of the {generated.NAME} mod are not the ones its last build recorded.",
                     TOOL_REBUILD,
+                )
+            ]
+        return []
+
+    # -- me3 and what a launch inherits ---------------------------------------------
+
+    def _me3_rows(self, context: Context) -> list[Problem]:
+        rows = self._me3_install_rows(context)
+        wrappers = self._wrapper_options()
+        if wrappers:
+            rows.append(
+                Problem(
+                    "ENTRY_WRAPPER_OPTIONS",
+                    "An entry for me3 carries wrapper options:\n"
+                    + "\n".join(f"  {title}: {options}" for title, options in wrappers)
+                    + "\nThey become environment variables and a program started in front of me3, which "
+                    "the launch check cannot see. Clear them in Fluorine's Executables dialog.",
+                )
+            )
+        findings = environment.scan_me3_config(environment.me3_config_files())
+        working = context.paths.root / environment.ME3_TOML
+        lines = [f"  {item.path}: {item.key} ({item.note})" for item in findings if not item.blocking]
+        in_the_way = fsprobe.kind(working) is not None
+        if in_the_way:
+            lines.insert(0, f"  {working}: me3 reads a me3.toml from its working folder, and a launch is refused while it is there")
+        if lines:
+            rows.append(
+                Problem(
+                    "ME3_CONFIG_OVERRIDE",
+                    "me3 reads these:\n" + "\n".join(lines) + "\nReset the entry to the plugin's defaults, or "
+                    "remove the key from the file.",
+                    informational=not in_the_way,
+                )
+            )
+        blocking = [f"  {item.path}: {item.key} ({item.note})" for item in findings if item.blocking]
+        if blocking:
+            rows.append(
+                Problem(
+                    "ME3_CONFIG_STEAM_DIR",
+                    "A me3 config file sets steam_dir, or leads somewhere that cannot be read to rule it out. "
+                    "steam_dir moves the Steam folder, and with it the game, the prefix and the save "
+                    "folder. A launch is refused while this stands:\n" + "\n".join(blocking)
+                    + "\nRemove the steam_dir key from that file, or replace a link that leads nowhere with a "
+                    "regular file.",
+                )
+            )
+        options = environment.steam_launch_options(saves.steam_install_root())
+        if options:
+            rows.append(
+                Problem(
+                    "STEAM_LAUNCH_OPTION",
+                    "Steam has a launch option set for Elden Ring, so a Steam Play runs that instead of the "
+                    "game as it was:\n" + "\n".join(f"  {path}: {value}" for path, value in options)
+                    + "\nClear it in the game's Properties in Steam, while Steam is running: the file cannot be "
+                    "edited safely under a running Steam.",
+                    informational=True,
+                )
+            )
+        return rows
+
+    def _me3_install_rows(self, context: Context) -> list[Problem]:
+        status = me3_host.status(context.paths)
+        binary = me3_host.binary_path()
+        if status.kind == me3_host.MISSING:
+            return [
+                Problem(
+                    "ME3_MISSING",
+                    f"No me3 is installed at {binary}, so there is no \"Elden Ring (me3)\" entry to run. Install "
+                    "it, then restart Fluorine so the entry is added.",
+                    TOOL_ME3,
+                )
+            ]
+        if status.kind == me3_host.OFF_PIN:
+            return [
+                Problem(
+                    "ME3_OFF_PIN",
+                    f"The me3 at {binary} is not the build this plugin is tested with (it reports "
+                    f"{status.version or 'no version'}; the files' bytes decide, not that text). The next launch "
+                    "through the entry installs the pinned one; the fix does it now.",
+                    TOOL_ME3,
+                    informational=True,
+                )
+            ]
+        if status.kind in (me3_host.WINDOWS_BIN_MISSING, me3_host.WINDOWS_BIN_MISMATCH):
+            return [
+                Problem(
+                    "ME3_WINDOWS_BIN",
+                    f"me3's Windows parts in {me3_host.windows_bin_dir()} are "
+                    f"{'missing' if status.kind == me3_host.WINDOWS_BIN_MISSING else 'not the pinned ones'}. "
+                    "The next launch through the entry repairs them; the fix does it now.",
+                    TOOL_ME3,
+                    informational=True,
                 )
             ]
         return []

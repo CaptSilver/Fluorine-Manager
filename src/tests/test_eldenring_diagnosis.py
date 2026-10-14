@@ -15,9 +15,11 @@ from eldenring_testsupport import synthetic_pe
 PACKAGE = support.load_support("_eldenring_diagnosis_tests")
 deploy = support.module(PACKAGE, "deploy")
 diagnosis = support.module(PACKAGE, "diagnosis")
+environment = support.module(PACKAGE, "environment")
 generated = support.module(PACKAGE, "generated")
 hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
+me3_host = support.module(PACKAGE, "me3_host")
 kinds = support.module(PACKAGE, "kinds")
 procs = support.module(PACKAGE, "procs")
 session = support.module(PACKAGE, "session")
@@ -78,12 +80,18 @@ class DiagnosisCase(unittest.TestCase):
         self.modlist.add(generated.NAME, kind="generated")
         self.keep_order = False
         self.identify = mock.patch.object(diagnosis.gamebuild, "identify", return_value=LIVE).start()
+        self.me3_status = mock.patch.object(
+            diagnosis.me3_host, "status", return_value=me3_host.Status(me3_host.OK, "me3 0.13.0")
+        ).start()
         self.addCleanup(mock.patch.stopall)
+        env_dirs = mock.patch.object(environment, "SYSTEM_DIR", self.tmp / "etc/me3")
+        env_dirs.start()
         self.put("eldenring.exe", b"MZ game")
         self.put("regulation.bin", b"regulation")
         self.recorded = self.adopt("eldenring.exe")
         state.write_build_stamp(self.paths, LIVE)
-        self.diagnosis = diagnosis.Diagnosis(self.organizer, self.game)
+        self.wrappers: list[tuple[str, str]] = []
+        self.diagnosis = diagnosis.Diagnosis(self.organizer, self.game, wrapper_options=lambda: self.wrappers)
 
     def set_buildid(self, buildid: str) -> None:
         (self.library / "steamapps").mkdir(parents=True, exist_ok=True)
@@ -681,6 +689,119 @@ class GeneratedRowTests(DiagnosisCase):
 
     def test_a_mod_that_was_never_built_is_not_corrupt(self) -> None:
         self.assertEqual(self.problems(), [])
+
+
+class Me3RowTests(DiagnosisCase):
+    def status(self, kind: str, version: str | None = "me3 0.13.0") -> None:
+        self.me3_status.return_value = me3_host.Status(kind, version)
+
+    def write(self, path: Path, text: str) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def test_the_pinned_me3_is_nothing(self) -> None:
+        self.assertEqual(self.problems(), [])
+
+    def test_no_me3_is_a_row_with_the_install_tool_and_the_restart_note(self) -> None:
+        self.status(me3_host.MISSING, None)
+        problem = self.one("ME3_MISSING")
+        self.assertEqual((problem.fix, problem.informational), ("tool:me3", False))
+        self.assertIn("restart Fluorine", problem.text)
+
+    def test_an_off_pin_binary_is_informational_and_says_the_bytes_decide(self) -> None:
+        self.status(me3_host.OFF_PIN, "me3 0.13.0")
+        problem = self.one("ME3_OFF_PIN")
+        self.assertEqual((problem.fix, problem.informational), ("tool:me3", True))
+        self.assertIn("bytes decide", problem.text)
+
+    def test_missing_or_mismatched_windows_parts_are_one_informational_row(self) -> None:
+        for kind, word in ((me3_host.WINDOWS_BIN_MISSING, "missing"), (me3_host.WINDOWS_BIN_MISMATCH, "not the pinned")):
+            with self.subTest(kind):
+                self.status(kind)
+                problem = self.one("ME3_WINDOWS_BIN")
+                self.assertTrue(problem.informational)
+                self.assertIn(word, problem.text)
+
+    def test_wrapper_options_on_the_entry_are_a_row_naming_the_entry_and_the_value(self) -> None:
+        self.wrappers = [("Elden Ring (me3)", "FOO=1")]
+        problem = self.one("ENTRY_WRAPPER_OPTIONS")
+        self.assertIn("Elden Ring (me3): FOO=1", problem.text)
+        self.assertFalse(problem.informational)
+
+    def test_the_default_reader_looks_at_the_instances_ini(self) -> None:
+        from PyQt6.QtCore import QSettings
+
+        ini = Path(self.organizer.basePath()) / "ModOrganizer.ini"
+        settings = QSettings(str(ini), QSettings.Format.IniFormat)
+        settings.beginWriteArray("customExecutables", 1)
+        settings.setArrayIndex(0)
+        settings.setValue("title", "Elden Ring (me3)")
+        settings.setValue("binary", "Z:\\home\\x\\.local\\bin\\me3")
+        settings.setValue("wrapperOptions", "env X=1")
+        settings.endArray()
+        settings.sync()
+        self.diagnosis = diagnosis.Diagnosis(self.organizer, self.game)
+        self.assertIn("env X=1", self.one("ENTRY_WRAPPER_OPTIONS").text)
+
+    def test_keys_the_entrys_tokens_override_are_informational_and_name_file_and_key(self) -> None:
+        path = self.write(self.home / ".config/me3/me3.toml", 'windows_binaries_dir = "/x"\n[game.eldenring]\nskip_logos = true\n')
+        problem = self.one("ME3_CONFIG_OVERRIDE")
+        self.assertTrue(problem.informational)
+        self.assertIn(f"{path}: windows_binaries_dir", problem.text)
+        self.assertIn("[game.eldenring] skip_logos", problem.text)
+
+    def test_a_config_file_that_sets_nothing_that_matters_is_nothing(self) -> None:
+        self.write(self.home / ".config/me3/me3.toml", "crash_reporting = false\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_me3_toml_in_the_working_folder_is_not_informational_because_a_launch_is_refused(self) -> None:
+        self.write(self.paths.root / "me3.toml", "[options]\n")
+        problem = self.one("ME3_CONFIG_OVERRIDE")
+        self.assertFalse(problem.informational)
+        self.assertIn("refused", problem.text)
+
+    def test_a_config_file_behind_a_link_is_read_and_one_that_leads_nowhere_is_the_same_row(self) -> None:
+        real = self.write(self.tmp / "dotfiles/me3.toml", 'steam_dir = "/other/steam"\n')
+        link = self.home / ".config/me3/me3.toml"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+        self.assertIn(f"{link}: steam_dir", self.one("ME3_CONFIG_STEAM_DIR").text)
+        real.unlink()
+        self.assertIn(f"{link}: not a readable file", self.one("ME3_CONFIG_STEAM_DIR").text)
+
+    def test_a_steam_dir_is_its_own_blocking_row(self) -> None:
+        self.write(self.tmp / "etc/me3/me3.toml", 'steam_dir = "/other/steam"\n')
+        problem = self.one("ME3_CONFIG_STEAM_DIR")
+        self.assertFalse(problem.informational)
+        self.assertIn("steam_dir", problem.text)
+        self.assertNotIn("ME3_CONFIG_OVERRIDE", self.keys())
+
+
+class SteamLaunchOptionRowTests(DiagnosisCase):
+    def user(self, name: str, value: str) -> Path:
+        path = self.home / ".local/share/Steam/userdata" / name / "config/localconfig.vdf"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('"UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "1245620" { "LaunchOptions" "%s" } } } } } }' % value)
+        (self.home / ".local/share/Steam/steamapps").mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_no_steam_or_an_empty_option_is_nothing(self) -> None:
+        self.assertEqual(self.problems(), [])
+        self.user("1001", "")
+        self.assertEqual(self.problems(), [])
+
+    def test_an_option_is_informational_and_shows_the_value_and_the_file(self) -> None:
+        path = self.user("1001", "me3 launch # %command%")
+        problem = self.one("STEAM_LAUNCH_OPTION")
+        self.assertTrue(problem.informational)
+        self.assertIn(f"{path}: me3 launch # %command%", problem.text)
+        self.assertIn("while Steam is running", problem.text)
+
+    def test_a_second_users_option_counts(self) -> None:
+        self.user("1001", "")
+        self.user("1002", "-x")
+        self.assertIn("1002", self.one("STEAM_LAUNCH_OPTION").text)
 
 
 class FailureTests(DiagnosisCase):
