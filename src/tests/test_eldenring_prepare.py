@@ -364,6 +364,39 @@ class ModListTests(PrepareCase):
         veto = self.veto(prepare.NATIVE_DLL_MISSING)
         self.assertIn("broken native", veto.text())
 
+    def native(self, config) -> support.FakeMod:
+        mod = self.modlist.add(
+            "thing", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n", "mods/Thing/x.ini": "b=2\n"}
+        )
+        kinds.set_kind(mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=config)
+        return mod
+
+    def test_a_native_with_deployable_config_files_passes(self) -> None:
+        self.native(["mods/Thing/config.ini"])
+        self.assertEqual([label for label, _ in self.run_prepare().natives], ["thing"])
+
+    def test_a_native_whose_config_files_cannot_be_deployed_is_a_veto_naming_it(self) -> None:
+        mod = self.native(["mods/Thing/config.ini"])
+        for recorded in (["mods/Thing/missing.ini"], ["../x.ini"], ["mods/Thing/x.dll"], ["mods/Other/x.ini"]):
+            with self.subTest(recorded):
+                mod.setPluginSetting(kinds.PLUGIN, "deploy_config", json.dumps(recorded))
+                veto = self.veto("DEPLOY_CONFIG_INVALID")
+                self.assertIn("thing", veto.text())
+                self.assertIn("Set mod kind", veto.text())
+                self.assertEqual(self.generated_files(), {})
+
+    def test_a_damaged_config_record_is_a_veto_too(self) -> None:
+        mod = self.native(["mods/Thing/config.ini"])
+        mod.setPluginSetting(kinds.PLUGIN, "deploy_config", "{not json")
+        self.veto("DEPLOY_CONFIG_INVALID")
+
+    def test_a_native_with_no_config_files_and_a_disabled_one_with_bad_ones_pass(self) -> None:
+        self.native([])
+        off = self.modlist.add("off", enabled=False, files={"mods/Off.dll": b"MZ"})
+        kinds.set_kind(off, kinds.NATIVE, native_dll="mods/Off.dll")
+        off.setPluginSetting(kinds.PLUGIN, "deploy_config", json.dumps(["mods/Off/gone.ini"]))
+        self.assertEqual([label for label, _ in self.run_prepare().natives], ["thing"])
+
     def test_a_root_folder_layout_is_a_veto(self) -> None:
         self.modlist.add("rooted", kind="unknown", files={"Root/Game/x.txt": b"x"})
         self.veto(prepare.ROOT_LAYOUT)

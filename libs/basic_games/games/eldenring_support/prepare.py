@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import archives, coop_settings, doctor, generated, kinds, me3, merge_engine, mods, saves, state, treewalk, views
+from . import archives, coop_settings, deploy, doctor, generated, kinds, me3, merge_engine, mods, saves, state, treewalk, views
 from .ermlib import gamebuild, heal, merge
 from .ermlib.errors import ErmError
 from .veto import Veto
@@ -120,6 +120,16 @@ def _check_mods(organizer, refs: list[mods.ModRef]) -> list[str]:
                 'Open Tools > "Elden Ring: Set mod kind…" and choose the DLL.',
                 NATIVE_DLL_MISSING,
             )
+        if ref.kind == kinds.NATIVE:
+            listed = kinds.recorded_deploy_config(organizer.modList().getMod(ref.name))
+            if listed is None or (listed and not kinds.deploy_config_ok(ref.path, ref.native_dll, listed)):
+                raise Veto(
+                    "Mod list",
+                    f"{ref.name} lists config files that cannot be deployed to Game/mods/ "
+                    f"(recorded: {listed!r}).",
+                    'Open Tools > "Elden Ring: Set mod kind…" and correct them.',
+                    deploy.DEPLOY_CONFIG_INVALID,
+                )
         if ref.kind == kinds.UNKNOWN:
             warnings.append(f"{ref.name} is enabled but its kind is unknown, so it is not loaded.")
     try:
