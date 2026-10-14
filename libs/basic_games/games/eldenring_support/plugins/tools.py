@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import traceback
+from pathlib import Path
 
 from PyQt6.QtCore import qWarning
 from PyQt6.QtGui import QIcon
@@ -10,7 +12,7 @@ from PyQt6.QtWidgets import QMessageBox
 
 import mobase
 
-from .. import me3_host, session, state
+from .. import gate, generated, importer, kinds, me3_host, qtui, saves, session, state
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
 
@@ -210,3 +212,207 @@ class SaveToolsTool(EldenRingTool):
                 f"The save in the Steam folder was kept. {kept}If a modded session wrote "
                 "it, it must not go online.",
             )
+
+
+def describe_rebuild(prepared) -> str:
+    lines = [
+        f"The {generated.NAME} mod was rebuilt."
+        if prepared.rebuilt
+        else f"The {generated.NAME} mod was already up to date; nothing was merged.",
+        "",
+        "Packages, lowest priority first:",
+        *[f"  {name}" for name, _ in prepared.packages],
+    ]
+    if prepared.natives:
+        lines += ["", "Natives:", *[f"  {name}" for name, _ in prepared.natives]]
+    if prepared.notes:
+        lines += ["", "The merge could not carry over everything cleanly:", *[f"  {note}" for note in prepared.notes]]
+    if prepared.warnings:
+        lines += ["", "Warnings:", *[f"  {warning}" for warning in prepared.warnings]]
+    return "\n".join(lines)
+
+
+class RebuildTool(EldenRingTool):
+    def name(self) -> str:
+        return "Elden Ring Rebuild merges"
+
+    def description(self) -> str:
+        return "Merge the enabled mods into the generated mod now, without launching the game."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Rebuild merges…"
+
+    def tooltip(self) -> str:
+        return "Run the same checks and merges a launch runs, and stop there."
+
+    def _the_gate(self):
+        return gate.LaunchGate(
+            self._organizer,
+            self._organizer.managedGame(),
+            show_veto=lambda title, text: QMessageBox.critical(self._parent, title, text),
+            show_modal=lambda title, text: QMessageBox.critical(self._parent, title, text),
+            busy=lambda title: Busy(title, self._parent),
+        )
+
+    def _rebuild(self, error=None) -> None:
+        # Also the continuation of ensure_mod, which on a fresh instance runs
+        # from the directory refresh and not from display(); a placement that
+        # failed there arrives as `error`.
+        if error is not None:
+            qWarning(f"{self.displayName()}: could not place the {generated.NAME} mod: {error!r}")
+            QMessageBox.critical(
+                self._parent,
+                self.displayName(),
+                f"The {generated.NAME} mod could not be enabled and raised to the top: {error}\n\n"
+                "Nothing was merged. Fix the mod list by hand and run this again.",
+            )
+            return
+        try:
+            prepared = self._the_gate().rebuild()
+        except gate.Veto as veto:
+            QMessageBox.critical(self._parent, self.displayName(), veto.text())
+        except ErmError as exc:
+            QMessageBox.critical(self._parent, self.displayName(), str(exc))
+        except Exception as exc:
+            qWarning(f"{self.displayName()}: unexpected failure: {exc!r}\n{traceback.format_exc()}")
+            QMessageBox.critical(self._parent, self.displayName(), f"Unexpected failure: {exc}")
+        else:
+            QMessageBox.information(self._parent, self.displayName(), describe_rebuild(prepared))
+
+    def run(self) -> None:
+        generated.ensure_mod(self._organizer, then=self._rebuild)
+
+
+SET_KIND_CHOICES = [*kinds.SETTABLE, "reclassify"]
+
+
+def describe_kind(mod, classified: kinds.Classified) -> str:
+    recorded = kinds.recorded_kind(mod)
+    lines = [
+        f"{mod.name()}",
+        "",
+        f"Recorded kind: {recorded or 'none yet'}",
+        f"The classifier says: {classified.kind}"
+        + (f" ({classified.native_dll})" if classified.native_dll else "")
+        + (f" - {classified.reason}" if classified.reason else ""),
+    ]
+    dll = kinds.recorded_native_dll(mod)
+    if dll:
+        lines.append(f"Recorded DLL: {dll}")
+    deploy = kinds.recorded_deploy_config(mod)
+    if deploy:
+        lines.append("Config files to deploy to Game/mods/: " + ", ".join(deploy))
+    lines += [
+        "",
+        "package: loaded by me3 as a content package. native: a DLL me3 chainloads. "
+        "ersc: Seamless Co-op. unknown: not loaded. reclassify: record the classifier's answer again.",
+    ]
+    return "\n".join(lines)
+
+
+class SetModKindTool(EldenRingTool):
+    def name(self) -> str:
+        return "Elden Ring Set mod kind"
+
+    def description(self) -> str:
+        return "Choose how the Elden Ring plugin loads a mod: package, native, Seamless Co-op or not at all."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Set mod kind…"
+
+    def tooltip(self) -> str:
+        return "Set or re-detect what kind of mod this is."
+
+    def run(self) -> None:
+        modlist = self._organizer.modList()
+        names = []
+        for name in modlist.allModsByProfilePriority():
+            mod = modlist.getMod(name)
+            if mod is not None and not mod.isSeparator() and name != generated.NAME:
+                names.append(name)
+        title = self.displayName()
+        if not names:
+            QMessageBox.information(self._parent, title, "There are no mods to set.")
+            return
+        picked = qtui.pick_item(self._parent, title, "Mod:", names)
+        if picked is None:
+            return
+        mod = modlist.getMod(picked)
+        classified = kinds.classify(kinds.PathListing(mod.absolutePath()), mod.name())
+        choice = _choose(self._parent, title, describe_kind(mod, classified), SET_KIND_CHOICES)
+        if choice is None:
+            return
+        kind = SET_KIND_CHOICES[choice]
+        if kind == "reclassify":
+            answer = kinds.reclassify(mod)
+            QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {answer.kind}.")
+            return
+        native_dll = None
+        if kind == kinds.NATIVE:
+            dlls = [f for f in kinds.install_files(mod.absolutePath()) if f.lower().endswith(".dll")]
+            if not dlls:
+                QMessageBox.critical(self._parent, title, f"{mod.name()} holds no DLL to load.")
+                return
+            native_dll = qtui.pick_item(self._parent, title, "DLL to load:", dlls)
+            if native_dll is None:
+                return
+        kinds.set_kind(mod, kind, native_dll=native_dll)
+        QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {kind}.")
+
+
+class ImportFromErmTool(EldenRingTool):
+    def name(self) -> str:
+        return "Elden Ring Import from erm"
+
+    def description(self) -> str:
+        return "Install erm's mods as Fluorine mods and create a profile for each erm profile."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Import from erm…"
+
+    def tooltip(self) -> str:
+        return "Copy erm's mods, profiles and records into this instance. Nothing in Game/ is changed."
+
+    def run(self) -> None:
+        title = self.displayName()
+        folder = qtui.choose_folder(self._parent, title, str(Path.home()))
+        if folder is None:
+            return
+        if not os.path.isfile(Path(folder) / "installed.json"):
+            QMessageBox.critical(self._parent, title, f"{folder} has no installed.json; choose the erm folder.")
+            return
+        names = qtui.pick_profiles(self._parent, title, importer.erm_profile_names(folder))
+        if names is None:
+            return
+        if not names:
+            QMessageBox.information(self._parent, title, "No profile was ticked, so nothing was imported.")
+            return
+        answer = QMessageBox.question(
+            self._parent,
+            title,
+            "This will back up your save files, install erm's mods from its vendor/ folder "
+            "(nothing is downloaded) and create a Fluorine profile for each ticked erm profile.\n\n"
+            "It does not change Game/, the Steam launch option or the save files themselves.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        game = self._organizer.managedGame()
+        save_dir = saves.save_dir(saves.library_root(game.gameDirectory().absolutePath()))
+        busy = Busy(title, self._parent)
+        try:
+            report = importer.run(
+                self._organizer, folder, save_dir=save_dir, profiles=names,
+                version_info=mobase.VersionInfo,
+            )
+        except importer.ImportStopped as exc:
+            if exc.report is not None and exc.report.lines:
+                qtui.show_text(
+                    self._parent, title,
+                    f"The import stopped: {exc}\n\nWhat was done before it stopped:\n{exc.report.text()}",
+                )
+            else:
+                QMessageBox.critical(self._parent, title, str(exc))
+            return
+        finally:
+            busy.close()
+        qtui.show_text(self._parent, title, report.text())

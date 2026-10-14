@@ -6,8 +6,8 @@ the module-level ``createPlugins()`` found here.
 
 import mobase
 
-from .tools import InstallMe3Tool, SaveToolsTool
+from .tools import ImportFromErmTool, InstallMe3Tool, RebuildTool, SaveToolsTool, SetModKindTool
 
 
 def createPlugins() -> list[mobase.IPlugin]:
-    return [InstallMe3Tool(), SaveToolsTool()]
+    return [InstallMe3Tool(), SaveToolsTool(), RebuildTool(), SetModKindTool(), ImportFromErmTool()]
