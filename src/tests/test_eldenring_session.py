@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import tempfile
@@ -14,6 +15,7 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_session_tests")
 session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
+errors = support.module(PACKAGE, "ermlib.errors")
 
 SL2 = b"vanilla save " * 3000
 BAK = b"vanilla backup " * 3000
@@ -44,6 +46,18 @@ class SessionCase(unittest.TestCase):
             "stamp": stamp, "pid": 1, "start_ticks": 2, "save_dir": str(self.save_dir),
             "snapshot_dir": str(folder), "files": files, "swept": None,
         }
+
+    def pend(self, sentinel: dict, changed=("ER0000.sl2",)) -> None:
+        sentinel["swept"] = {"outcome": "pending"}
+        session.save_last_launch(
+            self.paths,
+            {"sentinel": sentinel, "pending_restore": {
+                "reason": "game-running", "sentinel": sentinel, "changed": list(changed)}},
+        )
+
+    def quarantined(self) -> list[Path]:
+        folder = self.paths.save_backups / "quarantine"
+        return sorted(folder.iterdir()) if folder.exists() else []
 
 
 class LastLaunchTests(SessionCase):
@@ -365,6 +379,206 @@ class PruneTests(SessionCase):
         self.paths.last_launch.write_text("{")
         session.prune_snapshots(self.paths, keep=1)
         self.assertEqual(self.left(), stamps)
+
+
+class RestoreChangedTests(SessionCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_saves()
+        self.record = self.sentinel()
+
+    def test_nothing_changed_means_nothing_done(self) -> None:
+        result = session.restore_changed(self.paths, self.record)
+        self.assertEqual((result.restored, result.quarantined), ([], []))
+        self.assertEqual(self.quarantined(), [])
+
+    def test_a_changed_file_is_quarantined_then_replaced_by_the_snapshot(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b"modded")
+        result = session.restore_changed(self.paths, self.record, stamp="20261013T130000000000Z")
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(result.restored, ["ER0000.sl2"])
+        self.assertEqual(
+            (self.save_dir / "ER0000.sl2").stat().st_mtime_ns,
+            self.record["files"]["ER0000.sl2"]["mtime_ns"],
+            "the restored file should carry the mtime it had before the session",
+        )
+        [kept] = result.quarantined
+        self.assertEqual(
+            kept, self.paths.save_backups / "quarantine" / "ER0000.sl2.20261013T130000000000Z-modded-session"
+        )
+        self.assertEqual(kept.read_bytes(), SL2 + b"modded")
+
+    def test_only_the_changed_file_is_touched(self) -> None:
+        (self.save_dir / "ER0000.sl2.bak").write_bytes(b"other")
+        before = (self.save_dir / "ER0000.sl2").stat().st_mtime_ns
+        session.restore_changed(self.paths, self.record)
+        self.assertEqual((self.save_dir / "ER0000.sl2").stat().st_mtime_ns, before)
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), BAK)
+
+    def test_a_file_that_vanished_is_restored_with_nothing_quarantined(self) -> None:
+        (self.save_dir / "ER0000.sl2").unlink()
+        result = session.restore_changed(self.paths, self.record)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(result.quarantined, [])
+
+    def test_a_file_that_was_not_there_before_is_quarantined_with_no_copy_back(self) -> None:
+        (self.save_dir / "ER0000.sl2.bak").unlink()
+        record = self.sentinel("20261013T120000000002Z")
+        (self.save_dir / "ER0000.sl2.bak").write_bytes(b"new")
+        result = session.restore_changed(self.paths, record)
+        self.assertFalse((self.save_dir / "ER0000.sl2.bak").exists())
+        self.assertEqual(result.restored, [])
+        [kept] = result.quarantined
+        self.assertEqual(kept.read_bytes(), b"new")
+
+    def test_a_damaged_snapshot_stops_everything_before_anything_moves(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"first")
+        (self.save_dir / "ER0000.sl2.bak").write_bytes(b"second")
+        (Path(self.record["snapshot_dir"]) / "ER0000.sl2.bak").write_bytes(b"damaged")
+        with self.assertRaises(session.SnapshotError) as caught:
+            session.restore_changed(self.paths, self.record)
+        self.assertIn("ER0000.sl2.bak", str(caught.exception))
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"first")
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), b"second")
+        self.assertEqual(self.quarantined(), [])
+
+    def test_a_missing_snapshot_file_is_the_same_error(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"first")
+        (Path(self.record["snapshot_dir"]) / "ER0000.sl2").unlink()
+        with self.assertRaises(session.SnapshotError):
+            session.restore_changed(self.paths, self.record)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"first")
+
+    def test_a_write_that_fails_after_the_move_leaves_both_copies_on_disk(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"first")
+        with mock.patch.object(session.atomic, "write_bytes_atomic", side_effect=OSError(28, "full")):
+            with self.assertRaises(session.SnapshotError) as caught:
+                session.restore_changed(self.paths, self.record)
+        self.assertIn("full", str(caught.exception))
+        [kept] = self.quarantined()
+        self.assertEqual(kept.read_bytes(), b"first")
+        self.assertTrue((Path(self.record["snapshot_dir"]) / "ER0000.sl2").is_file())
+
+    def test_a_restored_file_that_does_not_read_back_is_an_error(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"first")
+        with mock.patch.object(
+            session.atomic, "write_bytes_atomic", lambda path, data, mode=0o644: Path(path).write_bytes(b"torn")
+        ):
+            with self.assertRaises(session.SnapshotError) as caught:
+                session.restore_changed(self.paths, self.record)
+        self.assertIn("does not match its snapshot", str(caught.exception))
+
+    def test_two_restores_in_a_row_do_not_overwrite_each_others_quarantine(self) -> None:
+        for round_number in range(2):
+            (self.save_dir / "ER0000.sl2").write_bytes(b"session %d" % round_number)
+            session.restore_changed(self.paths, self.record)
+        self.assertEqual(sorted(p.read_bytes() for p in self.quarantined()), [b"session 0", b"session 1"])
+
+    def test_a_quarantine_name_that_is_taken_is_an_error_and_nothing_moves(self) -> None:
+        stamp = "20261013T130000000000Z"
+        (self.save_dir / "ER0000.sl2").write_bytes(b"session 0")
+        session.restore_changed(self.paths, self.record, stamp=stamp)
+        (self.save_dir / "ER0000.sl2").write_bytes(b"session 1")
+        with self.assertRaises(session.SnapshotError) as caught:
+            session.restore_changed(self.paths, self.record, stamp=stamp)
+        self.assertIn("already exists", str(caught.exception))
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"session 1")
+        [kept] = self.quarantined()
+        self.assertEqual(kept.read_bytes(), b"session 0")
+
+    def test_a_quarantine_folder_that_cannot_be_made_is_an_error_with_the_file_untouched(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"first")
+        with mock.patch.object(session.shutil, "move", side_effect=PermissionError("denied")):
+            with self.assertRaises(session.SnapshotError) as caught:
+                session.restore_changed(self.paths, self.record)
+        self.assertIn("ER0000.sl2", str(caught.exception))
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"first")
+
+
+class RestorePendingTests(SessionCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_saves()
+        self.record = self.sentinel()
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b"modded")
+        self.pend(self.record)
+
+    def data(self) -> dict:
+        return json.loads(self.paths.last_launch.read_text())
+
+    def test_it_refuses_while_the_game_runs_and_changes_nothing(self) -> None:
+        with self.assertRaises(errors.ErmError) as caught:
+            session.restore_pending(self.paths, running=lambda: [(8, "me3"), (9, "eldenring.exe")])
+        self.assertIn("still running", str(caught.exception))
+        self.assertIn("me3 pid 8", str(caught.exception))
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertIn("pending_restore", self.data())
+
+    def test_it_restores_clears_the_flag_and_records_what_it_did(self) -> None:
+        result = session.restore_pending(self.paths, running=lambda: [])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        data = self.data()
+        self.assertNotIn("pending_restore", data)
+        self.assertEqual(data["sentinel"]["swept"], {"outcome": "restored"})
+        self.assertEqual(data["sentinel_tripped"]["restored"], ["ER0000.sl2"])
+        self.assertEqual(data["sentinel_tripped"]["quarantined"], [str(result.quarantined[0])])
+
+    def test_with_nothing_pending_it_says_so(self) -> None:
+        session.restore_pending(self.paths, running=lambda: [])
+        with self.assertRaises(errors.ErmError) as caught:
+            session.restore_pending(self.paths, running=lambda: [])
+        self.assertIn("No save restore is pending", str(caught.exception))
+
+    def test_a_restore_that_fails_keeps_the_flag(self) -> None:
+        (Path(self.record["snapshot_dir"]) / "ER0000.sl2").write_bytes(b"damaged")
+        with self.assertRaises(session.SnapshotError):
+            session.restore_pending(self.paths, running=lambda: [])
+        self.assertIn("pending_restore", self.data())
+
+    def test_a_damaged_record_is_an_error_not_a_crash(self) -> None:
+        self.paths.last_launch.write_text("{")
+        with self.assertRaises(session.LaunchStateError):
+            session.restore_pending(self.paths, running=lambda: [])
+
+    def test_the_default_liveness_test_is_the_process_scan(self) -> None:
+        with mock.patch.object(session.procs, "game_running", return_value=[(3, "me3")]):
+            with self.assertRaises(errors.ErmError):
+                session.restore_pending(self.paths)
+
+
+class KeepSessionSaveTests(SessionCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_saves()
+        self.record = self.sentinel()
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b"modded")
+        self.pend(self.record)
+
+    def test_the_snapshot_moves_under_its_stamp_and_the_save_stays(self) -> None:
+        moved = session.keep_session_save(self.paths)
+        self.assertEqual(moved, self.paths.save_backups / STAMP)
+        self.assertEqual((moved / "ER0000.sl2").read_bytes(), SL2)
+        self.assertFalse((self.paths.save_snapshots / STAMP).exists())
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        data = json.loads(self.paths.last_launch.read_text())
+        self.assertNotIn("pending_restore", data)
+        self.assertEqual(data["sentinel"]["swept"], {"outcome": "kept"})
+
+    def test_a_snapshot_that_is_already_gone_still_clears_the_flag(self) -> None:
+        shutil.rmtree(self.record["snapshot_dir"])
+        self.assertIsNone(session.keep_session_save(self.paths))
+        self.assertNotIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
+
+    def test_with_nothing_pending_it_says_so(self) -> None:
+        session.keep_session_save(self.paths)
+        with self.assertRaises(errors.ErmError):
+            session.keep_session_save(self.paths)
+
+    def test_a_move_that_fails_keeps_the_flag(self) -> None:
+        with mock.patch.object(session.shutil, "move", side_effect=PermissionError("denied")):
+            with self.assertRaises(session.SnapshotError):
+                session.keep_session_save(self.paths)
+        self.assertIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
 
 
 if __name__ == "__main__":

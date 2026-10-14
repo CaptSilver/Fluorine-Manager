@@ -10,15 +10,18 @@ the same restore, which is why it lives here and not in the gate.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
-from . import atomic, saves, state
+from . import atomic, procs, saves, state
 from .ermlib import github
 from .ermlib.errors import ErmError
 
@@ -239,3 +242,139 @@ def _held_snapshots(data: dict) -> set[str]:
             held.add(str(sentinel.get("stamp")))
             held.add(Path(str(sentinel.get("snapshot_dir", ""))).name)
     return held
+
+
+@dataclass
+class Restored:
+    restored: list[str]
+    quarantined: list[Path]
+
+
+def restore_changed(paths: state.InstancePaths, sentinel: dict, stamp: str | None = None) -> Restored:
+    """Put the pre-session copy back over every guarded file that changed.
+
+    The one restore both the sweep after a session and the Save tools use. A
+    changed file is moved to save-backups/quarantine/ first, so the session's
+    version is never the only copy to disappear, and the snapshot is checked
+    against the recorded hash before anything moves.
+    """
+    stamp = stamp or now_stamp()
+    save_dir = Path(sentinel["save_dir"])
+    snapshot_dir = Path(sentinel["snapshot_dir"])
+    work: list[tuple[str, dict | None, bytes | None]] = []
+    for name in saves.GUARDED:
+        recorded = sentinel["files"].get(name)
+        differs, _ = check_file(recorded, save_dir / name)
+        if not differs:
+            continue
+        data = _read_snapshot(snapshot_dir / name, recorded)
+        # shutil.move onto an existing file replaces it, which would destroy an
+        # earlier quarantined save. Found here, before anything has moved.
+        kept = _quarantine_path(paths, name, stamp)
+        if os.path.lexists(save_dir / name) and os.path.lexists(kept):
+            raise SnapshotError(f"{kept} already exists; not overwriting an earlier quarantined save")
+        work.append((name, recorded, data))
+
+    result = Restored(restored=[], quarantined=[])
+    for name, recorded, data in work:
+        target = save_dir / name
+        if os.path.lexists(target):
+            kept = _quarantine_path(paths, name, stamp)
+            try:
+                kept.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(target), str(kept))
+            except OSError as exc:
+                raise SnapshotError(f"cannot move {target} to {kept}: {exc}") from exc
+            result.quarantined.append(kept)
+        if data is None:
+            continue
+        try:
+            atomic.write_bytes_atomic(target, data)
+            written = github.sha256_file(target)
+        except OSError as exc:
+            raise SnapshotError(f"cannot restore {target}: {exc}") from exc
+        if written != recorded["sha256"]:
+            raise SnapshotError(f"{target} does not match its snapshot after the restore")
+        # Put the old mtime back too, so the file is what Steam last saw: same
+        # bytes and same stamp, nothing for Steam Cloud to take for a change.
+        with contextlib.suppress(OSError):
+            os.utime(target, ns=(recorded["mtime_ns"], recorded["mtime_ns"]))
+        result.restored.append(name)
+    return result
+
+
+def _quarantine_path(paths: state.InstancePaths, name: str, stamp: str) -> Path:
+    return paths.save_backups / "quarantine" / f"{name}.{stamp}-modded-session"
+
+
+def _read_snapshot(path: Path, recorded: dict | None) -> bytes | None:
+    if recorded is None:
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise SnapshotError(f"the snapshot {path} cannot be read: {exc}") from exc
+    if hashlib.sha256(data).hexdigest() != recorded["sha256"]:
+        raise SnapshotError(f"the snapshot {path} does not match what was recorded; nothing was touched")
+    return data
+
+
+def restore_pending(
+    paths: state.InstancePaths, running: Callable[[], list] | None = None
+) -> Restored:
+    """The Save tools' "restore the pre-session snapshot".
+
+    Refuses while the game is up: it would race the game's own writes.
+    `running` defaults to the process scan, looked up at call time.
+    """
+    data = load_last_launch(paths)
+    pending = data.get("pending_restore")
+    if not pending:
+        raise ErmError("No save restore is pending.")
+    up = (running or procs.game_running)()
+    if up:
+        raise ErmError(
+            "Elden Ring or me3 is still running ("
+            + ", ".join(f"{name} pid {pid}" for pid, name in up)
+            + "). Quit the game, then restore."
+        )
+    result = restore_changed(paths, pending["sentinel"])
+    _close_pending(data, pending, "restored")
+    data["sentinel_tripped"] = tripped(result)
+    save_last_launch(paths, data)
+    return result
+
+
+def keep_session_save(paths: state.InstancePaths) -> Path | None:
+    """The Save tools' "keep the session's save": the snapshot goes to save-backups/."""
+    data = load_last_launch(paths)
+    pending = data.get("pending_restore")
+    if not pending:
+        raise ErmError("No save restore is pending.")
+    snapshot = Path(pending["sentinel"]["snapshot_dir"])
+    moved = None
+    if os.path.isdir(snapshot):
+        moved = paths.save_backups / snapshot.name
+        try:
+            moved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(snapshot), str(moved))
+        except OSError as exc:
+            raise SnapshotError(f"cannot move {snapshot} to {moved}: {exc}") from exc
+    _close_pending(data, pending, "kept")
+    save_last_launch(paths, data)
+    return moved
+
+
+def _close_pending(data: dict, pending: dict, outcome: str) -> None:
+    del data["pending_restore"]
+    sentinel = data.get("sentinel")
+    if isinstance(sentinel, dict) and sentinel.get("stamp") == pending["sentinel"].get("stamp"):
+        sentinel["swept"] = {"outcome": outcome}
+
+
+def tripped(result: Restored) -> dict:
+    return {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "restored": result.restored,
+        "quarantined": [str(path) for path in result.quarantined],
+    }
