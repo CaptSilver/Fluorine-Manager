@@ -1497,3 +1497,7 @@ add_test(
     NAME test_eldenring_prepare
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_prepare.py
 )
+add_test(
+    NAME test_eldenring_importer
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importer.py
+)
