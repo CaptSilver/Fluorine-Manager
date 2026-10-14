@@ -656,8 +656,15 @@ class LaunchGate:
             # The post-session sweep restored the save and then could not write
             # the note about it, so nothing says where the session's copies are.
             found = session.quarantined_since(paths, sentinel.get("stamp"))
-            if found and "sentinel_tripped" not in data:
-                note = session.tripped(session.Restored(restored=[], quarantined=found))
+            if found:
+                older = data.get("sentinel_tripped")
+                if isinstance(older, dict):
+                    # An earlier session's note is still on the record; keep it
+                    # and add this session's files to it.
+                    note = {**older}
+                    note["quarantined"] = session._merged(list(older.get("quarantined") or []), found)
+                else:
+                    note = session.tripped(session.Restored(restored=[], quarantined=found))
                 note["unrecorded"] = True
                 data["sentinel_tripped"] = note
         session.save_last_launch(paths, data)

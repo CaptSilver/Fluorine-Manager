@@ -1369,6 +1369,31 @@ class SweepTests(GateCase):
         # Settled once: the next check finds nothing left to note.
         self.assertIsNone(self.new_gate().sweep_stale())
 
+    def test_a_lost_record_is_merged_into_an_older_tripped_note(self) -> None:
+        self.append("ER0000.sl2")
+        real = session.save_last_launch
+
+        def failing(paths, data):
+            if "sentinel_tripped" in data:
+                raise OSError(28, "No space left on device")
+            return real(paths, data)
+
+        with mock.patch.object(gate.session, "save_last_launch", failing):
+            self.finish()
+        [kept] = self.quarantined()
+        data = self.last_launch()
+        data["sentinel_tripped"] = {
+            "time": "2026-01-01T00:00:00+00:00",
+            "restored": ["ER0000.sl2"],
+            "quarantined": ["/old/ER0000.sl2.x-modded-session"],
+        }
+        session.save_last_launch(self.paths, data)
+        self.assertEqual(self.new_gate().sweep_stale(), "stale-clean")
+        note = self.last_launch()["sentinel_tripped"]
+        self.assertEqual(note["quarantined"], ["/old/ER0000.sl2.x-modded-session", str(kept)])
+        self.assertEqual(note["restored"], ["ER0000.sl2"])
+        self.assertTrue(note["unrecorded"])
+
     def test_a_clean_session_leaves_no_note(self) -> None:
         self.assertEqual(self.new_gate().sweep_stale(), "stale-clean")
         self.assertNotIn("sentinel_tripped", self.last_launch())
