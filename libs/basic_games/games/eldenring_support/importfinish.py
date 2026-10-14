@@ -190,7 +190,8 @@ _NEEDS_A_FIX = (hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED)
 
 
 def fix_launcher(
-    host: Host, paths: state.InstancePaths, ui: Ui, report: importer.Report, current: str, stamp: str, log, cleaned: bool
+    host: Host, paths: state.InstancePaths, ui: Ui, report: importer.Report, current: str, stamp: str, log, cleaned: bool,
+    saved: bool,
 ) -> None:
     """Offer Re-harden or Unharden for a launcher that is not locked, restored by Steam or stale.
 
@@ -200,9 +201,11 @@ def fix_launcher(
     Unharden are hardening.reharden and hardening.unharden, so the system
     password prompt and every refusal (a running game, files deployed into
     Game/mods/) are theirs; a refusal is reported and the launcher stays as it was.
-    While erm's files remain in Game/ (`cleaned` is False) Unharden is not offered:
-    the swapped launcher is what keeps a proxy DLL from loading under Easy
-    Anti-Cheat if the launch option is cleared by hand.
+    While erm's files remain in Game/ (`cleaned` is False) or ER0000.sl2 is
+    not settled (`saved` is False) Unharden is not offered: the swapped
+    launcher is what keeps a proxy DLL from loading under Easy Anti-Cheat if
+    the launch option is cleared by hand, and what keeps a Steam Play from
+    starting the game under it over an unreviewed save.
     """
     if ui.ask_launcher is None or current not in _NEEDS_A_FIX:
         return
@@ -210,9 +213,10 @@ def fix_launcher(
         action for action in hardening.choices(current, fsprobe.kind(host.game_dir / hardening.BACKUP) == fsprobe.FILE)
         if action != hardening.ACT_HARDEN
     ]
-    if not cleaned and hardening.ACT_UNHARDEN in options:
+    if hardening.ACT_UNHARDEN in options and not (cleaned and saved):
         options.remove(hardening.ACT_UNHARDEN)
-        report.info("Unharden is not offered while erm's files are in Game/: the swapped launcher is the backstop.")
+        why = "erm's files are in Game/" if not cleaned else "ER0000.sl2 is not settled"
+        report.info(f"Unharden is not offered while {why}: the swapped launcher is the backstop.")
     if not options:
         return
     picked = ui.ask_launcher(LAUNCHER_TEXT.format(state=hardening.describe(current)), options)
@@ -591,7 +595,7 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
                     "meanwhile. Moving them first would leave Steam's launch option starting me3 with erm's mods "
                     "but without Seamless Co-op."
                 )
-    fix_launcher(host, paths, ui, report, launcher_report(host, paths, report), stamp, log, cleaned)
+    fix_launcher(host, paths, ui, report, launcher_report(host, paths, report), stamp, log, cleaned, saved)
     adopted = False
     if cleaned:
         adopted = adopt_inventory(installed, paths, host, ui, report)

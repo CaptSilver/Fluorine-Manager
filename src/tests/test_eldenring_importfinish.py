@@ -1116,7 +1116,7 @@ class LauncherFixTests(FinishCase):
         deploy.write_manifest(
             self.paths, deploy.Manifest({"mods/AdjustTheFov/config.ini": entry}, ["mods/AdjustTheFov"])
         )
-        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=True)
+        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=True, saved=True)
         self.assertEqual(self.launcher_bytes(), b"MZ")
         self.assertTrue((self.game / "start_protected_game.exe.erm-backup").is_file())
         self.assertIn("deployed config file", report.text())
@@ -1126,7 +1126,7 @@ class LauncherFixTests(FinishCase):
         self.report = importer.Report()
         log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
         self.host.running = lambda: [(7, "eldenring.exe")]
-        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), self.report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=True)
+        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), self.report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=True, saved=True)
         self.assertEqual(self.launcher_bytes(), b"MZ")
         self.assertEqual(self.lock_calls, [])
         self.assertTrue(any(level == "warn" and "eldenring.exe (pid 7)" in text for level, text in self.report.lines))
@@ -1140,7 +1140,7 @@ class LauncherFixTests(FinishCase):
         elsewhere.write_bytes(b"MZ eac")
         backup.symlink_to(elsewhere)
         self.put("start_protected_game.exe", b"MZ older")
-        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), self.report, hardening.STALE, STAMP, log, cleaned=True)
+        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), self.report, hardening.STALE, STAMP, log, cleaned=True, saved=True)
         self.assertEqual(self.script.shown, [])
         self.assertEqual(self.lock_calls, [])
         self.assertEqual(self.launcher_bytes(), b"MZ older")
@@ -1150,7 +1150,7 @@ class LauncherFixTests(FinishCase):
         log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
         self.script.launcher = None
         importfinish.fix_launcher(
-            self.host, self.paths, self.script.ui(), self.report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=False
+            self.host, self.paths, self.script.ui(), self.report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=False, saved=True
         )
         self.assertEqual(self.script.offered, [hardening.ACT_REHARDEN])
         self.assertTrue(any("Unharden is not offered" in text for _, text in self.report.lines))
@@ -1166,6 +1166,32 @@ class LauncherFixTests(FinishCase):
         self.finish()
         self.assertEqual(self.lock_calls, [])
         self.assertFalse(self.paths.import_overrides.exists())
+
+
+class MoveAnywayLauncherTests(OverrideCase):
+    """The launcher offer after erm's files were moved while ER0000.sl2 is still unreviewed."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        for patcher in (
+            mock.patch.object(importfinish.hardening, "is_immutable", return_value=False),
+            mock.patch.object(importfinish.hardening.ermharden, "set_immutable", side_effect=AssertionError("real chattr")),
+            mock.patch.object(importfinish.hardening.ermharden.subprocess, "run", side_effect=AssertionError("real pkexec")),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.script.answer = None
+        self.script.offer_anyway = True
+        self.script.anyway = importfinish.MOVE_ONLY
+        self.script.offer_launcher = True
+        self.script.launcher = None
+
+    def test_unharden_is_withheld_while_the_save_is_unsettled(self) -> None:
+        report = self.finish()
+        self.assertFalse(self.erm_files_left())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertEqual(self.script.offered, [hardening.ACT_REHARDEN])
+        self.assertTrue(any("Unharden is not offered" in text and "ER0000.sl2" in text for _, text in report.lines))
 
 
 class UiTests(unittest.TestCase):
