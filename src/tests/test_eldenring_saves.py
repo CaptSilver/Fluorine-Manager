@@ -587,6 +587,39 @@ class QuarantineVanillaTests(SaveFolderCase):
         self.assertEqual(taken.read_bytes(), b"an earlier quarantine")
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
 
+    def test_a_link_in_place_of_the_save_is_refused_and_nothing_moves(self) -> None:
+        real = self.tmp / "other" / "ER0000.sl2"
+        real.parent.mkdir()
+        real.write_bytes(SL2)
+        (self.folder / "ER0000.sl2").unlink()
+        (self.folder / "ER0000.sl2").symlink_to(real)
+        with self.assertRaises(errors.SafetyError):
+            self.quarantine()
+        self.assertTrue((self.folder / "ER0000.sl2").is_symlink())
+        self.assertEqual(real.read_bytes(), SL2)
+        self.assertFalse(self.backups.exists() and any(self.backups.iterdir()))
+
+    def test_a_taken_orig_name_is_not_overwritten_either(self) -> None:
+        taken = self.put(f"quarantine-backup/ER0000.sl2.{STAMP}-orig", b"an earlier copy")
+        with self.assertRaises(errors.ErmError):
+            self.quarantine()
+        self.assertEqual(taken.read_bytes(), b"an earlier copy")
+        self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertFalse((self.backups / "quarantine").exists())
+
+    def test_the_cloud_purge_lines_survive_a_copy_that_does_not_read_back(self) -> None:
+        account = self.steam / "userdata/65369667/1245620"
+        account.mkdir(parents=True)
+        (account / "remotecache.vdf").write_text(REMOTECACHE.format(app="1245620"))
+        real = saves.github.sha256_file
+        with mock.patch.object(
+            saves.github, "sha256_file", side_effect=lambda p: "0" * 64 if "quarantine" in str(p) else real(p)
+        ):
+            with self.assertRaises(errors.ErmError) as caught:
+                self.quarantine()
+        self.assertIn("65369667", str(caught.exception))
+        self.assertIn("Steam Cloud", str(caught.exception))
+
     def test_a_move_that_fails_is_an_error_not_a_crash(self) -> None:
         with mock.patch.object(saves.ermsaves.shutil, "move", side_effect=PermissionError("denied")):
             with self.assertRaises(errors.ErmError):
@@ -659,6 +692,22 @@ class MoveToModdedTests(SaveFolderCase):
         self.assertEqual((self.folder / "ER0000_modded").read_bytes(), MODDED)
         self.assertFalse(kept.exists())
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(placed.destination, self.folder / "ER0000_modded")
+
+    def test_a_session_copy_from_outside_the_quarantine_folder_is_refused(self) -> None:
+        stray = self.folder / "elsewhere" / f"ER0000.sl2.{LATER}-modded-session"
+        stray.parent.mkdir()
+        stray.write_bytes(MODDED)
+        with self.assertRaises(errors.SafetyError):
+            self.move(stray)
+        self.assertEqual(stray.read_bytes(), MODDED)
+        self.assertFalse(os.path.lexists(self.folder / "ER0000_modded"))
+
+    def test_a_session_copy_at_the_root_of_the_backups_folder_is_taken(self) -> None:
+        kept = self.put(f"ER0000.sl2.{LATER}-modded-session", MODDED)
+        placed = self.move(kept, steam_running=lambda: True)
+        self.assertEqual((self.folder / "ER0000_modded").read_bytes(), MODDED)
+        self.assertFalse(kept.exists())
         self.assertEqual(placed.destination, self.folder / "ER0000_modded")
 
     def test_a_source_that_is_a_link_is_refused_and_nothing_moves(self) -> None:
@@ -753,6 +802,20 @@ class AuditTextTests(SaveFolderCase):
             text = saves.audit_text(path)
         self.assertIn("The audit found nothing.", text)
         self.assertTrue(text.endswith(saves.audit.CAVEAT))
+
+    def test_audit_file_says_whether_the_audit_found_anything(self) -> None:
+        path = self.write("ER0000.co2", self.container(break_md5=(3,)))
+        found = saves.audit_file(path)
+        self.assertFalse(found.clean)
+        self.assertEqual(found.text, saves.audit_text(path))
+        with mock.patch.object(saves.audit, "audit_save", return_value=saves.audit.AuditResult([])):
+            clean = saves.audit_file(path)
+        self.assertTrue(clean.clean)
+        self.assertIn("The audit found nothing.", clean.text)
+
+    def test_audit_file_raises_what_audit_text_raised(self) -> None:
+        with self.assertRaises(errors.ErmError):
+            saves.audit_file(self.write("ER0000.co2", b"nope"))
 
     def test_a_file_that_is_not_a_save_is_an_error_with_the_audits_own_words(self) -> None:
         with self.assertRaises(errors.ErmError) as caught:

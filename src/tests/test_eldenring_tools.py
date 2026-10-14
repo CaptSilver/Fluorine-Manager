@@ -762,6 +762,21 @@ class MoveToModdedToolTests(SaveToolsMenuCase):
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
         self.assertIn(f"{name}  (what a modded session wrote)", menu.call_args_list[1].args[3])
 
+    def test_a_copy_the_backup_tool_wrote_at_the_root_while_a_restore_is_pending_can_be_moved(self) -> None:
+        self.pend()
+        with self.choose(2), self.menu(tools.BACKUP):
+            self.tool.display()
+        [copy] = [
+            b.path for b in saves.restorable_backups(self.paths.save_backups)
+            if b.base == "ER0000.sl2" and b.modded_session
+        ]
+        self.assertEqual(copy.parent, self.paths.save_backups)
+        wrote = copy.read_bytes()
+        with self.choose(2), self.menu([tools.TO_MODDED, f"{copy.name}  (what a modded session wrote)"]):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000_modded").read_bytes(), wrote)
+        self.assertFalse(copy.exists())
+
     def test_with_nothing_to_move_it_says_so(self) -> None:
         (self.save_dir / "ER0000.sl2").unlink()
         with self.menu(tools.TO_MODDED):

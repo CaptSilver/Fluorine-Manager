@@ -315,13 +315,16 @@ def quarantine_vanilla(
     """Move ER0000.sl2 out of the save folder so Steam Play and Steam Cloud cannot reach it.
 
     Only ER0000.sl2: it is the file Steam syncs. Refuses while the game runs,
-    while Steam runs (it would sync the move as a deletion), and when no Steam
+    while Steam runs (it would sync the move as a deletion), when no Steam
     install with a userdata/ folder is found, because the cloud listing for a
     root without one is empty and an empty list must not pass for "no cloud
-    saves". A copy is taken first, and both it and the moved file are hashed
-    against the original, because ermlib's quarantine checks neither. Returns
-    the lines to show: where the file went and, per Steam account, what to
-    purge from the cloud.
+    saves", and when ER0000.sl2 is a link or anything but a regular file,
+    because moving a link would leave the real save where Steam can reach it.
+    A copy is taken first, and both it and the moved file are hashed against
+    the original, because ermlib's quarantine checks neither. Returns the
+    lines to show: where the file went and, per Steam account, what to purge
+    from the cloud; the same lines are part of the error when a copy does not
+    read back, since the file has moved by then.
     """
     procs.refuse_while_running(running, "quarantine the save")
     root = (install_root or steam_install_root)()
@@ -333,23 +336,30 @@ def quarantine_vanilla(
     target = Path(folder) / VANILLA
     if not os.path.lexists(target):
         raise ErmError(f"There is no {VANILLA} in {folder} to quarantine.")
+    if os.path.islink(target) or not os.path.isfile(target):
+        raise SafetyError(
+            f"{target} is a link or not a regular file. Moving it would not take the save out of Steam's "
+            "reach. Nothing was moved."
+        )
     taken = Path(backups_dir) / "quarantine" / f"{VANILLA}.{stamp}"
-    if os.path.lexists(taken) or not STAMP.fullmatch(str(stamp)):
-        raise ErmError(f"{taken} cannot be used as the quarantined name; nothing was moved.")
-    steam_up = (steam_running or steam.steam_running)()
     orig = Path(backups_dir) / "quarantine-backup" / f"{VANILLA}.{stamp}-orig"
+    if not STAMP.fullmatch(str(stamp)) or os.path.lexists(taken) or os.path.lexists(orig):
+        raise ErmError(f"{taken} and {orig} cannot both be new names; nothing was moved.")
+    steam_up = (steam_running or steam.steam_running)()
     try:
         before = github.sha256_file(target)
         report = ermsaves.quarantine(target, backups_dir, steam.cloud_saves(root), steam_up, stamp=stamp)
         unequal = [copy for copy in (taken, orig) if github.sha256_file(copy) != before]
     except OSError as exc:
         raise ErmError(f"cannot quarantine {target}: {exc}") from exc
+    lines = [message for _, message in report.items]
     if unequal:
         raise ErmError(
             f"{VANILLA} was moved, but a copy did not read back the same. Compare {taken} and {orig} "
             "with each other and with an older backup before using either. Neither was deleted."
+            + "".join(f"\n{line}" for line in lines)
         )
-    return [message for _, message in report.items]
+    return lines
 
 
 def move_to_modded(
@@ -374,6 +384,12 @@ def move_to_modded(
         parsed = parse_backup(source)
         if parsed is None or parsed.base != VANILLA or not parsed.modded_session:
             raise SafetyError(f"{source.name} is neither ER0000.sl2 nor a modded session's copy of it; nothing was moved.")
+        kept_in = (Path(backups_dir), Path(backups_dir) / "quarantine")
+        if source.parent not in kept_in:
+            raise SafetyError(
+                f"{source} is not in {kept_in[0]} or {kept_in[1]}, where a modded session's copy of ER0000.sl2 "
+                "is kept; nothing was moved."
+            )
     procs.refuse_while_running(running, "move a save to the modded name")
     if in_folder and (steam_running or steam.steam_running)():
         raise SafetyError("Close Steam first: it would sync the move of ER0000.sl2 as a deletion. Nothing was moved.")
@@ -397,12 +413,21 @@ def move_to_modded(
 # -- looking at a save ------------------------------------------------------------
 
 
-def audit_text(path) -> str:
+@dataclass(frozen=True)
+class Audited:
+    """What the audit made of a save: whether it found nothing, and the text to show."""
+
+    clean: bool
+    text: str
+
+
+def audit_file(path) -> Audited:
     """What the audit finds in the save at `path`, ending with the caveat.
 
     The audit can flag the marks careless tampering leaves. It cannot prove a
-    save clean, and the text says so every time. A file that is not an Elden
-    Ring PC save raises the audit's own NotAnEldenRingSave, which is an ErmError.
+    save clean, and the text says so every time; `clean` only says that it
+    found nothing. A file that is not an Elden Ring PC save raises the audit's
+    own NotAnEldenRingSave, which is an ErmError.
     """
     path = Path(path)
     try:
@@ -417,4 +442,9 @@ def audit_text(path) -> str:
         where = f"slot {finding.slot}: " if finding.slot is not None else ""
         lines.append(f"[{finding.severity}] {where}{finding.message}")
     lines += ["", result.caveat]
-    return "\n".join(lines)
+    return Audited(not result.findings, "\n".join(lines))
+
+
+def audit_text(path) -> str:
+    """audit_file's text, for the callers that only show it."""
+    return audit_file(path).text
