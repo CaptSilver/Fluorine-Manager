@@ -974,6 +974,32 @@ class MoveAnywayTests(OverrideCase):
         self.finish()
         self.assertNotIn("anyway", self.script.kinds_shown())
 
+    def test_running_again_after_a_move_without_the_check_still_warns_against_play(self) -> None:
+        self.script.anyway = importfinish.MOVE_ONLY
+        self.finish("20260101-000000")
+        report = self.finish()
+        text = report.text()
+        self.assertIn("moved out of Game/ earlier", text)
+        self.assertNotIn("erm's files stay in Game/", text)
+        self.assertNotIn("erm's files are still in Game/", text)
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", text)
+        self.assertIn("ER0000.sl2 is still unreviewed", text)
+        self.assertNotIn("not recorded as vanilla", text)
+        self.assertIsNone(self.done())
+
+    def test_running_again_after_a_move_with_the_check_still_warns_against_play(self) -> None:
+        self.script.anyway = importfinish.MOVE_AND_CHECK
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: self.options.clear() or True
+        self.finish("20260101-000000")
+        report = self.finish()
+        text = report.text()
+        self.assertIn("moved out of Game/ earlier", text)
+        self.assertNotIn("erm's files stay in Game/", text)
+        self.assertNotIn("erm's files are still in Game/", text)
+        self.assertIn("Do not press Play in Steam until", text)
+        self.assertIsNone(self.done())
+
     def test_declining_the_move_list_after_choosing_to_move_changes_nothing(self) -> None:
         self.script.accept = False
         before = base.tree(self.game)

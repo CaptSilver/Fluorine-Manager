@@ -498,6 +498,7 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
         backup=importer.backup_copy(paths, saves.VANILLA, stamp), overrides=log,
     )
     moved_now = None
+    left_in_game = True
     if saved:
         cleaned, moved = clean_game(organizer, installed, paths, host, ui, report, stamp)
     else:
@@ -505,12 +506,21 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
         if moved_now is not None:
             cleaned, moved = clean_game(organizer, installed, paths, host, ui, report, stamp)
         else:
-            cleaned = moved = False
-            report.warn(
-                "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam meanwhile. "
-                "Moving them first would leave Steam's launch option starting me3 with erm's mods but without "
-                "Seamless Co-op."
-            )
+            cleaned = False
+            found = importgame.survey(organizer, installed, host.game_dir)
+            moved = bool(importgame.quarantined(paths, found.gone))
+            left_in_game = bool(found.moves() or found.carries)
+            if moved and not left_in_game:
+                report.warn(
+                    "erm's files were moved out of Game/ earlier, while ER0000.sl2 was not settled. Steam's "
+                    "launch option is not looked at until it is."
+                )
+            else:
+                report.warn(
+                    "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam "
+                    "meanwhile. Moving them first would leave Steam's launch option starting me3 with erm's mods "
+                    "but without Seamless Co-op."
+                )
     launcher_report(host, paths, report)
     adopted = False
     if cleaned:
@@ -539,8 +549,10 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
     blockers = []
     if not saved:
         blockers.append("ER0000.sl2 is still unreviewed")
-    if not cleaned:
+    if not cleaned and left_in_game:
         blockers.append("erm's files are still in Game/")
+    elif not cleaned:
+        pass  # moved by an earlier run, which also asked about the inventory
     elif not adopted:
         blockers.append("Game/ is not recorded as vanilla")
     if (saved or moved_now == MOVE_AND_CHECK) and adopted and not option:
