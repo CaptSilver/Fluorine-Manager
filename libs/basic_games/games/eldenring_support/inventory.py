@@ -1,8 +1,9 @@
 """What Game/ held when it was vanilla, and the checks that hold it to that.
 
-Decision 10 wants Game/ vanilla at every launch, and neither erm nor Fluorine
-has a definition of vanilla: erm's doctor only knew a blocklist of names, and
-Steam's depot manifests are a format the plugin does not parse. So the plugin
+Game/ has to be vanilla at every launch or the launch is blocked, and neither
+erm nor Fluorine has a definition of vanilla: erm's doctor only knew a
+blocklist of names, and Steam's depot manifests are a format the plugin does
+not parse. So the plugin
 records one, <instance>/eldenring/vanilla-inventory.json, adopted at a moment
 the user confirmed (adopt), checked at every launch and after every session
 (check), and moved forward across a Steam update without trusting anything that
@@ -344,8 +345,11 @@ def ordered_for_dialog(rels: Iterable[str]) -> list[str]:
 
 def candidates(game_dir, manifest: deploy.Manifest) -> Candidates:
     """Every path an adoption could record: the plain files and the allowlisted links."""
+    return _candidates_in(game_dir, manifest, walk(game_dir))
+
+
+def _candidates_in(game_dir, manifest: deploy.Manifest, tree: Tree) -> Candidates:
     ctx = context(game_dir, manifest)
-    tree = walk(game_dir)
     found = Candidates(unreadable=list(tree.unreadable))
     found.files = sorted(rel for rel in tree.files if not excluded(rel, ctx))
     for rel, target in sorted(tree.links.items()):
@@ -399,7 +403,8 @@ def adopt(
     and a non-empty deploy manifest. `live` is the gamebuild.BuildId whose
     steam_buildid, regulation and regulation_sha are recorded beside the files.
     """
-    found = candidates(game_dir, manifest)
+    tree = walk(game_dir)
+    found = _candidates_in(game_dir, manifest, tree)
     _refuse_unadoptable(game_dir, found, manifest, allow_deployed=False)
     allowed = set(found.files) | set(found.links)
     unknown = sorted(set(accepted) - allowed)
@@ -410,7 +415,6 @@ def adopt(
         raise InventoryError(
             "These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked)
         )
-    tree = walk(game_dir)
     notify = notify or (lambda message: None)
     inventory = Inventory(
         live.steam_buildid,
@@ -420,9 +424,12 @@ def adopt(
     )
     for rel in sorted(accepted):
         notify(f"Recording {rel}")
-        if rel in tree.links:
-            inventory.links[rel] = _link_entry(game_dir, rel, tree.links[rel], cache)
-        else:
-            inventory.files[rel] = _file_entry(game_dir, rel, tree.files[rel], cache)
+        try:
+            if rel in tree.links:
+                inventory.links[rel] = _link_entry(game_dir, rel, tree.links[rel], cache)
+            else:
+                inventory.files[rel] = _file_entry(game_dir, rel, tree.files[rel], cache)
+        except OSError as exc:
+            raise InventoryError(f"{rel} could not be read from Game/ ({exc.strerror or exc}).") from exc
     write(paths, inventory)
     return inventory

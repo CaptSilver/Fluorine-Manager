@@ -312,6 +312,24 @@ class AdoptTests(InventoryCase):
         self.adopt("eldenring.exe", "sd/sd.bdt", notify=seen.append)
         self.assertEqual(seen, ["Recording eldenring.exe", "Recording sd/sd.bdt"])
 
+    def test_a_file_that_vanishes_after_the_walk_is_an_inventory_error_naming_it(self) -> None:
+        self.vanilla()
+        real_walk = inventory.walk
+        walks: list[int] = []
+
+        def walk_then_lose_a_file(game_dir):
+            tree = real_walk(game_dir)
+            walks.append(1)
+            (self.game / "steam_api64.dll").unlink(missing_ok=True)
+            return tree
+
+        with mock.patch.object(inventory, "walk", walk_then_lose_a_file):
+            with self.assertRaises(inventory.InventoryError) as caught:
+                self.adopt("eldenring.exe", "steam_api64.dll")
+        self.assertIn("steam_api64.dll", str(caught.exception))
+        self.assertEqual(len(walks), 1)
+        self.assertFalse(self.paths.vanilla_inventory.exists())
+
     def test_a_path_that_is_not_a_candidate_is_refused_and_nothing_is_written(self) -> None:
         self.vanilla()
         for rel in ("missing.bin", "sd", "../x", "vkd3d-proton.cache"):
