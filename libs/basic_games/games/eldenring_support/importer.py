@@ -867,7 +867,10 @@ def _run(
     sources = _stage_vanilla(organizer, paths, erm_dir, vanilla_ids, lock, raw_ids, report)
 
     if loaded:
-        generated.ensure_folder(organizer, guessed)
+        if generated.ensure_folder(organizer, guessed):
+            # createMod adds the mod without refreshing ModInfo's indices; the profile's
+            # mod state stays one short and the next enable or disable throws.
+            organizer.refresh()
         for name, data in loaded.items():
             recipe = sorted(
                 entry.id for entry in _entries(data) if entry.install in INSTALLABLE and entry.id in present

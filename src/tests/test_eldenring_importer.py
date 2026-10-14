@@ -739,7 +739,21 @@ class ProfileTests(ImporterCase):
         self.run_import()
         self.assertEqual(self.organizer.create_calls, [GEN])
         self.assertNotIn(GEN, self.modlist.active)
-        self.assertEqual(self.organizer.mod_list.mods.get(GEN), None)  # not indexed until the next refresh
+
+    def test_the_organizer_is_refreshed_after_the_generated_mod_is_created(self) -> None:
+        # createMod leaves ModInfo's indices stale, so without a refresh the profile's mod
+        # state is one entry short and the next enable or disable throws "invalid mod index".
+        before = self.organizer.refreshes
+        self.run_import()
+        self.assertEqual(self.organizer.create_calls, [GEN])
+        self.assertGreater(self.organizer.refreshes, before)
+        self.assertIsNotNone(self.modlist.getMod(GEN))
+
+    def test_an_existing_generated_mod_does_not_need_a_refresh_for_the_mod_to_resolve(self) -> None:
+        self.modlist.add(GEN, enabled=False)
+        self.run_import()
+        self.assertEqual(self.organizer.create_calls, [])
+        self.assertIsNotNone(self.modlist.getMod(GEN))
 
     def test_a_profile_with_a_rule_the_merge_cannot_read_is_reported_and_not_written(self) -> None:
         (self.erm / "profiles/full.toml").write_text(
@@ -1102,7 +1116,7 @@ class KeepOpenProfileTests(ProfileChoiceCase):
     def test_the_other_mods_keep_their_state_and_their_order(self) -> None:
         self.modlist.setActive("map-for-goblins", True)
         self.lose("erdyes")
-        others = list(self.modlist.order)
+        others = [name for name in self.modlist.order if name != GEN]
         self.rerun()
         self.assertEqual([name for name in self.modlist.order if name not in ("erdyes", GEN)], others)
         self.assertEqual(self.modlist.active, {"map-for-goblins", "erdyes"})
