@@ -430,9 +430,10 @@ def clean_game(
     erm's and vanilla.
 
     Refuses, moving nothing, while the deploy manifest holds files (folders
-    it only owns for a DLL's log place nothing): on a re-run after a gated launch, installed.json still names the
-    config files Fluorine deployed over erm's, and quarantining them would
-    leave the manifest naming files that are gone. A file that cannot be
+    it only owns for a DLL's log place nothing). On a re-run after a gated
+    launch, installed.json still names the config files Fluorine deployed over
+    erm's, and quarantining them would leave the manifest naming files that
+    are gone. A file that cannot be
     moved is reported and the rest go on. An edited
     config file is carried into its mod folder first; if that fails the file
     still goes to quarantine with the edit in it.

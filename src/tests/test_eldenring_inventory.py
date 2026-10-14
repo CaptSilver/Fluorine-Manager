@@ -646,9 +646,13 @@ class ManifestOwnedTests(CheckCase):
         self.put("mods/other/log.txt")
         self.assertEqual(self.check().strays, ["mods/other/log.txt"])
 
-    def test_a_folder_spelled_with_another_case_is_not_the_owned_one(self) -> None:
+    def test_a_folder_spelled_with_another_case_is_the_owned_one(self) -> None:
         self.put("mods/thing/log.txt")
-        self.assertEqual(self.check().strays, ["mods/thing/log.txt"])
+        self.assertEqual(self.check().strays, [])
+
+    def test_anything_else_in_a_differently_cased_owned_folder_is_still_a_stray(self) -> None:
+        self.put("mods/thing/notes.txt")
+        self.assertEqual(self.check().strays, ["mods/thing/notes.txt"])
 
     def test_a_file_with_the_bytes_a_native_wants_there_is_not_a_stray(self) -> None:
         wanted = {"mods/Fov/config.ini": sha(b"fov=90\n")}

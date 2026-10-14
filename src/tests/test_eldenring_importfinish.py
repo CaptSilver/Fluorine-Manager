@@ -990,6 +990,12 @@ class MoveAnywayTests(OverrideCase):
         self.assertEqual(base.tree(self.game), before)
         self.assertIn("is not offered while Fluorine has files deployed", report.text())
 
+    def test_folders_owned_for_a_dlls_log_do_not_withdraw_the_override(self) -> None:
+        deploy.write_manifest(self.paths, deploy.Manifest({}, ["mods/AdjustTheFov"]))
+        report = self.finish()
+        self.assertIn("anyway", self.script.kinds_shown())
+        self.assertNotIn("is not offered while Fluorine has files deployed", report.text())
+
     def test_with_nothing_of_erms_left_in_game_the_override_is_not_offered(self) -> None:
         for rel in [*ERM_FILES, *RESIDUE, "mods/AdjustTheFov/config.ini"]:
             (self.game / rel).unlink(missing_ok=True)

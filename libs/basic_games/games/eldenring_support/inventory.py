@@ -251,7 +251,7 @@ class Context:
 
 
 def context(game_dir, manifest: deploy.Manifest, desired: dict[str, str] | None = None) -> Context:
-    return Context(manifest, dict(desired or {}), reshade_active(game_dir), frozenset(manifest.dirs))
+    return Context(manifest, dict(desired or {}), reshade_active(game_dir), frozenset(name.lower() for name in manifest.dirs))
 
 
 def excluded(rel: str, ctx: Context) -> bool:
@@ -271,7 +271,7 @@ def excluded(rel: str, ctx: Context) -> bool:
     parts = rel.split("/")
     # The log.txt a LukeYui-style DLL writes beside its config file is owned by
     # the folder the plugin created for it. Anything else in there is not.
-    return len(parts) > 2 and "/".join(parts[:2]) in ctx.owned and deploy.is_noise(parts[-1])
+    return len(parts) > 2 and "/".join(parts[:2]).lower() in ctx.owned and deploy.is_noise(parts[-1])
 
 
 def _is_reshade_name(rel: str) -> bool:

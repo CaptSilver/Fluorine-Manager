@@ -53,8 +53,9 @@ class Entry:
 @dataclass
 class Manifest:
     """`files` maps "mods/<Name>/<file>" to what was placed; `dirs` lists the
-    "mods/<Name>" folders the plugin created or owns for a DLL's log, so it
-    removes only those and expects the DLL's log files in them."""
+    "mods/<Name>" folders the plugin created or adopted while they held nothing
+    but runtime noise, so it removes only those and expects the DLL's log files
+    in them."""
 
     files: dict[str, Entry] = field(default_factory=dict)
     dirs: list[str] = field(default_factory=list)
@@ -260,8 +261,8 @@ def desired(organizer) -> Desired:
     The mod folder's copy is the one the user edits and the list pins; the
     copy in Game/ is derived from it. The same path wanted by two mods is a
     finding for both and neither mod deploys any file, never a last-wins:
-    a deployed file cannot be taken back by priority alone. Names are compared without regard to case, because
-    Wine resolves them that way.
+    a deployed file cannot be taken back by priority alone. Names are compared
+    without regard to case, because Wine resolves them that way.
     """
     result = Desired()
     claims: dict[str, list[tuple[str, Wanted]]] = {}
@@ -388,8 +389,12 @@ def plan(wanted: Desired, manifest: Manifest, game_dir) -> Plan:
     config.ini) is copied again from the mod folder, which is the source of
     truth, and what the DLL wrote is kept in the quarantine.
     """
+    recorded = {name.lower() for name in manifest.dirs}
     result = Plan(
-        keep_dirs=set(wanted.dirs), new_dirs=sorted(wanted.dirs - set(manifest.dirs))
+        keep_dirs=set(wanted.dirs),
+        new_dirs=sorted(
+            name for name in wanted.dirs if name.lower() not in recorded and _adoptable(game_dir, name)
+        ),
     )
     for rel, want in sorted(wanted.files.items()):
         found, digest = on_disk(game_dir, rel)
@@ -488,6 +493,40 @@ def _record(paths: state.InstancePaths, manifest: Manifest) -> None:
         raise DeployError(f"cannot write {paths.deploy_manifest}: {exc}") from exc
 
 
+def _has_dir(manifest: Manifest, name_rel: str) -> bool:
+    """Whether the manifest lists `name_rel`, without regard to case: Wine resolves names that way."""
+    return name_rel.lower() in {name.lower() for name in manifest.dirs}
+
+
+def _adoptable(game_dir, name_rel: str) -> bool:
+    """Whether the plugin may own mods/<Name>/: it is absent, or holds only runtime noise.
+
+    A folder with anything else in it, or one that is not a plain folder, belongs
+    to someone, and removing it with the last of ours would delete their files.
+    The name is looked up without regard to case, as Wine would find it.
+    """
+    game_dir = Path(game_dir)
+    if _blocked_above(game_dir, name_rel):
+        return False
+    mods_dir, wanted = game_dir / MODS, name_rel.split("/")[1].lower()
+    try:
+        names = [entry for entry in os.listdir(mods_dir) if entry.lower() == wanted]
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    for entry in names:
+        folder = mods_dir / entry
+        if fsprobe.kind(folder) != fsprobe.DIR:
+            return False
+        try:
+            if not all(is_noise(name) and fsprobe.kind(folder / name) == fsprobe.FILE for name in os.listdir(folder)):
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def _folder_of(rel: str) -> str:
     return "/".join(rel.split("/")[:2])
 
@@ -495,8 +534,9 @@ def _folder_of(rel: str) -> str:
 def _make_folders(rel: str, manifest: Manifest, paths: state.InstancePaths, game_dir: Path) -> None:
     """mods/ and mods/<Name>/, the second recorded before it is created.
 
-    Only a folder this call creates is recorded as the plugin's, so a mods/<Name>/
-    that already held someone's files is never removed with the last of ours.
+    Only a folder this call creates is recorded as the plugin's here; one that
+    already exists is owned only if apply_copies adopted it for holding nothing
+    but runtime noise, so someone's files are never removed with the last of ours.
     """
     mods_dir = game_dir / MODS
     found = fsprobe.kind(mods_dir)
@@ -508,7 +548,7 @@ def _make_folders(rel: str, manifest: Manifest, paths: state.InstancePaths, game
     folder = game_dir / name_rel
     found = fsprobe.kind(folder)
     if found is None:
-        if name_rel not in manifest.dirs:
+        if not _has_dir(manifest, name_rel):
             manifest.dirs.append(name_rel)
             _record(paths, manifest)
         os.mkdir(folder)
@@ -560,9 +600,10 @@ def apply_copies(
         manifest.files[rel] = Entry(want.sha256, want.size, want.mod)
         _record(paths, manifest)
         done.adopted.append(rel)
-    # Recorded, never created: the DLL makes the folder when it first writes its log.
+    # Recorded, never created: the DLL makes the folder when it first writes its
+    # log. A folder that holds anything but noise is someone's and stays unowned.
     for name_rel in plan.new_dirs:
-        if name_rel not in manifest.dirs:
+        if not _has_dir(manifest, name_rel) and _adoptable(game_dir, name_rel):
             manifest.dirs.append(name_rel)
             _record(paths, manifest)
     for item in plan.copies:
@@ -593,8 +634,10 @@ def _empty_folder(folder: Path, game_dir: Path, paths: state.InstancePaths, stam
 def _clean_folders(
     manifest: Manifest, paths: state.InstancePaths, game_dir: Path, stamp: str, done: Applied, needed: set[str]
 ) -> None:
+    needed = {name.lower() for name in needed}
     for name_rel in list(manifest.dirs):
-        if name_rel in needed or any(rel.startswith(name_rel + "/") for rel in manifest.files):
+        low = name_rel.lower() + "/"
+        if name_rel.lower() in needed or any(rel.lower().startswith(low) for rel in manifest.files):
             continue
         folder = game_dir / name_rel
         blocked = _blocked_above(game_dir, name_rel)
@@ -669,8 +712,8 @@ def sync_removes(
     check and the findings stay with the launch and the Sync tool: a mod whose
     list became invalid wants nothing, so its files leave here exactly as they
     do in deploy.sync, and the refusal is shown where the user is looking.
-    Nothing is edited under a running game, so while
-    one is up the result says it was skipped.
+    Nothing is edited under a running game, so while one is up the result says
+    it was skipped.
     """
     manifest = read_manifest(paths)
     if not manifest.files and not manifest.dirs:
@@ -714,9 +757,10 @@ def sync(
     files in Game/ longer; then the findings, strays and harden vetoes; then
     the copies. A mod with a finding wants nothing, so its files go in the
     removals (desired() leaves none of a colliding mod's files in `wanted`).
-    Nothing is copied unless the launcher is hardened, and that is asked of `launcher()` only when a file is, or is about to be, deployed
-    (a folder owned for a DLL's log places no file and does not ask):
-    the hardened launcher has to be in place before the first file exists.
+    Nothing is copied unless the launcher is hardened, and `launcher()` is
+    asked only when a file is, or is about to be, deployed (a folder owned for
+    a DLL's log places no file and does not ask): the hardened launcher has to
+    be in place before the first file exists.
     `launcher` returns hardening.state(...).
     """
     game_dir, stamp = Path(game_dir), stamp or session.now_stamp()

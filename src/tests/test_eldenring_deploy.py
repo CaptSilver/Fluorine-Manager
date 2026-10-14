@@ -188,6 +188,7 @@ class DesiredTests(ModListCase):
         self.native("No list", dll="mods/Other.dll", config=())
         wanted = deploy.desired(self.organizer)
         self.assertEqual((wanted.files, wanted.findings), ({}, []))
+        self.assertEqual(wanted.dirs, {"mods/Other"})
 
     def test_a_reserved_shape_is_a_finding_naming_the_mod_and_nothing_is_wanted(self) -> None:
         mod = self.native("Thing mod")
@@ -878,6 +879,59 @@ class OwnedLayoutFolderTests(ModListCase):
         self.sync()
         self.assertTrue(self.excluded("mods/NoWeight/log.txt"))
 
+    def test_an_absent_folder_is_owned(self) -> None:
+        self.bare()
+        self.sync()
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, ["mods/NoWeight"])
+
+    def test_a_folder_holding_only_the_dlls_log_is_owned(self) -> None:
+        (self.game / "mods/NoWeight").mkdir(parents=True)
+        (self.game / "mods/NoWeight/log.txt").write_text("log")
+        self.bare()
+        self.sync()
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, ["mods/NoWeight"])
+
+    def test_a_folder_holding_someones_other_file_is_not_owned_and_survives_disabling(self) -> None:
+        folder = self.game / "mods/NoWeight"
+        folder.mkdir(parents=True)
+        (folder / "log.txt").write_text("log")
+        (folder / "notes.txt").write_text("mine")
+        self.bare()
+        self.sync()
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, [])
+        self.assertFalse(self.excluded("mods/NoWeight/log.txt"))
+        self.organizer.mod_list.active.discard("NoWeight")
+        applied = self.sync()
+        self.assertEqual((applied.noise, applied.quarantined, applied.folders_removed), ([], [], []))
+        self.assertEqual((folder / "notes.txt").read_text(), "mine")
+        self.assertEqual((folder / "log.txt").read_text(), "log")
+
+    def test_a_folder_holding_a_subfolder_is_not_owned(self) -> None:
+        (self.game / "mods/NoWeight/sub").mkdir(parents=True)
+        self.bare()
+        self.sync()
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, [])
+
+    def test_folders_are_matched_without_regard_to_case(self) -> None:
+        folder = self.game / "mods/foo"
+        folder.mkdir(parents=True)
+        (folder / "log.txt").write_text("log")
+        self.bare("Foo", dll="Foo.dll")
+        self.sync()
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, ["mods/Foo"])
+        self.assertTrue(self.excluded("mods/foo/log.txt"))
+        self.assertTrue(self.excluded("mods/FOO/log.txt"))
+        self.assertEqual(self.sync(), deploy.Applied())
+        self.assertTrue((folder / "log.txt").exists())
+
+    def test_a_differently_cased_folder_is_not_owned_when_it_holds_someones_file(self) -> None:
+        folder = self.game / "mods/foo"
+        folder.mkdir(parents=True)
+        (folder / "notes.txt").write_text("mine")
+        self.bare("Foo", dll="Foo.dll")
+        self.sync()
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, [])
+
 
 class SyncTests(ModListCase):
     def setUp(self) -> None:
@@ -1088,3 +1142,4 @@ class AppliedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
