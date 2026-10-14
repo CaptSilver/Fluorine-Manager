@@ -27,10 +27,30 @@ def write_bytes_atomic(path: Path | str, data: bytes, mode: int = 0o644) -> None
             os.fsync(handle.fileno())
         os.chmod(tmp_name, mode)
         os.replace(tmp_name, path)
+        fsync_dir(path.parent)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp_name)
         raise
+
+
+def fsync_dir(folder: Path | str) -> None:
+    """Flush a folder's entries to disk, so a rename or a new file in it survives a crash.
+
+    A filesystem that has no such thing (EINVAL, ENOTSUP) is not an error;
+    every other failure is, because a move is about to remove the only other
+    copy. In write_bytes_atomic the same failure is reported although the file
+    is already in place: a disk that cannot flush a folder is not one to
+    trust a state file to.
+    """
+    descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    except OSError as exc:
+        if exc.errno not in (errno.EINVAL, errno.ENOTSUP):
+            raise
+    finally:
+        os.close(descriptor)
 
 
 class MoveError(OSError):
@@ -56,6 +76,7 @@ def move_durably(source: Path | str, destination: Path | str) -> None:
             raise
     if os.path.islink(source):
         os.symlink(os.readlink(source), destination)
+        fsync_dir(destination.parent)
         os.unlink(source)
         return
     data = source.read_bytes()

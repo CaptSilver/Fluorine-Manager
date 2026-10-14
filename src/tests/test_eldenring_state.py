@@ -52,6 +52,20 @@ class AtomicWriteTests(TempDirCase):
         atomic.write_bytes_atomic(target, b"new")
         self.assertEqual(target.read_bytes(), b"new")
 
+    def test_the_folder_is_flushed_after_the_file_is_in_place(self) -> None:
+        events: list = []
+        real_replace = os.replace
+
+        def replace(source, destination) -> None:
+            events.append("replace")
+            real_replace(source, destination)
+
+        with mock.patch.object(atomic.os, "replace", side_effect=replace), mock.patch.object(
+            atomic, "fsync_dir", side_effect=lambda folder: events.append(("fsync_dir", Path(folder)))
+        ):
+            atomic.write_bytes_atomic(self.tmp / "folder" / "f", b"x")
+        self.assertEqual(events, ["replace", ("fsync_dir", self.tmp / "folder")])
+
     def test_default_mode_is_0644_and_the_mode_can_be_set(self) -> None:
         plain = self.tmp / "plain"
         atomic.write_bytes_atomic(plain, b"x")
@@ -73,6 +87,64 @@ class AtomicWriteTests(TempDirCase):
         target = self.tmp / "My Instance" / "it's" / "current.me3"
         atomic.write_bytes_atomic(target, b"x")
         self.assertTrue(target.is_file())
+
+
+class FsyncDirTests(TempDirCase):
+    def test_a_filesystem_that_cannot_flush_a_folder_is_not_an_error(self) -> None:
+        for code in (errno.EINVAL, errno.ENOTSUP):
+            with self.subTest(code), mock.patch.object(atomic.os, "fsync", side_effect=OSError(code, "no")):
+                atomic.fsync_dir(self.tmp)
+
+    def test_any_other_failure_is_raised(self) -> None:
+        with mock.patch.object(atomic.os, "fsync", side_effect=OSError(errno.EIO, "io")):
+            with self.assertRaises(OSError):
+                atomic.fsync_dir(self.tmp)
+
+    def test_a_folder_that_is_not_there_is_raised(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            atomic.fsync_dir(self.tmp / "nothing")
+
+
+class MoveDurablyTests(TempDirCase):
+    def cross_device(self):
+        return mock.patch.object(atomic.os, "rename", side_effect=OSError(errno.EXDEV, "cross-device link"))
+
+    def test_across_filesystems_the_destination_folder_is_flushed_before_the_source_goes(self) -> None:
+        source = self.tmp / "a" / "f"
+        source.parent.mkdir()
+        source.write_bytes(b"data")
+        destination = self.tmp / "b" / "f"
+        destination.parent.mkdir()
+        seen: list = []
+
+        def watching(folder) -> None:
+            seen.append((Path(folder), os.path.lexists(source), os.path.lexists(destination)))
+
+        with self.cross_device(), mock.patch.object(atomic, "fsync_dir", side_effect=watching):
+            atomic.move_durably(source, destination)
+        self.assertIn((destination.parent, True, True), seen)
+        self.assertFalse(os.path.lexists(source))
+        self.assertEqual(destination.read_bytes(), b"data")
+
+    def test_a_link_is_flushed_before_the_source_link_goes(self) -> None:
+        target = self.tmp / "target"
+        target.write_bytes(b"t")
+        source = self.tmp / "a" / "link"
+        source.parent.mkdir()
+        source.symlink_to(target)
+        destination = self.tmp / "b" / "link"
+        destination.parent.mkdir()
+        seen: list = []
+
+        def watching(folder) -> None:
+            seen.append((Path(folder), os.path.lexists(source), os.path.lexists(destination)))
+
+        with self.cross_device(), mock.patch.object(atomic, "fsync_dir", side_effect=watching):
+            atomic.move_durably(source, destination)
+        self.assertEqual(seen, [(destination.parent, True, True)])
+        self.assertTrue(destination.is_symlink())
+        self.assertEqual(os.readlink(destination), str(target))
+        self.assertFalse(os.path.lexists(source))
 
 
 class AtomicMoveTests(TempDirCase):
