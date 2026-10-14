@@ -14,6 +14,7 @@ PACKAGE = support.load_support("_eldenring_views_tests")
 views = support.module(PACKAGE, "views")
 merge_engine = support.module(PACKAGE, "merge_engine")
 state = support.module(PACKAGE, "state")
+treewalk = support.module(PACKAGE, "treewalk")
 
 
 def tree(root: Path) -> dict:
@@ -108,6 +109,30 @@ class ViewFilesTests(ViewsCase):
     def test_a_rename_of_a_missing_source_is_skipped_as_already_fixed(self) -> None:
         files = views.view_files("pack", self.mod, [], self.renames({"nothing": "somewhere"}))
         self.assertNotIn("somewhere", files)
+
+
+class ViewListingTests(ViewsCase):
+    def test_it_lists_what_a_view_would_hold_with_the_real_files_stat(self) -> None:
+        renames = self.renames({"msg/engUS/item.msgbnd.dcx": "msg/engus/item.msgbnd.dcx"})
+        listing = views.view_listing("pack", self.mod, self.prunes("param/systemparam.parambnd.dcx"), renames)
+        self.assertEqual(
+            [entry.rel for entry in listing],
+            ["msg/engUS/menu.msgbnd.dcx", "msg/engus/item.msgbnd.dcx", "regulation.bin"],
+        )
+        entry = listing[1]
+        self.assertEqual((entry.path, entry.size), (self.mod / "msg/engUS/item.msgbnd.dcx", len(b"text")))
+
+    def test_its_digest_is_the_digest_of_the_view_built_from_the_same_rules(self) -> None:
+        prunes = self.prunes("param")
+        renames = self.renames({"msg/engUS/item.msgbnd.dcx": "msg/engus/item.msgbnd.dcx"})
+        built = self.tmp / "built"
+        views.build_view("pack", self.mod, prunes, renames, built)
+        listing = views.view_listing("pack", self.mod, prunes, renames)
+        self.assertEqual(treewalk.digest_of(listing), treewalk.listing_digest(built))
+
+    def test_the_refusals_of_the_view_apply_to_the_listing(self) -> None:
+        with self.assertRaises(merge_engine.ConflictError):
+            views.view_listing("pack", self.mod, self.prunes("../escape"), [])
 
 
 class EnsureViewTests(ViewsCase):

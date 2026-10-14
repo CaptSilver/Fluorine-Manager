@@ -57,6 +57,7 @@ class Prepared:
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     rebuilt: bool = False
+    merged: list[str] = field(default_factory=list)
 
 
 def _active_list(organizer) -> dict | None:
@@ -322,7 +323,7 @@ def _names(folder: Path) -> list[str]:
         return []
 
 
-def _vanilla_archives(merges: list[dict], sources: dict, downloads: Path, paths, cache: dict) -> dict:
+def _vanilla_archives(merges: list[dict], sources: dict, downloads: Path, cache: dict) -> dict:
     out = {}
     for rule in merges:
         mod_id = (rule.get("vanilla") or {}).get("mod")
@@ -376,36 +377,59 @@ def prepare(
     mod_dir = Path(organizer.modsPath()) / generated.NAME
     ersc = next((ref for ref in refs if ref.kind == kinds.ERSC), None)
     notes: list[str] = []
+    decisions: list[merge_engine.Decision] = []
+    spelling_warnings: list[str] = []
     rebuilt = False
     with archives.hash_cache(paths) as cache:
         try:
             notify("Preparing the mods")
+            contributors = merge_engine.contributors_of(organizer, {})
+            # Each mod as me3 will see it: through the profile's prunes and renames, listed
+            # without building a view yet.
+            listings = {
+                c.mod: (
+                    views.view_listing(c.mod, c.source, rules["prunes"], rules["renames"])
+                    if views.has_rules(c.mod, rules["prunes"], rules["renames"])
+                    else treewalk.package_listing(c.source)
+                )
+                for c in contributors
+            }
+            dropped: dict[str, list[str]] = {}
+            provided = merge_engine.index(contributors, listings, spelling_warnings, dropped)
+            # What me3 loads has to be what the merge saw. A merged output sits at the game's
+            # spelling, so a mod's file under another spelling of the same path is taken out of
+            # its view, beside the profile's own prunes. One build per mod per launch.
+            shadows = merge_engine.shadowed(provided, rules["merges"], dropped)
             view_map: dict[str, Path] = {}
             for ref in refs:
-                if ref.kind == kinds.PACKAGE and views.has_rules(ref.name, rules["prunes"], rules["renames"]):
+                if ref.kind != kinds.PACKAGE or ref.name == generated.NAME:
+                    continue
+                if views.has_rules(ref.name, rules["prunes"], rules["renames"]) or ref.name in shadows:
+                    own = [{"mod": ref.name, "paths": shadows[ref.name]}] if ref.name in shadows else []
                     view_map[ref.name] = views.ensure_view(
-                        paths, ref.name, ref.path, rules["prunes"], rules["renames"]
+                        paths, ref.name, ref.path, rules["prunes"] + own, rules["renames"]
                     )
-            contributors = merge_engine.contributors_of(organizer, view_map)
             fp = generated.fingerprint(
                 contributors=[
-                    (c.mod, kinds.PACKAGE, treewalk.listing_digest(c.source)) for c in contributors
+                    (c.mod, kinds.PACKAGE, treewalk.digest_of(listings[c.mod])) for c in contributors
                 ],
                 rules={k: rules[k] for k in ("merges", "prunes", "renames")},
                 vanilla_archives=_vanilla_archives(
-                    rules["merges"], rules["vanilla_sources"], Path(organizer.downloadsPath()), paths, cache
+                    rules["merges"], rules["vanilla_sources"], Path(organizer.downloadsPath()), cache
                 ),
                 codecs=generated.codecs(),
                 live=live,
                 ersc_tree=generated.ersc_tree(ersc.path, cache) if ersc else None,
                 position=me3.GENERATED_POSITION,
+                collisions=merge_engine.collision_map(
+                    provided, rules["merges"], dropped, merge_engine.game_archives(game_dir)
+                ),
             )
             if generated.verify(mod_dir, paths.generated_state, fp, cache) != generated.FRESH:
                 notify("Merging the mods")
                 loader = merge_engine.make_vanilla_loader(
                     paths, organizer.downloadsPath(), rules["vanilla_sources"]
                 )
-                provided = merge_engine.index(contributors)
                 rebase = merge_engine.rebase_bases(game_dir, live, rules["merges"], provided, paths, loader)
                 merge_notes: list = []
                 planned = merge_engine.plan(
@@ -414,10 +438,14 @@ def prepare(
                 )
                 merge_engine.verify_rebase(planned.outputs, rebase, live)
                 notes = [f"{rel}: {merge.describe_note(note)}" for rel, note in merge_notes]
+                decisions = planned.decisions
                 files = list(planned.outputs)
                 if ersc is not None:
                     files += generated.ersc_files(ersc.path)
-                generated.build(mod_dir, paths.generated_state, files, fp)
+                generated.build(
+                    mod_dir, paths.generated_state, files, fp,
+                    decisions=[decision.to_json() for decision in decisions], notes=notes,
+                )
                 if generated.verify(mod_dir, paths.generated_state, fp, cache) != generated.FRESH:
                     raise Veto(
                         "Generated mod",
@@ -426,16 +454,32 @@ def prepare(
                         MERGE_FAILED,
                     )
                 rebuilt = True
-        except Veto:
-            raise
+            else:
+                recorded = state.read_cache(paths.generated_state)
+                decisions = merge_engine.decisions_from_state(recorded.get("decisions"))
+                notes = generated.recorded_notes(paths.generated_state)
         except ErmError as exc:
             raise Veto("Merging the mods", str(exc), "", MERGE_FAILED) from exc
-    warnings += _write_coop_ini(organizer, mod_dir, ersc)
+        except OSError as exc:
+            raise Veto(
+                "Merging the mods",
+                f"A mod file or the generated mod could not be read or written: {exc}",
+                "Check the disk and the mod folders, then run Rebuild merges again.",
+                MERGE_FAILED,
+            ) from exc
+    warnings += spelling_warnings + merge_engine.warnings_for(decisions)
+    merged = [merge_engine.describe(d) for d in decisions if d.outcome == merge_engine.MERGED]
+    try:
+        warnings += _write_coop_ini(organizer, mod_dir, ersc)
+    except OSError as exc:
+        raise Veto(
+            "Co-op settings", f"cannot write the co-op settings: {exc}", "Check the disk and try again.", COOP_SETTINGS
+        ) from exc
     try:
         plan = me3.plan_profile(organizer, view_map)
     except me3.ProfileError as exc:
         raise Veto("Mod list", str(exc), "", exc.key) from exc
-    return Prepared(plan.packages, plan.natives, live, warnings, notes, rebuilt)
+    return Prepared(plan.packages, plan.natives, live, warnings, notes, rebuilt, merged)
 
 
 def _write_coop_ini(organizer, mod_dir: Path, ersc: mods.ModRef | None) -> list[str]:

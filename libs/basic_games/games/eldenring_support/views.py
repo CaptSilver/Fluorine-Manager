@@ -1,10 +1,13 @@
 """A package mod seen through the profile's prunes and renames.
 
-A mod with rules is loaded by me3, and indexed by the merge, through a tree of
-links to its files under <instance>/eldenring/views/<mod>/, with the pruned
+A mod with rules is loaded by me3 through a tree of links to its files under
+<instance>/eldenring/views/<mod>/ (the merge indexes it through view_listing,
+which lists the same files without building the tree), with the pruned
 paths missing and the renamed ones at their destination. The mod's own folder
 is never touched. What me3 loads is therefore what the merge saw: a pruned file
 cannot load, and a msg/engUS/ spelling cannot sit beside the merged msg/engus/.
+The merge adds prunes of its own to a mod's view (the spellings its output
+replaces), in the same place as the profile's.
 """
 
 from __future__ import annotations
@@ -72,6 +75,20 @@ def view_files(mod: str, mod_dir, prunes: list[dict], renames: list[dict]) -> di
             for name in [name for name in files if name == rel or name.startswith(folder)]:
                 del files[name]
     return files
+
+
+def view_listing(mod: str, mod_dir, prunes: list[dict], renames: list[dict]) -> list[treewalk.Entry]:
+    """What build_view would link, without building it: each file under the name me3 will see, stat'd where it really is.
+
+    treewalk.digest_of of this equals treewalk.listing_digest of the built view
+    (a stat follows the link), so the merge can index and fingerprint a mod before
+    deciding what its view has to leave out.
+    """
+    found = []
+    for rel, source in sorted(view_files(mod, mod_dir, prunes, renames).items()):
+        info = source.stat()
+        found.append(treewalk.Entry(rel, source, info.st_size, info.st_mtime_ns))
+    return found
 
 
 def build_view(mod: str, mod_dir, prunes: list[dict], renames: list[dict], view_dir) -> None:

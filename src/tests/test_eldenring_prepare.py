@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import types
 import unittest
@@ -26,6 +27,14 @@ gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 heal = support.module(PACKAGE, "ermlib.heal")
 merge = support.module(PACKAGE, "ermlib.merge")
 errors = support.module(PACKAGE, "ermlib.errors")
+fmg = support.module(PACKAGE, "ermlib.formats.fmg")
+dcx = support.module(PACKAGE, "ermlib.formats.dcx")
+bnd4 = support.module(PACKAGE, "ermlib.formats.bnd4")
+bhd5 = support.module(PACKAGE, "ermlib.formats.bhd5")
+views = support.module(PACKAGE, "views")
+
+sys.path.insert(0, str(support.ROOT / "src/tests/eldenring"))
+from tests.build_fixtures import _synthetic_bnd4  # noqa: E402  (needs the aliased ermlib)
 
 LIVE = gamebuild.BuildId(
     exe="2.7.1.0", app="1.17.1", regulation="11711000", steam_buildid="25080141", regulation_sha="a" * 64
@@ -36,6 +45,23 @@ NEW_LIVE = LIVE._replace(
 TEMPLATE = "[PASSWORD]\ncooppassword = @COOP_PASSWORD@\n[SAVE]\nsave_file_extension = co2\n"
 RULE = {"path": "msg/x.dcx", "strategy": "concat", "mods": ["a", "b"], "prefer": "a"}
 STRATEGIES = {"concat": lambda out, extra, notes=None: out + b"|" + extra}
+
+
+DLC = "item_dlc02.msgbnd.dcx"
+GAME_ROWS = {1: "one", 2: "two", 3: "three", 4: "four"}
+
+
+def msgbnd(rows: dict) -> bytes:
+    """A .msgbnd.dcx holding one text table, shaped like the game's item_dlc02."""
+    return dcx.write_dflt(_synthetic_bnd4([(1, "1.fmg", fmg.write(rows))]))
+
+
+def edited(changes: dict) -> bytes:
+    return msgbnd({**GAME_ROWS, **changes})
+
+
+def rows_of(blob: bytes) -> dict:
+    return {entry.id: fmg.read(entry.data) for entry in bnd4.read(dcx.read(blob))}[1]
 
 
 class Dir:
@@ -484,6 +510,9 @@ class MergeTests(PrepareCase):
         prepared = self.run_prepare()
         self.assertTrue(prepared.rebuilt)
         self.assertEqual((self.organizer.modsPath_ / generated.NAME / "msg/x.dcx").read_bytes(), b"B")
+        self.assertTrue(
+            any("msg/x.dcx" in w and "a, b" in w and "b has the highest priority" in w for w in prepared.warnings)
+        )
 
     def test_a_rebase_is_verified_before_the_build_and_a_bad_one_builds_nothing(self) -> None:
         self.two_providers()
@@ -528,6 +557,188 @@ class MergeTests(PrepareCase):
         self.assertTrue((view / "msg/x.dcx").is_symlink())
 
 
+class AdaptiveMergeTests(PrepareCase):
+    """The user's profile: one mod spells the message folder engUS, three spell it engus, and all four carry item_dlc02."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        patcher = mock.patch.object(merge_engine.bhd5, "read_file", return_value=msgbnd(GAME_ROWS))
+        self.read_game = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.gro = self.package("great-rune-overhaul", {f"msg/engUS/{DLC}": edited({1: "GRO"})})
+        self.brl = self.package("boss-resurrection-lite", {f"msg/engus/{DLC}": edited({2: "BRL"})})
+        self.cm = self.package("clevers-moveset", {f"msg/engus/{DLC}": edited({3: "CM"})})
+        self.nfd = self.package("nofalldead", {f"msg/engus/{DLC}": edited({4: "NFD"})})
+
+    def output(self) -> Path:
+        return self.organizer.modsPath_ / generated.NAME / "msg/engus" / DLC
+
+    def mod_file(self, mod, spelling="engus") -> Path:
+        return Path(mod.absolutePath()) / "msg" / spelling / DLC
+
+    def test_all_four_launch_and_every_mods_edit_is_in_the_merged_file(self) -> None:
+        prepared = self.run_prepare()
+        self.assertEqual(rows_of(self.output().read_bytes()), {1: "GRO", 2: "BRL", 3: "CM", 4: "NFD"})
+        self.assertEqual([w for w in prepared.warnings if DLC in w], [])
+        self.assertTrue(any(DLC in line and "great-rune-overhaul" in line for line in prepared.merged))
+        self.read_game.assert_called_once_with(self.install / "Game", f"msg/engus/{DLC}")
+
+    def test_the_case_variant_does_not_load_beside_the_merged_file(self) -> None:
+        prepared = self.run_prepare()
+        packages = dict(prepared.packages)
+        view = packages["great-rune-overhaul"]
+        self.assertEqual(view, self.paths.view_dir("great-rune-overhaul"))
+        self.assertFalse((view / "msg/engUS" / DLC).exists())
+        self.assertEqual(packages["nofalldead"], Path(self.nfd.absolutePath()))
+        self.assertTrue(self.mod_file(self.gro, "engUS").exists(), "the mod's own folder is never touched")
+
+    def test_a_row_two_mods_changed_differently_falls_back_to_the_highest_priority_mod_and_says_so(self) -> None:
+        self.mod_file(self.cm).write_bytes(edited({4: "CM-WANTS-THIS"}))
+        prepared = self.run_prepare()
+        self.assertEqual(self.output().read_bytes(), self.mod_file(self.nfd).read_bytes())
+        [warning] = [w for w in prepared.warnings if DLC in w]
+        for expected in (
+            "great-rune-overhaul", "boss-resurrection-lite", "clevers-moveset", "nofalldead",
+            "nofalldead has the highest priority", f"msg/engus/{DLC}",
+        ):
+            self.assertIn(expected, warning)
+        self.assertEqual(prepared.merged, [])
+
+    def test_the_warning_is_still_reported_when_the_next_launch_finds_everything_fresh(self) -> None:
+        self.mod_file(self.cm).write_bytes(edited({4: "CM-WANTS-THIS"}))
+        first = self.run_prepare()
+        second = self.run_prepare()
+        self.assertTrue(first.rebuilt)
+        self.assertFalse(second.rebuilt)
+        self.assertEqual([w for w in second.warnings if DLC in w], [w for w in first.warnings if DLC in w])
+        self.assertEqual(len([w for w in second.warnings if DLC in w]), 1)
+
+    def test_the_merge_notes_are_reported_on_a_fresh_launch_too(self) -> None:
+        self.run_prepare()
+        recorded = state.read_cache(self.paths.generated_state)
+        recorded["notes"] = [f"msg/engus/{DLC}: entry 1 row 9: two mods each added a row"]
+        state.write_json(self.paths.generated_state, recorded)
+        second = self.run_prepare()
+        self.assertFalse(second.rebuilt)
+        self.assertEqual(second.notes, recorded["notes"])
+
+    def test_the_same_mods_in_the_same_order_give_the_same_bytes_after_a_rebuild(self) -> None:
+        self.run_prepare()
+        first = self.output().read_bytes()
+        os.utime(self.mod_file(self.nfd), ns=(1, 1))
+        prepared = self.run_prepare()
+        self.assertTrue(prepared.rebuilt)
+        self.assertEqual(self.output().read_bytes(), first)
+
+    def test_a_game_archive_appearing_makes_the_generated_mod_stale(self) -> None:
+        # Patched, not written: the strict Game/ inventory would veto an archive it does not know.
+        with mock.patch.object(merge_engine, "game_archives", return_value=["Data0.bdt", "Data0.bhd"]):
+            self.run_prepare()
+        before = state.read_cache(self.paths.generated_state)["fingerprint"]
+        with mock.patch.object(merge_engine, "game_archives", return_value=["DLC.bdt", "DLC.bhd", "Data0.bdt", "Data0.bhd"]):
+            prepared = self.run_prepare()
+        self.assertTrue(prepared.rebuilt)
+        self.assertNotEqual(state.read_cache(self.paths.generated_state)["fingerprint"], before)
+
+    def test_the_order_of_the_mods_is_part_of_the_fingerprint(self) -> None:
+        self.run_prepare()
+        before = state.read_cache(self.paths.generated_state)["fingerprint"]
+        order = self.modlist.order
+        one, other = order.index("clevers-moveset"), order.index("nofalldead")
+        order[one], order[other] = order[other], order[one]
+        self.run_prepare()
+        self.assertNotEqual(state.read_cache(self.paths.generated_state)["fingerprint"], before)
+
+    def test_a_disabled_mod_takes_no_part(self) -> None:
+        self.modlist.active.discard("nofalldead")
+        self.run_prepare()
+        self.assertEqual(rows_of(self.output().read_bytes()), {1: "GRO", 2: "BRL", 3: "CM", 4: "four"})
+
+    def test_a_profile_rename_still_applies_first_and_leaves_nothing_to_prune(self) -> None:
+        rename = {"mod": "great-rune-overhaul", "paths": {f"msg/engUS/{DLC}": f"msg/engus/{DLC}"}}
+        state.write_profile_rules(self.organizer.profilePath(), {"renames": [rename]})
+        prepared = self.run_prepare()
+        self.assertEqual(rows_of(self.output().read_bytes()), {1: "GRO", 2: "BRL", 3: "CM", 4: "NFD"})
+        view = dict(prepared.packages)["great-rune-overhaul"]
+        self.assertTrue((view / "msg/engus" / DLC).is_symlink())
+
+    def test_a_mod_with_profile_prunes_and_a_case_variant_gets_one_view_with_both(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"prunes": [{"mod": "great-rune-overhaul", "paths": ["dead.bin"]}]},
+        )
+        (Path(self.gro.absolutePath()) / "dead.bin").write_bytes(b"x")
+        with mock.patch.object(views, "ensure_view", wraps=views.ensure_view) as ensure:
+            prepared = self.run_prepare()
+        self.assertEqual([call.args[1] for call in ensure.call_args_list], ["great-rune-overhaul"])
+        view = dict(prepared.packages)["great-rune-overhaul"]
+        self.assertFalse((view / "dead.bin").exists())
+        self.assertFalse((view / "msg/engUS" / DLC).exists())
+
+    def test_a_garbage_provider_file_falls_back_and_the_launch_goes_on(self) -> None:
+        self.mod_file(self.cm).write_bytes(b"")
+        prepared = self.run_prepare()
+        self.assertEqual(self.output().read_bytes(), self.mod_file(self.nfd).read_bytes())
+        [warning] = [w for w in prepared.warnings if DLC in w]
+        self.assertIn("clevers-moveset", warning)
+
+    def test_a_game_without_the_file_falls_back_with_the_reason(self) -> None:
+        self.read_game.side_effect = bhd5.Bhd5Error("is not in any of Data0, Data1")
+        prepared = self.run_prepare()
+        self.assertEqual(self.output().read_bytes(), self.mod_file(self.nfd).read_bytes())
+        [warning] = [w for w in prepared.warnings if DLC in w]
+        self.assertIn("is not in any of Data0, Data1", warning)
+
+    def test_four_copies_of_the_same_file_are_nothing_to_warn_about(self) -> None:
+        self.modlist.active.discard("great-rune-overhaul")
+        for mod in (self.brl, self.cm, self.nfd):
+            self.mod_file(mod).write_bytes(msgbnd(GAME_ROWS))
+        prepared = self.run_prepare()
+        self.assertFalse(self.output().exists())
+        self.assertEqual([w for w in prepared.warnings if DLC in w], [])
+        self.read_game.assert_not_called()
+
+    def test_identical_copies_in_two_spellings_leave_one_file_in_the_games(self) -> None:
+        for mod in (self.brl, self.cm, self.nfd):
+            self.mod_file(mod).write_bytes(msgbnd(GAME_ROWS))
+        self.mod_file(self.gro, "engUS").write_bytes(msgbnd(GAME_ROWS))
+        prepared = self.run_prepare()
+        self.assertEqual(self.output().read_bytes(), msgbnd(GAME_ROWS))
+        self.assertFalse((dict(prepared.packages)["great-rune-overhaul"] / "msg/engUS" / DLC).exists())
+
+    def test_a_mod_shipping_both_spellings_loads_one_and_the_report_names_both(self) -> None:
+        both = self.package(
+            "both", {"msg/engUS/menu.msgbnd.dcx": b"upper", "msg/engus/menu.msgbnd.dcx": b"lower"}
+        )
+        prepared = self.run_prepare()
+        view = dict(prepared.packages)["both"]
+        self.assertTrue((view / "msg/engus/menu.msgbnd.dcx").is_symlink())
+        self.assertFalse((view / "msg/engUS/menu.msgbnd.dcx").exists())
+        [warning] = [w for w in prepared.warnings if w.startswith("both ships")]
+        self.assertIn("msg/engUS/menu.msgbnd.dcx", warning)
+        self.assertIn("msg/engus/menu.msgbnd.dcx", warning)
+        self.assertTrue(Path(both.absolutePath(), "msg/engUS/menu.msgbnd.dcx").exists())
+
+    def test_a_damaged_decision_record_is_ignored_on_a_fresh_launch(self) -> None:
+        self.run_prepare()
+        recorded = state.read_cache(self.paths.generated_state)
+        recorded["decisions"] = [None, 5, {"outcome": "winner"}, "x"]
+        state.write_json(self.paths.generated_state, recorded)
+        prepared = self.run_prepare()
+        self.assertFalse(prepared.rebuilt)
+        self.assertEqual([w for w in prepared.warnings if DLC in w], [])
+
+    def test_a_file_that_cannot_be_read_is_a_veto_not_a_crash(self) -> None:
+        with mock.patch.object(merge_engine, "plan", side_effect=OSError("input/output error")):
+            veto = self.veto(prepare.MERGE_FAILED)
+        self.assertIn("input/output error", veto.text())
+        self.assertEqual(self.generated_files(), {})
+
+    def test_the_game_folder_is_still_held_to_the_inventory(self) -> None:
+        self.put("dinput8.dll", b"MZ proxy")
+        self.veto(prepare.GAME_DIR_STRAYS)
+
+
 class ErscTests(PrepareCase):
     def ersc(self, ini=TEMPLATE, name="seamless-coop"):
         return self.modlist.add(
@@ -538,6 +749,13 @@ class ErscTests(PrepareCase):
 
     def set_password(self, password="s3cret") -> None:
         self.organizer.setPluginSetting(kinds.PLUGIN, "coop_password", password)
+
+    def test_a_co_op_ini_that_cannot_be_written_is_a_veto_not_a_crash(self) -> None:
+        self.ersc()
+        self.set_password()
+        with mock.patch.object(prepare.coop_settings, "write_ini", side_effect=OSError("disk full")):
+            veto = self.veto(prepare.COOP_SETTINGS)
+        self.assertIn("disk full", veto.text())
 
     def test_the_tree_is_copied_with_the_injected_ini_and_the_ersc_folder_is_untouched(self) -> None:
         mod = self.ersc()

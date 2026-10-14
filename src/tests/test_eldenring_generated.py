@@ -39,6 +39,7 @@ def base_inputs(**over) -> dict:
         live=LIVE,
         ersc_tree=[["ersc.dll", "h1"]],
         position="last",
+        collisions={"paths": {}, "dropped": {}, "archives": []},
     )
     inputs.update(over)
     return inputs
@@ -68,6 +69,15 @@ class FingerprintTests(unittest.TestCase):
             "the ERSC tree": dict(ersc_tree=[["ersc.dll", "h2"]]),
             "no ERSC": dict(ersc_tree=None),
             "the generated position": dict(position="first"),
+            "a collision": dict(
+                collisions={
+                    "paths": {"msg/x": {"providers": [["a", "msg/x"], ["b", "msg/X"]], "strategy": None}},
+                    "dropped": {},
+                    "archives": [],
+                }
+            ),
+            "a dropped spelling": dict(collisions={"paths": {}, "dropped": {"a": ["MSG/x"]}, "archives": []}),
+            "a game archive": dict(collisions={"paths": {}, "dropped": {}, "archives": ["DLC.bhd"]}),
         }
         seen = {base}
         for label, change in changes.items():

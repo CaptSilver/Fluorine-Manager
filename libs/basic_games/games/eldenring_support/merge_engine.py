@@ -33,14 +33,16 @@ class ConflictError(ErmError):
 
 class Contributor(NamedTuple):
     mod: str
-    source: Path  # the mod folder, or its view when the profile has rules for it
+    source: Path  # the mod folder, or the view the caller passed for it
 
 
 VanillaLoader = Callable[[str, str], bytes]
 
 
 def contributors_of(organizer, views: dict[str, Path]) -> list[Contributor]:
-    """Enabled package mods in priority order, lowest first, each through its view.
+    """Enabled package mods in priority order, lowest first.
+
+    A mod named in `views` contributes through that view instead of its folder.
 
     Natives and the ERSC mod never contribute (ERSC's tree is copied into the
     generated mod, not merged), and neither does the generated mod itself. That

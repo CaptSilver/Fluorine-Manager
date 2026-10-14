@@ -24,7 +24,7 @@ from .ermlib.formats import dcx, ooz
 
 NAME = "Elden Ring Generated"
 # Bumped on any change to the strategies or to the fingerprint's inputs.
-MERGE_ENGINE_VERSION = 1
+MERGE_ENGINE_VERSION = 2
 
 FRESH, STALE, CORRUPT = "fresh", "stale", "corrupt"
 
@@ -72,12 +72,15 @@ def ersc_tree(ersc_mod_dir, cache: dict | None = None) -> list[list[str]] | None
 
 def fingerprint(
     *, contributors: list[tuple[str, str, str]], rules: dict, vanilla_archives: dict,
-    codecs: dict, live, ersc_tree, position: str,
+    codecs: dict, live, ersc_tree, position: str, collisions: dict,
 ) -> str:
     """sha256 over canonical JSON of everything the generated mod is built from.
 
     `contributors` is [(mod, kind, listing_digest)] in contributor order; lists
-    keep their order, dict keys do not matter.
+    keep their order, dict keys do not matter. `collisions` is
+    merge_engine.collision_map: which paths collide, between whom, in what
+    spelling, and the strategy to be tried. What the engine decides for each
+    follows from that and from the contributors' files.
     """
     document = {
         "engine": MERGE_ENGINE_VERSION,
@@ -88,6 +91,7 @@ def fingerprint(
         "live": live._asdict(),
         "ersc_tree": ersc_tree,
         "generated_position": position,
+        "collisions": collisions,
     }
     text = json.dumps(document, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()
