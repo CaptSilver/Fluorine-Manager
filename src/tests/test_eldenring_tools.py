@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -92,6 +95,8 @@ PLUGINS = support.module(PACKAGE, "plugins")
 tools = support.module(PACKAGE, "plugins.tools")
 me3_host = support.module(PACKAGE, "me3_host")
 errors = support.module(PACKAGE, "ermlib.errors")
+session = support.module(PACKAGE, "session")
+state = support.module(PACKAGE, "state")
 
 
 class ToolCase(unittest.TestCase):
@@ -111,9 +116,11 @@ class ToolCase(unittest.TestCase):
 
 
 class CreatePluginsTests(ToolCase):
-    def test_the_install_tool_is_the_only_plugin(self) -> None:
+    def test_the_install_and_save_tools_are_the_plugins(self) -> None:
         plugins = PLUGINS.createPlugins()
-        self.assertEqual([type(plugin).__name__ for plugin in plugins], ["InstallMe3Tool"])
+        self.assertEqual(
+            [type(plugin).__name__ for plugin in plugins], ["InstallMe3Tool", "SaveToolsTool"]
+        )
 
     def test_the_tool_is_named_and_limited_to_the_game(self) -> None:
         self.assertEqual(self.tool.name(), "Elden Ring Install me3")
@@ -203,6 +210,128 @@ class DescribeTests(ToolCase):
     def test_directories_me3_would_also_find_are_listed(self) -> None:
         text = tools.describe(self.ok_result(False, shadows=("/home/x/.local/bin/win64",)))
         self.assertIn("/home/x/.local/bin/win64", text)
+
+
+SL2 = b"vanilla save " * 3000
+STAMP = "20261013T120000000001Z"
+
+
+class SaveToolsCase(ToolCase):
+    """A tool wired to an instance that has a pending restore on disk."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.organizer = SimpleNamespace(basePath=lambda: str(self.tmp / "instance"))
+        self.paths = state.InstancePaths(self.organizer)
+        self.save_dir = self.tmp / "saves/1"
+        self.save_dir.mkdir(parents=True)
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2)
+        folder, files = session.take_snapshot(self.paths, self.save_dir, STAMP)
+        self.sentinel = {
+            "stamp": STAMP, "pid": 1, "start_ticks": 2, "save_dir": str(self.save_dir),
+            "snapshot_dir": str(folder), "files": files, "swept": {"outcome": "pending"},
+        }
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b"modded")
+        self.tool = tools.SaveToolsTool()
+        self.tool.init(self.organizer)
+
+    def pend(self, reason: str = "game-running", **extra) -> None:
+        session.save_last_launch(
+            self.paths,
+            {"sentinel": self.sentinel, "pending_restore": {
+                "reason": reason, "sentinel": self.sentinel, "changed": ["ER0000.sl2"], **extra}},
+        )
+
+    def choose(self, index):
+        return mock.patch.object(tools, "_choose", return_value=index)
+
+
+class SaveToolsTests(SaveToolsCase):
+    def test_it_is_named_and_limited_to_the_game(self) -> None:
+        self.assertEqual(self.tool.name(), "Elden Ring Save tools")
+        self.assertEqual(self.tool.displayName(), "Elden Ring: Save tools…")
+        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
+
+    def test_nothing_pending_says_so_and_asks_nothing(self) -> None:
+        with self.choose(0) as choose:
+            self.tool.display()
+        choose.assert_not_called()
+        self.assertEqual(SHOWN[-1][0], "information")
+        self.assertIn("No save restore is pending", SHOWN[-1][2])
+
+    def test_restore_puts_the_snapshot_back_and_says_where_the_session_save_went(self) -> None:
+        self.pend()
+        with self.choose(0) as choose, mock.patch.object(session.procs, "game_running", return_value=[]):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        kind, title, text = SHOWN[-1]
+        self.assertEqual((kind, title), ("information", "Elden Ring: Save tools…"))
+        self.assertIn("quarantine", text)
+        self.assertIn("Do not press Play in Steam", text)
+        self.assertEqual(choose.call_args.args[3], [tools.RESTORE, tools.KEEP])
+        self.assertNotIn("pending_restore", session.load_last_launch(self.paths))
+
+    def test_restore_while_the_game_runs_is_refused_with_the_pids_and_changes_nothing(self) -> None:
+        self.pend()
+        with self.choose(0), mock.patch.object(session.procs, "game_running", return_value=[(42, "me3")]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("pid 42", SHOWN[-1][2])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertIn("pending_restore", session.load_last_launch(self.paths))
+
+    def test_keep_moves_the_snapshot_and_warns_about_going_online(self) -> None:
+        self.pend()
+        with self.choose(1):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertTrue((self.paths.save_backups / STAMP / "ER0000.sl2").is_file())
+        self.assertIn("must not go online", SHOWN[-1][2])
+        self.assertNotIn("pending_restore", session.load_last_launch(self.paths))
+
+    def test_cancel_changes_nothing(self) -> None:
+        self.pend()
+        before = self.paths.last_launch.read_bytes()
+        with self.choose(None):
+            self.tool.display()
+        self.assertEqual(SHOWN, [])
+        self.assertEqual(self.paths.last_launch.read_bytes(), before)
+
+    def test_a_damaged_record_is_shown_not_raised(self) -> None:
+        self.paths.last_launch.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.last_launch.write_text("{")
+        self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("damaged", SHOWN[-1][2])
+
+    def test_a_snapshot_that_no_longer_matches_is_shown_and_keeps_the_flag(self) -> None:
+        self.pend()
+        (Path(self.sentinel["snapshot_dir"]) / "ER0000.sl2").write_bytes(b"damaged")
+        with self.choose(0), mock.patch.object(session.procs, "game_running", return_value=[]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("pending_restore", session.load_last_launch(self.paths))
+
+
+class DescribePendingTests(unittest.TestCase):
+    def test_each_reason_has_its_own_wording_and_both_choices_are_explained(self) -> None:
+        texts = {
+            reason: tools.describe_pending({"reason": reason, "changed": ["ER0000.sl2"], "error": "disk full"})
+            for reason in ("game-running", "unseen-session", "restore-failed")
+        }
+        self.assertIn("still running", texts["game-running"])
+        self.assertIn("without Fluorine seeing it", texts["unseen-session"])
+        self.assertIn("disk full", texts["restore-failed"])
+        for text in texts.values():
+            self.assertIn(tools.RESTORE, text)
+            self.assertIn(tools.KEEP, text)
+            self.assertIn("must not go online", text)
+
+    def test_a_restore_that_found_nothing_to_do_says_so(self) -> None:
+        text = tools.describe_restored(session.Restored(restored=[], quarantined=[]))
+        self.assertIn("Nothing differed", text)
 
 
 if __name__ == "__main__":
