@@ -174,6 +174,7 @@ class LaunchGate:
         self._session_checks(paths, data)
         self._ensure_host()
         self._write_profile(paths, binary, cwd, args)
+        self._snapshot(paths, data)
 
     def _load(self, paths: state.InstancePaths) -> dict:
         try:
@@ -340,6 +341,48 @@ class LaunchGate:
             elif have != want:
                 return False
         return True
+
+    # The save snapshot and the sentinel come last: a launch that gets this far
+    # is one the sweep can undo.
+    def _snapshot(self, paths: state.InstancePaths, data: dict) -> None:
+        stamp = session.now_stamp()
+        save_dir = saves.save_dir(self._library())
+        try:
+            folder, files = session.take_snapshot(paths, save_dir, stamp)
+        except session.SnapshotError as exc:
+            raise _Veto(
+                "Save snapshot",
+                str(exc),
+                "Nothing was launched. The game is not started without a copy of your "
+                "vanilla save to restore.",
+            ) from exc
+        session.prune_snapshots(paths, protect=(stamp,))
+        data["report"] = {
+            "outcome": "launched",
+            "time": datetime.now(timezone.utc).isoformat(),
+            "stamp": stamp,
+        }
+        data["sentinel"] = {
+            "stamp": stamp,
+            "pid": os.getpid(),
+            "start_ticks": procs.start_ticks(os.getpid()),
+            "save_dir": str(save_dir),
+            "snapshot_dir": str(folder),
+            "files": files,
+            "swept": None,
+        }
+        try:
+            session.save_last_launch(paths, data)
+        except OSError as exc:
+            raise _Veto(
+                "Save snapshot",
+                f"cannot write {paths.last_launch}: {exc}",
+                "Nothing was launched. Without that record a changed save could not be restored.",
+            ) from exc
+        self._session_stamp = stamp
+
+    def _library(self) -> Path | None:
+        return saves.library_root(self._game.gameDirectory().absolutePath())
 
     def _report_veto(self, veto: _Veto) -> None:
         # The record is for the diagnose pass; failing to write it must not stop

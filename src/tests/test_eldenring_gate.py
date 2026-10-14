@@ -602,5 +602,158 @@ class EntryTests(GateCase):
         self.refused('"')
 
 
+class SnapshotTests(GateCase):
+    def test_a_launch_after_a_failed_ensure_records_a_launch(self) -> None:
+        self.make_saves()
+        self.ensure.side_effect = me3_host.Me3HostError("offline")
+        self.launch()
+        self.ensure.side_effect = None
+        self.vetoes.clear()
+        self.assertTrue(self.launch())
+        self.assertEqual(self.last_launch()["report"]["outcome"], "launched")
+
+    def test_both_files_are_copied_byte_identical_and_recorded(self) -> None:
+        self.make_saves()
+        self.assertTrue(self.launch())
+        sentinel = self.last_launch()["sentinel"]
+        folder = Path(sentinel["snapshot_dir"])
+        self.assertEqual(folder.parent, self.paths.save_snapshots)
+        self.assertEqual((folder / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual((folder / "ER0000.sl2.bak").read_bytes(), BAK)
+        entry = sentinel["files"]["ER0000.sl2"]
+        info = (self.save_dir / "ER0000.sl2").stat()
+        self.assertEqual(
+            entry,
+            {
+                "size": len(SL2),
+                "mtime_ns": info.st_mtime_ns,
+                "ino": info.st_ino,
+                "dev": info.st_dev,
+                "ctime_ns": info.st_ctime_ns,
+                "sha256": hashlib.sha256(SL2).hexdigest(),
+            },
+        )
+        self.assertEqual(sentinel["save_dir"], str(self.save_dir))
+        self.assertIsNone(sentinel["swept"])
+        self.assertEqual(sentinel["pid"], os.getpid())
+        self.assertEqual(self.last_launch()["report"]["outcome"], "launched")
+
+    def test_the_stamp_has_microseconds_and_only_digits(self) -> None:
+        self.assertRegex(session.now_stamp(), r"^\d{8}T\d{12}Z$")
+
+    def test_the_originals_are_not_touched_by_the_snapshot(self) -> None:
+        self.make_saves()
+        before = tree(self.save_dir)
+        self.launch()
+        self.assertEqual(tree(self.save_dir), before)
+
+    def test_a_backup_without_a_save_is_snapshotted_and_recorded_on_its_own(self) -> None:
+        self.make_saves(sl2=None)
+        self.assertTrue(self.launch())
+        sentinel = self.last_launch()["sentinel"]
+        self.assertIsNone(sentinel["files"]["ER0000.sl2"])
+        self.assertIsNotNone(sentinel["files"]["ER0000.sl2.bak"])
+        folder = Path(sentinel["snapshot_dir"])
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["ER0000.sl2.bak"])
+
+    def test_a_machine_that_never_ran_the_game_launches_with_nothing_to_copy(self) -> None:
+        self.assertFalse(self.save_dir.parent.exists())
+        self.assertTrue(self.launch())
+        sentinel = self.last_launch()["sentinel"]
+        self.assertEqual(sentinel["files"], {"ER0000.sl2": None, "ER0000.sl2.bak": None})
+        self.assertFalse(self.paths.save_snapshots.exists())
+        self.assertFalse(self.save_dir.parent.exists(), "the gate created the save folder")
+
+    def test_snapshots_beyond_the_newest_few_are_pruned_and_other_folders_kept(self) -> None:
+        self.make_saves()
+        old = ["20250101T000000000000Z", "20250102T000000000000Z", "20250103T000000000000Z",
+               "20250104T000000000000Z", "20250105T000000000000Z", "20250106T000000000000Z"]
+        for name in old:
+            (self.paths.save_snapshots / name).mkdir(parents=True)
+            (self.paths.save_snapshots / name / "ER0000.sl2").write_bytes(b"old")
+        (self.paths.save_snapshots / "notes").mkdir()
+        with mock.patch.object(session, "SNAPSHOT_KEEP", 3):
+            self.assertTrue(self.launch())
+        newest = Path(self.last_launch()["sentinel"]["snapshot_dir"]).name
+        self.assertEqual(self.snapshots(), [*old[-2:], newest, "notes"])
+
+    def test_a_new_snapshot_that_sorts_oldest_is_not_pruned(self) -> None:
+        # The clock stepped back: the stamp is older than every folder there.
+        self.make_saves()
+        old = [f"2025010{n}T000000000000Z" for n in range(1, 6)]
+        for name in old:
+            (self.paths.save_snapshots / name).mkdir(parents=True)
+        stepped_back = "20240101T000000000000Z"
+        with mock.patch.object(session, "SNAPSHOT_KEEP", 3), mock.patch.object(
+            session, "now_stamp", return_value=stepped_back
+        ):
+            self.assertTrue(self.launch())
+        self.assertEqual(Path(self.last_launch()["sentinel"]["snapshot_dir"]).name, stepped_back)
+        self.assertEqual(self.snapshots(), [stepped_back, *old[-3:]])
+
+    def test_a_snapshot_folder_that_cannot_be_written_vetoes_before_the_launch(self) -> None:
+        self.make_saves()
+        self.paths.root.mkdir(parents=True)
+        self.paths.save_snapshots.write_text("a file where the folder should be")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(None, "cannot copy", "Nothing was launched")
+        self.assertNotIn("sentinel", self.last_launch())
+
+    def test_a_full_disk_vetoes_and_leaves_no_partial_snapshot(self) -> None:
+        self.make_saves()
+        real = session.atomic.write_bytes_atomic
+
+        def full(path, data, mode=0o644):
+            if Path(path).name == "ER0000.sl2.bak":
+                raise OSError(28, "No space left on device")
+            return real(path, data, mode)
+
+        with mock.patch.object(session.atomic, "write_bytes_atomic", full):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, "No space left on device", "ER0000.sl2.bak")
+        self.assertEqual(self.snapshots(), [])
+
+    def test_a_save_that_changes_while_it_is_copied_vetoes(self) -> None:
+        self.make_saves()
+        real = Path.read_bytes
+
+        def racing(path):
+            data = real(path)
+            if path.name == "ER0000.sl2":
+                path.write_bytes(data + b"x")
+            return data
+
+        with mock.patch.object(Path, "read_bytes", racing):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, "changed while it was being copied")
+        self.assertEqual(self.snapshots(), [])
+
+    def test_a_copy_that_does_not_match_its_source_vetoes(self) -> None:
+        self.make_saves()
+        real = session.github.sha256_file
+
+        def corrupt(path):
+            digest = real(path)
+            return "0" * 64 if "save-snapshots" in str(path) else digest
+
+        with mock.patch.object(session.github, "sha256_file", corrupt):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, "does not match")
+        self.assertEqual(self.snapshots(), [])
+
+    def test_a_record_that_cannot_be_written_vetoes_the_launch(self) -> None:
+        self.make_saves()
+        real = session.save_last_launch
+
+        def failing(paths, data):
+            if "sentinel" in data:
+                raise OSError(28, "No space left on device")
+            return real(paths, data)
+
+        with mock.patch.object(gate.session, "save_last_launch", failing):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, "cannot write", "could not be restored")
+
+
 if __name__ == "__main__":
     unittest.main()
