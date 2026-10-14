@@ -462,6 +462,45 @@ class CheckTests(CheckCase):
         self.assertEqual(found.removed, ["steam_api64.dll"])
         self.assertTrue(found.blocking())
 
+    def _hash_fails(self, rel: str, make_error):
+        """sha256_file as a file that vanishes or cannot be read just before it is read."""
+        real = inventory.github.sha256_file
+
+        def failing(path, *args, **kwargs):
+            if Path(path) == self.game / rel:
+                raise make_error(path)
+            return real(path, *args, **kwargs)
+
+        return mock.patch.object(inventory.github, "sha256_file", failing)
+
+    def test_a_file_that_vanishes_while_it_is_hashed_is_reported_removed(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        with self._hash_fails("steam_api64.dll", lambda p: FileNotFoundError(2, "No such file", str(p))):
+            found = self.check()
+        self.assertEqual(found.removed, ["steam_api64.dll"])
+        self.assertTrue(found.blocking())
+
+    def test_a_file_that_cannot_be_read_while_it_is_hashed_is_reported_unreadable(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        with self._hash_fails("steam_api64.dll", lambda p: PermissionError(13, "Permission denied", str(p))):
+            found = self.check()
+        self.assertEqual(found.unreadable, ["steam_api64.dll"])
+        self.assertTrue(found.blocking())
+
+    def test_a_wanted_copy_that_vanishes_while_it_is_hashed_is_not_a_stray(self) -> None:
+        wanted = {"mods/Fov/config.ini": sha(b"fov=90\n")}
+        self.put("mods/Fov/config.ini", b"fov=90\n")
+        with self._hash_fails("mods/Fov/config.ini", lambda p: FileNotFoundError(2, "No such file", str(p))):
+            found = self.check(desired=wanted)
+        self.assertEqual(found.strays, [])
+
+    def test_a_wanted_copy_that_cannot_be_read_is_reported_unreadable(self) -> None:
+        wanted = {"mods/Fov/config.ini": sha(b"fov=90\n")}
+        self.put("mods/Fov/config.ini", b"fov=90\n")
+        with self._hash_fails("mods/Fov/config.ini", lambda p: PermissionError(13, "Permission denied", str(p))):
+            found = self.check(desired=wanted)
+        self.assertEqual(found.unreadable, ["mods/Fov/config.ini"])
+
     def test_a_replaced_dll_with_the_same_size_is_changed_by_its_bytes(self) -> None:
         path = self.put("steam_api64.dll", b"MZ stoam")
         touch(path)

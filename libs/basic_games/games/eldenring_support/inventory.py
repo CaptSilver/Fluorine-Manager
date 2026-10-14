@@ -508,7 +508,13 @@ def _links(game_dir, tree: Tree, inventory: Inventory, ctx: Context, cache: dict
             bad.append((rel, target))
             continue
         shown.append((rel, target))
-        if inventory.links.get(rel) != _link_entry(game_dir, rel, target, cache):
+        try:
+            pinned = _link_entry(game_dir, rel, target, cache)
+        except OSError:
+            # Its target vanished or became unreadable while it was hashed: not as pinned.
+            moved.append(rel)
+            continue
+        if inventory.links.get(rel) != pinned:
             moved.append(rel)
     return bad, shown, moved
 
@@ -536,21 +542,34 @@ def check(
     ctx = context(game_dir, manifest, desired)
     tree = walk(game_dir)
     found = Findings(unreadable=sorted(tree.unreadable))
+    vanished: set[str] = set()
     found.symlinks, found.reshade, found.changed = _links(game_dir, tree, inventory, ctx, cache)
     for rel, info in sorted(tree.files.items()):
         if excluded(rel, ctx):
             continue
         entry = inventory.files.get(rel)
-        if entry is None:
-            if not _is_wanted_copy(game_dir, rel, info, ctx, cache):
-                found.strays.append(rel)
+        try:
+            if entry is None:
+                if not _is_wanted_copy(game_dir, rel, info, ctx, cache):
+                    found.strays.append(rel)
+                continue
+            verdict = _compare(game_dir, rel, info, entry, cache)
+        except FileNotFoundError:
+            # Listed by walk, gone before it was hashed: a stray that left is nothing, a recorded file is removed.
+            if entry is not None:
+                vanished.add(rel)
             continue
-        verdict = _compare(game_dir, rel, info, entry, cache)
+        except OSError:
+            found.unreadable.append(rel)
+            continue
         if verdict == _CHANGED:
             found.changed.append(rel)
         elif verdict == _REFRESH:
             found.refreshed[rel] = FileEntry(info.st_size, info.st_mtime_ns, entry.sha256)
-    found.removed = sorted(rel for rel in inventory.files if rel not in tree.files and not excluded(rel, ctx))
+    found.unreadable.sort()
+    found.removed = sorted(
+        vanished | {rel for rel in inventory.files if rel not in tree.files and not excluded(rel, ctx)}
+    )
     found.changed.sort()
     return found
 
