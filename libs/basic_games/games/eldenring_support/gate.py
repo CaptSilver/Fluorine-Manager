@@ -18,8 +18,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import me3, me3_host, pe, procs, saves, session, state
+from . import doctor, me3, me3_host, pe, prepare as preparing, procs, saves, session, state
 from .ermlib.errors import ErmError
+from .prepare import Prepared
+from .veto import Veto
 
 TITLE = "Elden Ring launch blocked"
 SESSION_TITLE = "Elden Ring: save file"
@@ -30,8 +32,11 @@ GAME_RUNNING = "GAME_RUNNING"
 SAVE_RESTORE_PENDING = "SAVE_RESTORE_PENDING"
 NATIVE_DLL_INVALID = "NATIVE_DLL_INVALID"
 ME3_INSTALL_FAILED = "ME3_INSTALL_FAILED"
+GAME_DIR_STRAYS = "GAME_DIR_STRAYS"
 
 ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
+
+_Veto = Veto
 
 _SAVE_TOOLS = 'Tools > "Elden Ring: Save tools…"'
 
@@ -43,18 +48,6 @@ _PATH_OPTIONS = ("--windows-binaries-dir", "-p", "-e")
 # What me3_host.ensure can raise. ErmError covers the installer's own errors;
 # the others are what slips past its wrapping.
 _ENSURE_ERRORS = (ErmError, OSError, ValueError, KeyError, RuntimeError)
-
-
-class _Veto(Exception):
-    def __init__(self, step: str, reason: str, fix: str = "", key: str | None = None) -> None:
-        super().__init__(reason)
-        self.step, self.reason, self.fix, self.key = step, reason, fix, key
-
-    def text(self) -> str:
-        parts = [f"{self.step}", self.reason]
-        if self.fix:
-            parts.append(self.fix)
-        return "\n\n".join(parts)
 
 
 class _NoBusy:
@@ -101,8 +94,9 @@ class LaunchGate:
 
     `show_veto(title, text)` and `show_modal(title, text)` display a message,
     `busy(title)` returns a context manager with `update(message)`,
-    `natives()` lists the (label, path) of every DLL the me3 profile will
-    load, `running()` is procs.game_running and `warn(message)` logs.
+    `prepare(notify)` returns the Prepared result (preparing.prepare over the
+    organizer and the game unless a caller supplies its own), `running()` is
+    procs.game_running and `warn(message)` logs.
     """
 
     def __init__(
@@ -113,7 +107,7 @@ class LaunchGate:
         show_veto: Callable[[str, str], None],
         show_modal: Callable[[str, str], None],
         busy: Callable[[str], object] | None = None,
-        natives: Callable[[], list[tuple[str, Path]]] | None = None,
+        prepare: Callable[[Callable[[str], None]], Prepared] | None = None,
         running: Callable[[], list[tuple[int, str]]] = procs.game_running,
         warn: Callable[[str], None] | None = None,
     ) -> None:
@@ -122,7 +116,9 @@ class LaunchGate:
         self._show_veto = show_veto
         self._show_modal = show_modal
         self._busy = busy or (lambda title: _NoBusy())
-        self._natives = natives or (lambda: [])
+        self._prepare = prepare or (
+            lambda notify: preparing.prepare(self._organizer, self._game, notify=notify)
+        )
         self._running = running
         self._warn = warn or (lambda message: None)
         self._session_stamp: str | None = None
@@ -172,9 +168,55 @@ class LaunchGate:
         paths = state.InstancePaths(self._organizer)
         data = self._load(paths)
         self._session_checks(paths, data)
+        self._game_dir_checks()
         self._ensure_host()
-        self._write_profile(paths, binary, cwd, args)
-        self._snapshot(paths, data)
+        prepared = self._prepared()
+        self._write_profile(paths, binary, cwd, args, prepared)
+        self._snapshot(paths, data, prepared)
+        # Last, so a vetoed launch leaves the old stamp and the next run
+        # notices a patch again.
+        try:
+            state.write_build_stamp(paths, prepared.live)
+        except OSError as exc:
+            raise _Veto(
+                "Build stamp",
+                f"cannot write {paths.build_stamp}: {exc}",
+                "Nothing was launched.",
+            ) from exc
+
+    def rebuild(self) -> Prepared:
+        """Everything a launch checks and builds, without launching. Raises Veto.
+
+        The Rebuild tool runs this, so it meets the same session checks and the
+        same preparation as a Run. It writes the generated mod and the views,
+        never the profile, the stamp or the save snapshot.
+        """
+        paths = state.InstancePaths(self._organizer)
+        data = self._load(paths)
+        self._session_checks(paths, data)
+        return self._prepared()
+
+    def _prepared(self) -> Prepared:
+        with self._busy("Elden Ring: preparing the mods") as busy:
+            return self._prepare(busy.update)
+
+    # Anything in Game/ that loads code behind me3's back makes the launch
+    # something other than the profile says: erm's dinput8.dll would load every
+    # DLL in Game/mods/ a second time.
+    def _game_dir_checks(self) -> None:
+        game_dir = Path(self._game.dataDirectory().absolutePath())
+        found = doctor.scan_game_dir(game_dir)
+        if found:
+            names = "\n".join(f"  {path}" for path in found)
+            raise _Veto(
+                "Game folder",
+                "These files in Game/ load mods or replace content on their own, so a "
+                f"launch through me3 would not be the one the mod list describes:\n{names}",
+                "Move them out of Game/ (for example into this instance's "
+                "eldenring/quarantine-game folder) and press Run again. If they are erm's "
+                "files, erm will not work until they are moved back.",
+                GAME_DIR_STRAYS,
+            )
 
     def _load(self, paths: state.InstancePaths) -> dict:
         try:
@@ -262,7 +304,9 @@ class LaunchGate:
 
     # What a launch cannot do without: the working folder, natives that will
     # load, the profile, and an entry that is the one the plugin made.
-    def _write_profile(self, paths: state.InstancePaths, binary: str, cwd: str, args: str) -> None:
+    def _write_profile(
+        self, paths: state.InstancePaths, binary: str, cwd: str, args: str, prepared: Prepared
+    ) -> None:
         try:
             paths.root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -271,7 +315,7 @@ class LaunchGate:
                 f"cannot create the working folder {paths.root}: {exc}",
                 "me3 cannot start without it.",
             ) from exc
-        natives = list(self._natives())
+        natives = list(prepared.natives)
         for label, path in natives:
             verdict = pe.pe_dll_ok(path)
             if not verdict:
@@ -284,7 +328,9 @@ class LaunchGate:
                 )
         try:
             text = me3.render(
-                [], [path for _, path in natives], savefile=me3.savefile(self._organizer)
+                list(prepared.packages),
+                [path for _, path in natives],
+                savefile=me3.savefile(self._organizer),
             )
             me3.write_profile(paths.current_me3, text)
         except (OSError, ValueError) as exc:
@@ -353,7 +399,7 @@ class LaunchGate:
 
     # The save snapshot and the sentinel come last: a launch that gets this far
     # is one the sweep can undo.
-    def _snapshot(self, paths: state.InstancePaths, data: dict) -> None:
+    def _snapshot(self, paths: state.InstancePaths, data: dict, prepared: Prepared) -> None:
         stamp = session.now_stamp()
         save_dir = saves.save_dir(self._library())
         try:
@@ -370,6 +416,9 @@ class LaunchGate:
             "outcome": "launched",
             "time": datetime.now(timezone.utc).isoformat(),
             "stamp": stamp,
+            "warnings": list(prepared.warnings),
+            "notes": list(prepared.notes),
+            "rebuilt": prepared.rebuilt,
         }
         data["sentinel"] = {
             "stamp": stamp,

@@ -22,7 +22,11 @@ saves = support.module(PACKAGE, "saves")
 session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
 errors = support.module(PACKAGE, "ermlib.errors")
+gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 
+LIVE = gamebuild.BuildId(
+    exe="2.7.1.0", app="1.17.1", regulation="11711000", steam_buildid="25080141", regulation_sha="a" * 64
+)
 STEAM_ID = "76561198000000000"
 SL2 = b"vanilla save " * 5000
 BAK = b"vanilla backup " * 5000
@@ -94,6 +98,9 @@ class GateCase(unittest.TestCase):
         self.warnings: list[str] = []
         self.up: list[tuple[int, str]] = []
         self.natives: list[tuple[str, Path]] = []
+        self.packages: list[tuple[str, Path]] = []
+        self.warnings_out: list[str] = []
+        self.prepared_calls = 0
         self.busy_titles: list[str] = []
         self.progress: list[str] = []
         self.gate = self.new_gate()
@@ -109,6 +116,14 @@ class GateCase(unittest.TestCase):
 
     def assert_game_dir_untouched(self) -> None:
         self.assertEqual(tree(self.install), self.game_tree, "a gate run wrote to Game/")
+
+    def fake_prepare(self, notify):
+        """What preparing the mods hands the gate; the real one has its own tests."""
+        self.prepared_calls += 1
+        self.notify = notify
+        return gate.Prepared(
+            packages=list(self.packages), natives=list(self.natives), live=LIVE, warnings=list(self.warnings_out)
+        )
 
     def new_gate(self):
         test = self
@@ -132,7 +147,7 @@ class GateCase(unittest.TestCase):
             show_veto=lambda title, text: self.vetoes.append((title, text)),
             show_modal=lambda title, text: self.modals.append((title, text)),
             busy=Busy,
-            natives=lambda: list(self.natives),
+            prepare=self.fake_prepare,
             running=lambda: list(self.up),
             warn=self.warnings.append,
         )
@@ -451,7 +466,7 @@ class PassingLaunchTests(GateCase):
         progress = self.ensure.call_args.kwargs["progress"]
         progress("Downloading")
         self.assertEqual(self.progress, ["Downloading"])
-        self.assertEqual(len(self.busy_titles), 2)
+        self.assertEqual(self.busy_titles.count("Elden Ring: checking me3"), 2)
 
     def test_the_working_folder_and_profile_are_created_when_neither_exists(self) -> None:
         self.assertFalse(self.paths.root.exists())
@@ -1265,6 +1280,233 @@ class AfterTheSaveToolsTests(GateCase):
         self.assertTrue(self.launch())
         folder = Path(self.last_launch()["sentinel"]["snapshot_dir"])
         self.assertEqual((folder / "ER0000.sl2").read_bytes(), self.written)
+
+
+class PreparedLaunchTests(GateCase):
+    """What the gate does with the result of preparing the mods."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def profile(self) -> dict:
+        return tomllib.loads(self.paths.current_me3.read_text())
+
+    def test_the_profile_lists_the_prepared_packages_and_natives_in_order(self) -> None:
+        dll = self.tmp / "mods/n/n.dll"
+        dll.parent.mkdir(parents=True)
+        dll.write_bytes(synthetic_pe())
+        self.packages = [("A mod", self.tmp / "mods/A mod"), ("Elden Ring Generated", self.tmp / "mods/gen")]
+        self.natives = [("n", dll)]
+        self.assertTrue(self.launch())
+        document = self.profile()
+        self.assertEqual([p["id"] for p in document["packages"]], ["A mod", "Elden Ring Generated"])
+        self.assertEqual(document["packages"][0]["path"], str(self.tmp / "mods/A mod"))
+        self.assertEqual([n["path"] for n in document["natives"]], [str(dll)])
+        self.assertEqual(document["savefile"], "ER0000_modded")
+
+    def test_preparing_runs_once_under_a_busy_dialog_that_receives_its_progress(self) -> None:
+        self.assertTrue(self.launch())
+        self.assertEqual(self.prepared_calls, 1)
+        self.assertIn("Elden Ring: preparing the mods", self.busy_titles)
+        self.notify("Merging the mods")
+        self.assertIn("Merging the mods", self.progress)
+
+    def test_a_veto_from_preparing_is_shown_recorded_and_launches_nothing(self) -> None:
+        def refuse(notify):
+            raise gate.Veto("Generated mod", "it is missing", "make it", "MERGED_MOD_MISSING")
+
+        self.gate = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: self.vetoes.append((t, x)),
+            show_modal=lambda t, x: None, prepare=refuse, running=lambda: [],
+        )
+        self.assertFalse(self.launch())
+        self.assert_vetoed("MERGED_MOD_MISSING", "it is missing", "make it")
+        self.assertFalse(self.paths.current_me3.exists())
+        self.assertFalse(self.paths.save_snapshots.exists())
+        self.assertFalse(self.paths.build_stamp.exists())
+        self.assertNotIn("sentinel", self.last_launch())
+
+    def test_the_build_stamp_is_written_last_with_the_live_build(self) -> None:
+        self.assertFalse(self.paths.build_stamp.exists())
+        self.assertTrue(self.launch())
+        self.assertEqual(state.read_build_stamp(self.paths), LIVE)
+
+    def test_a_launch_that_is_vetoed_later_leaves_the_old_stamp(self) -> None:
+        old = LIVE._replace(steam_buildid="1")
+        state.write_build_stamp(self.paths, old)
+        self.natives = [("broken", self.tmp / "missing.dll")]
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.NATIVE_DLL_INVALID)
+        self.assertEqual(state.read_build_stamp(self.paths), old)
+
+    def test_a_stamp_that_cannot_be_written_is_a_veto_and_no_session_is_started(self) -> None:
+        with mock.patch.object(state, "write_build_stamp", side_effect=OSError("disk full")):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, "disk full")
+        self.gate.finished(str(self.binary), 0)
+        self.assertEqual(self.modals, [])
+
+    def test_after_a_stamp_failure_the_next_launch_settles_the_unswept_session_and_goes_on(self) -> None:
+        with mock.patch.object(state, "write_build_stamp", side_effect=OSError("disk full")):
+            self.assertFalse(self.launch())
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+        self.assertEqual(self.gate.sweep_stale(), "stale-clean")
+        self.assertEqual(self.last_launch()["sentinel"]["swept"], {"outcome": "stale-clean"})
+        self.vetoes.clear()
+        self.assertTrue(self.launch())
+        self.assertEqual(self.vetoes, [])
+        self.assertEqual(len(self.snapshots()), 2)
+
+    def test_the_warnings_and_notes_of_preparing_are_in_the_launch_report(self) -> None:
+        self.warnings_out = ["shop ships erdtools.dll"]
+        self.assertTrue(self.launch())
+        report = self.last_launch()["report"]
+        self.assertEqual(report["outcome"], "launched")
+        self.assertEqual(report["warnings"], ["shop ships erdtools.dll"])
+        self.assertEqual(report["notes"], [])
+
+    def test_a_running_game_stops_the_launch_before_anything_is_prepared(self) -> None:
+        self.up = [(4242, "eldenring.exe")]
+        self.assertFalse(self.launch())
+        self.assertEqual(self.prepared_calls, 0)
+
+
+class RealPrepareTests(GateCase):
+    """The gate over the real preparation, no fake in between.
+
+    Every other test hands the gate a canned Prepared; the seam where
+    Prepared.natives feeds the PE check and Prepared.packages feeds the
+    profile is only exercised here.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.real_organizer = support.FakeOrganizer(self.base)
+        self.mods = self.real_organizer.mod_list
+        state.write_build_stamp(self.paths, LIVE)
+        self.package = self.mods.add("A package", kind="package", files={"msg/engus/item.msgbnd.dcx": b"A"})
+        self.native = self.mods.add("A native", kind="native", files={"mods/n.dll": synthetic_pe()})
+        self.native.setPluginSetting("Elden Ring Support Plugin", "native_dll", "mods/n.dll")
+        self.mods.add("Elden Ring Generated", kind="generated")
+        identify = mock.patch.object(gate.preparing.gamebuild, "identify", return_value=LIVE)
+        identify.start()
+        self.addCleanup(identify.stop)
+        self.gate = gate.LaunchGate(
+            self.real_organizer, self.game,
+            show_veto=lambda title, text: self.vetoes.append((title, text)),
+            show_modal=lambda title, text: self.modals.append((title, text)),
+            running=lambda: [], warn=self.warnings.append,
+        )
+
+    def test_the_enabled_mods_reach_the_profile_as_packages_and_natives(self) -> None:
+        self.assertTrue(self.launch(), self.vetoes)
+        document = tomllib.loads(self.paths.current_me3.read_text())
+        self.assertEqual([p["id"] for p in document["packages"]], ["A package", "Elden Ring Generated"])
+        self.assertEqual(document["packages"][0]["path"], str(self.package.absolutePath()))
+        self.assertEqual([n["path"] for n in document["natives"]], [str(Path(self.native.absolutePath()) / "mods/n.dll")])
+        self.assertEqual(document["savefile"], "ER0000_modded")
+        self.assertTrue(self.last_launch()["report"]["outcome"] == "launched")
+
+    def test_a_native_that_is_not_a_dll_is_vetoed_from_the_real_native_list(self) -> None:
+        (Path(self.native.absolutePath()) / "mods/n.dll").write_bytes(b"MZ")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.NATIVE_DLL_INVALID, "A native")
+        self.assertFalse(self.paths.current_me3.exists())
+
+    def test_a_missing_generated_mod_is_a_veto_from_the_real_preparation(self) -> None:
+        self.mods.order.remove("Elden Ring Generated")
+        del self.mods.mods["Elden Ring Generated"]
+        self.mods.active.discard("Elden Ring Generated")
+        self.assertFalse(self.launch())
+        self.assert_vetoed("MERGED_MOD_MISSING", "Generated mod")
+
+
+
+
+class GameFolderTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def put(self, rel: str) -> None:
+        path = self.install / "Game" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        self.game_tree = tree(self.install)
+
+    def test_a_proxy_dll_in_game_vetoes_before_the_host_or_the_mods_are_touched(self) -> None:
+        self.put("Dinput8.dll")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.GAME_DIR_STRAYS, "Dinput8.dll", "quarantine-game")
+        self.ensure.assert_not_called()
+        self.assertEqual(self.prepared_calls, 0)
+        self.assertFalse(self.paths.current_me3.exists())
+
+    def test_every_name_the_scan_finds_is_listed(self) -> None:
+        self.put("mods/AdjustTheFov.dll")
+        self.put("SeamlessCoop/ersc.dll")
+        self.assertFalse(self.launch())
+        text = self.last_veto()
+        self.assertIn("mods/AdjustTheFov.dll", text)
+        self.assertIn("SeamlessCoop", text)
+
+    def test_runtime_noise_and_an_ordinary_vanilla_folder_pass(self) -> None:
+        self.put("SeamlessCoop/crashdumps/x.dmp")
+        self.put("sd/Data0.bdt")
+        self.assertTrue(self.launch())
+
+
+class RebuildTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def test_a_rebuild_returns_the_prepared_result_and_writes_no_profile_stamp_or_snapshot(self) -> None:
+        prepared = self.gate.rebuild()
+        self.assertEqual(prepared.live, LIVE)
+        self.assertEqual(self.prepared_calls, 1)
+        self.ensure.assert_not_called()
+        self.assertFalse(self.paths.current_me3.exists())
+        self.assertFalse(self.paths.build_stamp.exists())
+        self.assertFalse(self.paths.save_snapshots.exists())
+        self.assertNotIn("sentinel", session.load_last_launch(self.paths))
+
+    def test_a_rebuild_meets_the_same_session_checks_as_a_launch(self) -> None:
+        self.up = [(7, "me3")]
+        with self.assertRaises(gate.Veto) as caught:
+            self.gate.rebuild()
+        self.assertEqual(caught.exception.key, gate.GAME_RUNNING)
+        self.assertEqual(self.prepared_calls, 0)
+
+    def test_a_rebuild_is_refused_while_a_restore_is_pending(self) -> None:
+        session.save_last_launch(self.paths, {"pending_restore": {
+            "reason": "game-running", "changed": ["ER0000.sl2"],
+            "sentinel": {
+                "stamp": "20261013T120000000001Z", "save_dir": str(self.save_dir),
+                "snapshot_dir": str(self.paths.save_snapshots / "20261013T120000000001Z"),
+                "files": {name: None for name in saves.GUARDED}, "swept": None,
+            },
+        }})
+        with self.assertRaises(gate.Veto) as caught:
+            self.gate.rebuild()
+        self.assertEqual(caught.exception.key, gate.SAVE_RESTORE_PENDING)
+
+    def test_a_veto_from_preparing_reaches_the_caller(self) -> None:
+        def refuse(notify):
+            raise gate.Veto("Generated mod", "it is missing", key="MERGED_MOD_MISSING")
+
+        self.gate = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: None, show_modal=lambda t, x: None,
+            prepare=refuse, running=lambda: [],
+        )
+        with self.assertRaises(gate.Veto):
+            self.gate.rebuild()
+
+    def test_a_rebuild_does_not_need_the_game_to_be_the_active_one(self) -> None:
+        self.game.active = False
+        self.assertEqual(self.gate.rebuild().live, LIVE)
 
 
 if __name__ == "__main__":
