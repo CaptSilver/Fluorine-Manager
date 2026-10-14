@@ -214,5 +214,30 @@ class SteamLaunchOptionTests(EnvironmentCase):
             self.assertEqual(self.options(), [])
 
 
+class SteamBuildIdTests(EnvironmentCase):
+    def library(self, text: str | None) -> Path:
+        library = self.tmp / "lib"
+        (library / "steamapps").mkdir(parents=True, exist_ok=True)
+        manifest = library / "steamapps/appmanifest_1245620.acf"
+        manifest.unlink(missing_ok=True)
+        if text is not None:
+            manifest.write_text(text)
+        return library
+
+    def test_the_id_in_the_app_manifest_is_returned(self) -> None:
+        library = self.library('"AppState"\n{\n\t"buildid"\t\t"25080141"\n}\n')
+        self.assertEqual(environment.steam_buildid(library), "25080141")
+
+    def test_no_library_no_manifest_no_id_or_a_zero_id_are_none(self) -> None:
+        self.assertIsNone(environment.steam_buildid(None))
+        self.assertIsNone(environment.steam_buildid(self.library(None)))
+        self.assertIsNone(environment.steam_buildid(self.library('"AppState"\n{\n}\n')))
+        self.assertIsNone(environment.steam_buildid(self.library('"AppState"\n{\n\t"buildid"\t\t"0"\n}\n')))
+
+    def test_a_manifest_that_cannot_be_read_is_none_and_does_not_raise(self) -> None:
+        library = self.library('"AppState"\n{\n\t"SizeOnDisk"\t\t"many"\n\t"buildid"\t\t"1"\n}\n')
+        self.assertIsNone(environment.steam_buildid(library))
+
+
 if __name__ == "__main__":
     unittest.main()

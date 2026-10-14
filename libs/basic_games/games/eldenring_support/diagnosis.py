@@ -241,10 +241,9 @@ class Diagnosis:
                 appmanifest = steam.read_appmanifest(library)
             except (OSError, ValueError):
                 appmanifest = {}
-        buildid = str(appmanifest.get("buildid", "") or "")
         return Context(
             paths, game_dir, library, cache, manifest, deploy.desired(self._organizer),
-            buildid if buildid not in ("", "0") else None, appmanifest,
+            environment.steam_buildid(library), appmanifest,
         )
 
     def _identify(self, context: Context) -> gamebuild.BuildId | None:

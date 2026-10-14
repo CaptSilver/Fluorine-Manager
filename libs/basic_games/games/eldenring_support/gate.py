@@ -26,7 +26,6 @@ from . import (
     archives, deploy, doctor, environment, hardening, inventory, me3, me3_host, pe, prepare as preparing, problems,
     procs, qtui, saves, session, state,
 )
-from .ermlib import steam
 from .ermlib.errors import ErmError
 from .prepare import Prepared
 from .veto import Veto
@@ -294,20 +293,7 @@ class LaunchGate:
         return stamped is not None and buildid is not None and buildid != stamped.steam_buildid
 
     def _buildid(self) -> str | None:
-        """Steam's build id for the game, None when it cannot be read.
-
-        None is also what a missing or zero id gives: preparing the mods
-        refuses a build it cannot identify, and the callers here only need to
-        know whether the build moved.
-        """
-        library = self._library()
-        if library is None:
-            return None
-        try:
-            buildid = str(steam.read_appmanifest(library).get("buildid", "") or "")
-        except (OSError, ValueError):
-            return None
-        return buildid if buildid not in ("", "0") else None
+        return environment.steam_buildid(self._library())
 
     def _load(self, paths: state.InstancePaths) -> dict:
         try:

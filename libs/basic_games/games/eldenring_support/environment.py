@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .ermlib import paths as ermpaths
+from .ermlib import steam
 
 ME3_TOML = "me3.toml"
 STEAM_DIR = "steam_dir"
@@ -194,3 +195,18 @@ def steam_launch_options(steam_root: Path | None) -> list[tuple[Path, str]]:
         if isinstance(value, str) and value.strip():
             found.append((config, value))
     return found
+
+
+def steam_buildid(library: Path | None) -> str | None:
+    """Steam's build id for Elden Ring in this library, None when it cannot be read.
+
+    A missing or zero id is None too: Steam has no usable record then, and the
+    callers only need to know whether the build moved.
+    """
+    if library is None:
+        return None
+    try:
+        buildid = str(steam.read_appmanifest(Path(library)).get("buildid", "") or "")
+    except (OSError, ValueError):
+        return None
+    return buildid if buildid not in ("", "0") else None
