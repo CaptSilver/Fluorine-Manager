@@ -478,12 +478,12 @@ class MergeTests(PrepareCase):
         self.run_prepare()
         self.assertEqual((self.organizer.modsPath_ / generated.NAME / "msg/x.dcx").read_bytes(), b"B|A")
 
-    def test_an_undeclared_collision_is_a_veto_that_names_the_mods_and_builds_nothing(self) -> None:
+    def test_an_undeclared_collision_no_longer_stops_the_launch_and_the_highest_priority_mod_wins(self) -> None:
         self.two_providers()
         state.write_profile_rules(self.organizer.profilePath(), {})
-        veto = self.veto(prepare.MERGE_FAILED)
-        self.assertIn("a, b", veto.text())
-        self.assertEqual(self.generated_files(), {})
+        prepared = self.run_prepare()
+        self.assertTrue(prepared.rebuilt)
+        self.assertEqual((self.organizer.modsPath_ / generated.NAME / "msg/x.dcx").read_bytes(), b"B")
 
     def test_a_rebase_is_verified_before_the_build_and_a_bad_one_builds_nothing(self) -> None:
         self.two_providers()

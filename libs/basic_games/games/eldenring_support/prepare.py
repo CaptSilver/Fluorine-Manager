@@ -406,12 +406,15 @@ def prepare(
                     paths, organizer.downloadsPath(), rules["vanilla_sources"]
                 )
                 provided = merge_engine.index(contributors)
-                rebase = merge_engine.rebase_bases(game_dir, live, rules["merges"], contributors, paths, loader)
+                rebase = merge_engine.rebase_bases(game_dir, live, rules["merges"], provided, paths, loader)
                 merge_notes: list = []
-                planned = merge_engine.plan(provided, contributors, rules["merges"], loader, rebase.bases, merge_notes)
-                merge_engine.verify_rebase(planned, rebase, live)
+                planned = merge_engine.plan(
+                    provided, contributors, rules["merges"], loader, rebase.bases, merge_notes,
+                    auto=merge_engine.make_auto_resolver(game_dir, live, paths),
+                )
+                merge_engine.verify_rebase(planned.outputs, rebase, live)
                 notes = [f"{rel}: {merge.describe_note(note)}" for rel, note in merge_notes]
-                files = list(planned)
+                files = list(planned.outputs)
                 if ersc is not None:
                     files += generated.ersc_files(ersc.path)
                 generated.build(mod_dir, paths.generated_state, files, fp)

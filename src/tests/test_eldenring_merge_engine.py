@@ -22,6 +22,24 @@ bhd5 = support.module(PACKAGE, "ermlib.formats.bhd5")
 gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 
 CONCAT = {"concat": lambda out, extra, notes=None: out + b"|" + extra}
+
+
+def tri(out, extra, vanilla, notes=None):
+    """A three-way strategy that only concatenates, so a test can read the fold order off the bytes."""
+    return out + b"|" + extra
+
+
+def refuse(out, extra, vanilla, notes=None):
+    raise merge.MergeError("entry 1 row 5: both sides changed it and differ")
+
+
+def crash(out, extra, vanilla, notes=None):
+    raise IndexError("list index out of range")
+
+
+def keep_lead(out, extra, vanilla, notes=None):
+    """Settles a tie the way param_rows settles a rival row: the lead keeps its row."""
+    return extra if out == vanilla else out
 RULE = {"path": "msg/x.dcx", "strategy": "concat", "mods": ["a", "b", "c"], "prefer": "a"}
 
 
@@ -47,11 +65,15 @@ class EngineCase(unittest.TestCase):
         mod = self.organizer.mod_list.add(name, kind="package", files=files)
         return merge_engine.Contributor(name, Path(mod.absolutePath()))
 
-    def plan(self, contributors, merges, **kwargs):
+    def decide(self, contributors, merges, **kwargs):
         provided = merge_engine.index(contributors)
         return merge_engine.plan(
-            provided, contributors, merges, kwargs.pop("loader", no_vanilla), strategies=CONCAT, **kwargs
+            provided, contributors, merges, kwargs.pop("loader", no_vanilla),
+            strategies=kwargs.pop("strategies", CONCAT), **kwargs,
         )
+
+    def plan(self, contributors, merges, **kwargs):
+        return self.decide(contributors, merges, **kwargs).outputs
 
 
 def spelled(provided: dict) -> dict:
@@ -288,26 +310,10 @@ class PlanTests(EngineCase):
         self.assertEqual([rel for rel, _ in planned], ["msg/x.dcx"])
         self.assertEqual([tree(c.source) for c in contributors], before)
 
-    def test_an_undeclared_collision_is_refused_with_both_names(self) -> None:
-        with self.assertRaises(merge_engine.ConflictError) as caught:
-            self.plan(self.providers(), [])
-        self.assertIn("a, b, c", str(caught.exception))
-        self.assertIn("Declare a [[merges]] entry", str(caught.exception))
-
-    def test_a_provider_outside_the_declaration_is_refused(self) -> None:
-        with self.assertRaises(merge_engine.ConflictError) as caught:
-            self.plan(self.providers(), [{**RULE, "mods": ["a", "b"]}])
-        self.assertIn("also ship this path", str(caught.exception))
-
     def test_a_declared_mod_that_is_not_installed_is_fine(self) -> None:
         a, b, _c = self.providers()
         planned = self.plan([a, b], [{**RULE, "mods": ["a", "b", "ghost"]}])
         self.assertEqual(planned, [("msg/x.dcx", b"A|B")])
-
-    def test_prefer_must_be_a_provider(self) -> None:
-        with self.assertRaises(merge_engine.ConflictError) as caught:
-            self.plan(self.providers(), [{**RULE, "prefer": "ghost"}])
-        self.assertIn("prefer", str(caught.exception))
 
     def test_an_unknown_strategy_is_refused_listing_the_known_ones(self) -> None:
         with self.assertRaises(merge_engine.ConflictError) as caught:
@@ -352,6 +358,296 @@ class PlanTests(EngineCase):
             )
         self.assertEqual(calls, [(b"G", b"A", True), (b"G+A", b"B", False)])
 
+    def test_an_undeclared_collision_without_a_strategy_goes_to_the_highest_priority_mod(self) -> None:
+        plan = self.decide(self.providers(), [])
+        [(rel, source)] = plan.outputs
+        self.assertEqual(rel, "msg/x.dcx")
+        self.assertEqual(Path(source).read_bytes(), b"C")
+        [decision] = plan.decisions
+        self.assertEqual(
+            (decision.path, decision.outcome, decision.providers, decision.winner, decision.declared),
+            ("msg/x.dcx", merge_engine.WINNER, ("a", "b", "c"), "c", False),
+        )
+        self.assertIn("no way to merge", decision.detail)
+
+    def test_a_provider_outside_the_declaration_is_folded_in_and_named(self) -> None:
+        plan = self.decide(self.providers(), [{**RULE, "mods": ["a", "b"]}])
+        self.assertEqual(plan.outputs, [("msg/x.dcx", b"A|B|C")])
+        [decision] = plan.decisions
+        self.assertEqual((decision.outcome, decision.declared), (merge_engine.MERGED, True))
+        self.assertIn("does not name c", decision.detail)
+        self.assertIn("does not name c", merge_engine.warning(decision))
+
+    def test_a_prefer_that_is_not_a_provider_hands_the_lead_to_the_highest_priority_mod(self) -> None:
+        plan = self.decide(self.providers(), [{**RULE, "prefer": "ghost"}])
+        self.assertEqual(plan.outputs, [("msg/x.dcx", b"C|A|B")])
+        self.assertIn("ghost", plan.decisions[0].detail)
+        self.assertIn("c, the highest priority", plan.decisions[0].detail)
+
+    def test_a_declaration_in_another_spelling_applies_to_providers_in_any_spelling(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "A"})
+        b = self.folder("b", {"msg/engus/x.dcx": "B"})
+        plan = self.decide([a, b], [{**RULE, "path": "MSG/ENGUS/X.dcx", "mods": ["a", "b"]}])
+        self.assertEqual(plan.outputs, [("msg/engus/x.dcx", b"A|B")])
+
+    def test_a_declared_merge_that_fails_stops_with_the_file_the_mods_and_the_way_out(self) -> None:
+        def refuse_two(out, extra, notes=None):
+            raise merge.MergeError("entry 1 row 5: both sides changed it and differ")
+
+        with self.assertRaises(merge_engine.ConflictError) as caught:
+            self.plan(self.providers(), [{**RULE, "strategy": "refuse"}], strategies={"refuse": refuse_two})
+        text = str(caught.exception)
+        for expected in ("msg/x.dcx", "a, b, c", "row 5", "delete the entry"):
+            self.assertIn(expected, text)
+
+    def test_a_declared_merge_over_a_malformed_file_stops_with_the_file_and_the_error_named(self) -> None:
+        def crash_two(out, extra, notes=None):
+            raise IndexError("list index out of range")
+
+        with self.assertRaises(merge_engine.ConflictError) as caught:
+            self.plan(self.providers(), [{**RULE, "strategy": "crash"}], strategies={"crash": crash_two})
+        for expected in ("msg/x.dcx", "IndexError", "a, b, c"):
+            self.assertIn(expected, str(caught.exception))
+
+    def test_a_declared_merge_takes_precedence_over_the_automatic_one(self) -> None:
+        def unused(rel):
+            raise AssertionError("the automatic merge ran")
+
+        auto = merge_engine.AutoResolver(unused, lambda *a: None, lambda *a: None)
+        with mock.patch.dict(merge_engine.AUTO_SUFFIX, {".dcx": "tri"}, clear=True), \
+                mock.patch.object(merge, "NEEDS_VANILLA", frozenset({"tri"})):
+            plan = self.decide(self.providers(), [RULE], auto=auto, strategies={**CONCAT, "tri": tri})
+        self.assertEqual(plan.outputs, [("msg/x.dcx", b"A|B|C")])
+
+
+class AutomaticTests(EngineCase):
+    """Colliding files the profile declares nothing for."""
+
+    GAME = b"G"
+
+    def setUp(self) -> None:
+        super().setUp()
+        for patcher in (
+            mock.patch.dict(merge_engine.AUTO_EXACT, {}, clear=True),
+            mock.patch.dict(merge_engine.AUTO_SUFFIX, {".dcx": "tri"}, clear=True),
+            mock.patch.object(merge, "NEEDS_VANILLA", frozenset({"tri", "takes", "keep", "refuse", "crash", "noting"})),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.auto = merge_engine.AutoResolver(lambda rel: self.GAME, lambda *a: None, lambda *a: None)
+
+    def providers(self, names="abc"):
+        return [self.folder(name, {"msg/x.dcx": name.upper()}) for name in names]
+
+    def run_auto(self, contributors, strategy_name="tri", strategy=tri, auto=None, **kwargs):
+        with mock.patch.dict(merge_engine.AUTO_SUFFIX, {".dcx": strategy_name}, clear=True):
+            return self.decide(
+                contributors, [], strategies={strategy_name: strategy}, auto=auto or self.auto, **kwargs
+            )
+
+    def test_the_game_leads_and_the_providers_fold_in_highest_priority_first(self) -> None:
+        plan = self.run_auto(self.providers())
+        self.assertEqual(plan.outputs, [("msg/x.dcx", b"G|C|B|A")])
+        [decision] = plan.decisions
+        self.assertEqual(
+            (decision.outcome, decision.providers, decision.strategy, decision.declared, decision.winner),
+            (merge_engine.MERGED, ("a", "b", "c"), "tri", False, None),
+        )
+
+    def test_every_step_is_three_way_against_the_game_copy(self) -> None:
+        seen = []
+
+        def spy(out, extra, vanilla, notes=None):
+            seen.append(vanilla)
+            return out + extra
+
+        self.run_auto(self.providers(), "tri", spy)
+        self.assertEqual(seen, [b"G", b"G", b"G"])
+
+    def test_only_the_first_step_is_told_its_base_is_the_game(self) -> None:
+        calls = []
+
+        def takes(out, extra, vanilla, base_is_game=False, notes=None):
+            calls.append((out, extra, base_is_game))
+            return out + b"+" + extra
+
+        with mock.patch.object(merge, "TAKES_GAME_BASE", frozenset({"takes"})):
+            self.run_auto(self.providers("ab"), "takes", takes)
+        self.assertEqual(calls, [(b"G", b"B", True), (b"G+B", b"A", False)])
+
+    def test_a_tie_the_strategy_settles_for_its_lead_goes_to_the_mod_that_wins_when_the_merge_fails(self) -> None:
+        contributors = self.providers()
+        merged = self.run_auto(contributors, "keep", keep_lead)
+        fallback = self.run_auto(contributors, "refuse", refuse)
+        self.assertEqual(merged.outputs[0][1], b"C")
+        self.assertEqual(Path(fallback.outputs[0][1]).read_bytes(), b"C")
+
+    def test_a_strategy_that_refuses_hands_the_whole_file_to_the_highest_priority_mod(self) -> None:
+        plan = self.run_auto(self.providers(), "refuse", refuse)
+        [(rel, source)] = plan.outputs
+        self.assertEqual((rel, Path(source).read_bytes()), ("msg/x.dcx", b"C"))
+        [decision] = plan.decisions
+        self.assertEqual((decision.outcome, decision.winner, decision.providers), (merge_engine.WINNER, "c", ("a", "b", "c")))
+        self.assertIn("row 5", decision.detail)
+
+    def test_a_strategy_that_crashes_on_a_malformed_file_is_a_fallback_with_the_error_named(self) -> None:
+        plan = self.run_auto(self.providers(), "crash", crash)
+        self.assertEqual(plan.decisions[0].outcome, merge_engine.WINNER)
+        self.assertIn("IndexError", plan.decisions[0].detail)
+        self.assertEqual(Path(plan.outputs[0][1]).read_bytes(), b"C")
+
+    def test_a_file_with_no_strategy_is_won_by_the_highest_priority_mod(self) -> None:
+        a = self.folder("a", {"menu/pic.bin": "A"})
+        b = self.folder("b", {"menu/pic.bin": "B"})
+        plan = self.run_auto([a, b])
+        self.assertEqual(Path(plan.outputs[0][1]).read_bytes(), b"B")
+        self.assertIn("no way to merge", plan.decisions[0].detail)
+        self.assertIsNone(plan.decisions[0].strategy)
+
+    def test_a_game_without_the_file_is_a_fallback_with_the_reason(self) -> None:
+        def missing(rel):
+            raise merge_engine.ConflictError("the game's own copy of msg/x.dcx could not be read: not in any of Data0")
+
+        auto = merge_engine.AutoResolver(missing, lambda *a: None, lambda *a: None)
+        plan = self.run_auto(self.providers(), auto=auto)
+        self.assertEqual(plan.decisions[0].outcome, merge_engine.WINNER)
+        self.assertIn("not in any of Data0", plan.decisions[0].detail)
+
+    def test_no_resolver_at_all_is_a_fallback_too(self) -> None:
+        with mock.patch.dict(merge_engine.AUTO_SUFFIX, {".dcx": "tri"}, clear=True):
+            plan = self.decide(self.providers(), [], strategies={"tri": tri}, auto=None)
+        self.assertEqual(plan.decisions[0].outcome, merge_engine.WINNER)
+        self.assertIn("game's own copy is not available", plan.decisions[0].detail)
+
+    def test_a_check_that_refuses_the_inputs_or_the_output_is_a_fallback(self) -> None:
+        def refuse_inputs(rel, blobs, game):
+            raise merge_engine.ConflictError("built for another build")
+
+        def refuse_output(rel, merged, blobs, game):
+            raise merge_engine.ConflictError("a row was lost")
+
+        for label, auto, reason in (
+            ("inputs", merge_engine.AutoResolver(lambda rel: b"G", refuse_inputs, lambda *a: None), "another build"),
+            ("output", merge_engine.AutoResolver(lambda rel: b"G", lambda *a: None, refuse_output), "row was lost"),
+        ):
+            with self.subTest(label):
+                plan = self.run_auto(self.providers(), auto=auto)
+                self.assertEqual(plan.decisions[0].outcome, merge_engine.WINNER)
+                self.assertIn(reason, plan.decisions[0].detail)
+
+    def test_the_providers_blobs_reach_the_checks_highest_priority_first(self) -> None:
+        got = []
+        auto = merge_engine.AutoResolver(
+            lambda rel: b"G", lambda rel, blobs, game: got.append((rel, blobs, game)), lambda *a: None
+        )
+        self.run_auto(self.providers("ab"), auto=auto)
+        self.assertEqual(got, [("msg/x.dcx", [("b", b"B"), ("a", b"A")], b"G")])
+
+    def test_providers_with_the_same_bytes_need_no_merge_and_no_output(self) -> None:
+        a = self.folder("a", {"msg/x.dcx": "SAME"})
+        b = self.folder("b", {"msg/x.dcx": "SAME"})
+        plan = self.run_auto([a, b], "refuse", refuse)
+        self.assertEqual(plan.outputs, [])
+        self.assertEqual((plan.decisions[0].outcome, plan.decisions[0].winner), (merge_engine.IDENTICAL, None))
+        self.assertIsNone(merge_engine.warning(plan.decisions[0]))
+
+    def test_same_bytes_under_another_spelling_still_leave_one_copy_in_the_games_spelling(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "SAME"})
+        b = self.folder("b", {"msg/engus/x.dcx": "SAME"})
+        plan = self.run_auto([a, b], "refuse", refuse)
+        [(rel, source)] = plan.outputs
+        self.assertEqual((rel, Path(source).read_bytes()), ("msg/engus/x.dcx", b"SAME"))
+        self.assertEqual(plan.decisions[0].outcome, merge_engine.IDENTICAL)
+
+    def test_same_size_different_bytes_are_not_identical(self) -> None:
+        a = self.folder("a", {"menu/pic.bin": "AAAA"})
+        b = self.folder("b", {"menu/pic.bin": "AAAB"})
+        self.assertEqual(self.run_auto([a, b]).decisions[0].outcome, merge_engine.WINNER)
+
+    def test_a_case_variant_pair_merges_into_the_games_spelling(self) -> None:
+        a = self.folder("a", {"msg/engUS/x.dcx": "A"})
+        b = self.folder("b", {"msg/engus/x.dcx": "B"})
+        plan = self.run_auto([a, b])
+        self.assertEqual(plan.outputs, [("msg/engus/x.dcx", b"G|B|A")])
+
+    def test_what_a_strategy_could_not_carry_over_is_reported_with_the_path(self) -> None:
+        def noting(out, extra, vanilla, notes=None):
+            notes.append("N:" + extra.decode())
+            return out + extra
+
+        notes = []
+        with mock.patch.object(merge, "NEEDS_NOTES", frozenset({"noting"})):
+            self.run_auto(self.providers("ab"), "noting", noting, notes=notes)
+        self.assertEqual(notes, [("msg/x.dcx", "N:B"), ("msg/x.dcx", "N:A")])
+
+    def test_the_notes_of_a_fold_that_failed_are_not_reported(self) -> None:
+        def noting_then_refusing(out, extra, vanilla, notes=None):
+            notes.append("N")
+            if extra == b"A":
+                raise merge.MergeError("boom")
+            return out + extra
+
+        notes = []
+        with mock.patch.object(merge, "NEEDS_NOTES", frozenset({"noting"})):
+            plan = self.run_auto(self.providers("ab"), "noting", noting_then_refusing, notes=notes)
+        self.assertEqual(plan.decisions[0].outcome, merge_engine.WINNER)
+        self.assertEqual(notes, [])
+
+    def test_the_providers_are_never_modified(self) -> None:
+        contributors = self.providers()
+        before = [tree(c.source) for c in contributors]
+        self.run_auto(contributors, "refuse", refuse)
+        self.assertEqual([tree(c.source) for c in contributors], before)
+
+    def test_a_single_provider_is_left_alone(self) -> None:
+        a = self.folder("a", {"msg/x.dcx": "A"})
+        plan = self.run_auto([a])
+        self.assertEqual((plan.outputs, plan.decisions), ([], []))
+
+
+class DecisionWordingTests(unittest.TestCase):
+    WON = merge_engine.Decision(
+        "msg/engus/item_dlc02.msgbnd.dcx", merge_engine.WINNER,
+        ("great-rune-overhaul", "boss-resurrection-lite", "nofalldead"), "nofalldead", "fmg-3way", False,
+        "entry 1 row 5: both sides changed it and differ",
+    )
+
+    def test_a_win_names_the_file_every_provider_the_winner_and_the_reason(self) -> None:
+        text = merge_engine.warning(self.WON)
+        for expected in (
+            "msg/engus/item_dlc02.msgbnd.dcx", "great-rune-overhaul", "boss-resurrection-lite", "nofalldead",
+            "row 5", "highest priority", "not in the game",
+        ):
+            self.assertIn(expected, text)
+
+    def test_a_clean_merge_has_no_warning_but_is_described(self) -> None:
+        merged = self.WON._replace(outcome=merge_engine.MERGED, winner=None, detail="")
+        self.assertIsNone(merge_engine.warning(merged))
+        self.assertIn("merged from great-rune-overhaul, boss-resurrection-lite, nofalldead", merge_engine.describe(merged))
+
+    def test_a_merge_with_something_to_say_has_a_warning(self) -> None:
+        merged = self.WON._replace(outcome=merge_engine.MERGED, winner=None, detail="the entry does not name x")
+        self.assertEqual(merge_engine.warning(merged), "msg/engus/item_dlc02.msgbnd.dcx: the entry does not name x")
+
+    def test_warnings_for_keeps_only_the_decisions_that_have_one(self) -> None:
+        merged = self.WON._replace(outcome=merge_engine.MERGED, winner=None, detail="")
+        same = self.WON._replace(outcome=merge_engine.IDENTICAL, winner=None, detail="")
+        self.assertEqual(len(merge_engine.warnings_for([merged, self.WON, same])), 1)
+
+    def test_a_decision_survives_the_state_file(self) -> None:
+        import json
+
+        again = merge_engine.decisions_from_state(json.loads(json.dumps([self.WON.to_json()])))
+        self.assertEqual(again, [self.WON])
+
+    def test_whatever_in_the_state_does_not_read_back_as_a_decision_is_dropped(self) -> None:
+        good = self.WON.to_json()
+        junk = [None, 3, "x", {}, {"outcome": "nonsense", "path": "p", "providers": []}, {"outcome": "winner"},
+                {**good, "providers": 7}, good]
+        self.assertEqual(merge_engine.decisions_from_state(junk), [self.WON])
+        for raw in (None, {}, "winner", 5):
+            self.assertEqual(merge_engine.decisions_from_state(raw), [])
+
 
 class VanillaTests(EngineCase):
     def setUp(self) -> None:
@@ -375,7 +671,7 @@ class VanillaTests(EngineCase):
         provided = merge_engine.index([a, b])
         strategies = {"tri": lambda out, extra, vanilla, notes=None: out + b"|" + extra + b"|" + vanilla}
         with mock.patch.object(merge, "NEEDS_VANILLA", frozenset({"tri"})):
-            return merge_engine.plan(provided, [a, b], [rule], loader or self.loader, strategies=strategies)
+            return merge_engine.plan(provided, [a, b], [rule], loader or self.loader, strategies=strategies).outputs
 
     def test_the_ancestor_is_read_out_of_the_pinned_archive(self) -> None:
         rule = self.three_way(mod="ancestor-mod", member="sub/regulation.bin")
@@ -422,6 +718,17 @@ class VanillaTests(EngineCase):
             "vanilla": {"mod": "ancestor-mod", "member": "sub/regulation.bin"},
         }
         self.assertEqual(merge_engine.declared_ancestor([rule], "regulation.bin", self.loader), b"ANCESTOR")
+
+    def test_a_vanilla_that_is_not_a_table_is_a_conflict_error(self) -> None:
+        rule = {"path": "regulation.bin", "strategy": "param-rows", "mods": ["a"], "prefer": "a", "vanilla": "oops"}
+        with self.assertRaises(merge_engine.ConflictError) as caught:
+            merge_engine.declared_ancestor([rule], "regulation.bin", self.loader)
+        self.assertIn("table", str(caught.exception))
+
+    def test_an_archive_name_that_is_not_text_is_a_conflict_error(self) -> None:
+        loader = merge_engine.make_vanilla_loader(self.paths, self.organizer.downloads, {"m": {"archive": 5}})
+        with self.assertRaises(merge_engine.ConflictError):
+            loader("m", "x")
 
 
 class GameBaseTests(unittest.TestCase):
@@ -537,7 +844,7 @@ class RebaseTests(EngineCase):
         loader = lambda mod_id, member: b"ANC"  # noqa: E731
         with mock.patch.object(heal, "prepare_rebase", return_value={"regulation.bin": b"BASE"}) as prepare:
             result = merge_engine.rebase_bases(
-                "/game", self.LIVE, [self.rule], [self.a, self.b, self.c], self.paths, loader
+                "/game", self.LIVE, [self.rule], merge_engine.index([self.a, self.b, self.c]), self.paths, loader
             )
         args, kwargs = prepare.call_args
         self.assertEqual(args[:3], ("/game", self.LIVE, b"ANC"))
@@ -550,7 +857,7 @@ class RebaseTests(EngineCase):
     def test_a_single_regulation_asks_for_no_ancestor(self) -> None:
         loader = mock.Mock(side_effect=AssertionError("ancestor read"))
         with mock.patch.object(heal, "prepare_rebase", return_value={}) as prepare:
-            result = merge_engine.rebase_bases("/game", self.LIVE, [self.rule], [self.a, self.c], self.paths, loader)
+            result = merge_engine.rebase_bases("/game", self.LIVE, [self.rule], merge_engine.index([self.a, self.c]), self.paths, loader)
         self.assertIsNone(prepare.call_args.args[2])
         self.assertFalse(result.rebased)
         self.assertEqual(result.bases, {})
@@ -559,7 +866,7 @@ class RebaseTests(EngineCase):
         merges = [{"path": "msg/y.dcx", "base": "game"}]
         with mock.patch.object(heal, "prepare_rebase", return_value={}), \
                 mock.patch.object(bhd5, "read_file", return_value=b"G"):
-            result = merge_engine.rebase_bases("/game", self.LIVE, merges, [self.a], self.paths, no_vanilla)
+            result = merge_engine.rebase_bases("/game", self.LIVE, merges, merge_engine.index([self.a]), self.paths, no_vanilla)
         self.assertEqual(result.bases, {"msg/y.dcx": b"G"})
         self.assertFalse(result.rebased)
 
@@ -579,6 +886,22 @@ class RebaseTests(EngineCase):
             with self.assertRaises(heal.HealError) as caught:
                 merge_engine.verify_rebase([("regulation.bin", b"M")], rebase, self.LIVE)
         self.assertIn("row 5 dropped", str(caught.exception))
+        verify.assert_called_once_with(b"M", b"B", [("a", b"RA")], self.LIVE)
+
+    def test_a_regulation_in_another_spelling_is_still_found(self) -> None:
+        odd = self.folder("odd", {"Regulation.bin": "RO"})
+        with mock.patch.object(heal, "prepare_rebase", return_value={}) as prepare:
+            merge_engine.rebase_bases(
+                "/game", self.LIVE, [self.rule], merge_engine.index([odd, self.b]), self.paths, lambda mod_id, member: b"ANC"
+            )
+        self.assertEqual(prepare.call_args.args[3], [("odd", b"RO"), ("b", b"RB")])
+
+    def test_a_winner_copied_by_path_is_verified_after_a_rebase_like_bytes(self) -> None:
+        source = self.tmp / "winner.bin"
+        source.write_bytes(b"M")
+        rebase = merge_engine.Rebase({"regulation.bin": b"B"}, True, b"B", [("a", b"RA")])
+        with mock.patch.object(heal, "verify_rebase", return_value=()) as verify:
+            merge_engine.verify_rebase([("regulation.bin", source)], rebase, self.LIVE)
         verify.assert_called_once_with(b"M", b"B", [("a", b"RA")], self.LIVE)
 
 

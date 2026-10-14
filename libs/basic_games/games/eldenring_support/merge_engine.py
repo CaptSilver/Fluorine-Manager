@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 from . import archives, generated, kinds, mods, state, treewalk
-from .ermlib import gamebuild, heal, merge
+from .ermlib import gamebuild, github, heal, merge
 from .ermlib.errors import ErmError
 from .ermlib.formats import bhd5
 from .ermlib.paths import is_safe_relpath
@@ -232,7 +232,7 @@ def make_vanilla_loader(paths: state.InstancePaths, downloads, sources: dict[str
     def load(mod_id: str, member: str) -> bytes:
         entry = sources.get(mod_id)
         archive = entry.get("archive") if isinstance(entry, dict) else None
-        if not archive or Path(archive).name != archive:
+        if not isinstance(archive, str) or not archive or Path(archive).name != archive:
             raise ConflictError(
                 f"vanilla archive missing: {mod_id!r} has no archive in this profile's vanilla_sources"
             )
@@ -263,8 +263,10 @@ def _load_vanilla(rel: str, rule: dict, loader: VanillaLoader) -> bytes:
             'they branched from, but no `vanilla` is declared. Add vanilla = { mod = "<id>", '
             'member = "<path inside its archive>" }'
         )
+    if not isinstance(source, dict):
+        raise ConflictError(f"{rel}: `vanilla` has to be a table with `mod` and `member`, got {source!r}")
     mod_id, member = source.get("mod"), source.get("member")
-    if not (mod_id and member):
+    if not (isinstance(mod_id, str) and isinstance(member, str) and mod_id and member):
         raise ConflictError(f"{rel}: `vanilla` needs both `mod` and `member`, got {source!r}")
     if not is_safe_relpath(member):
         raise ConflictError(f"{rel}: unsafe vanilla member path {member!r}")
@@ -373,6 +375,187 @@ def make_auto_resolver(game_dir, live, paths: state.InstancePaths) -> AutoResolv
 
 # -- planning -----------------------------------------------------------------
 
+MERGED, WINNER, IDENTICAL = "merged", "winner", "identical"
+
+
+class Decision(NamedTuple):
+    """What the engine did with one colliding path.
+
+    `providers` are the mods shipping it, lowest priority first. `winner` is set
+    when the file went whole to one mod. `detail` is the reason an automatic merge
+    fell back, or what a declared merge had to adapt to.
+    """
+
+    path: str
+    outcome: str
+    providers: tuple
+    winner: str | None
+    strategy: str | None
+    declared: bool
+    detail: str
+
+    def to_json(self) -> dict:
+        return {**self._asdict(), "providers": list(self.providers)}
+
+
+class Plan(NamedTuple):
+    # (path in the game's spelling, the bytes, or the file to copy when a mod's file wins whole)
+    outputs: list
+    decisions: list
+
+
+def decisions_from_state(raw) -> list[Decision]:
+    """The decisions a build recorded. Anything in the record that does not read back as one is dropped."""
+    found = []
+    for item in raw if isinstance(raw, list) else ():
+        try:
+            if item["outcome"] not in (MERGED, WINNER, IDENTICAL):
+                continue
+            winner, strategy = item.get("winner"), item.get("strategy")
+            found.append(
+                Decision(
+                    str(item["path"]), item["outcome"], tuple(str(mod) for mod in item["providers"]),
+                    winner if isinstance(winner, str) else None,
+                    strategy if isinstance(strategy, str) else None,
+                    bool(item.get("declared")), str(item.get("detail", "")),
+                )
+            )
+        except (KeyError, TypeError, AttributeError):
+            continue
+    return found
+
+
+def warning(decision: Decision) -> str | None:
+    """The line for the launch report and the Problems list, or None when there is nothing to warn about."""
+    if decision.outcome == WINNER:
+        others = [mod for mod in decision.providers if mod != decision.winner]
+        return (
+            f"{decision.path} is shipped by {', '.join(decision.providers)} and could not be merged "
+            f"({decision.detail}). {decision.winner} has the highest priority, so its copy is used and what "
+            f"{', '.join(others)} change in it is not in the game."
+        )
+    if decision.detail:
+        return f"{decision.path}: {decision.detail}"
+    return None
+
+
+def warnings_for(decisions: list[Decision]) -> list[str]:
+    return [text for text in map(warning, decisions) if text]
+
+
+def describe(decision: Decision) -> str:
+    how = "the profile's merge entry" if decision.declared else f"the {decision.strategy} strategy"
+    return f"{decision.path}: merged from {', '.join(decision.providers)} with {how}"
+
+
+def _identical(providers: list[Provider]) -> bool:
+    first = providers[0].path
+    size = os.path.getsize(first)
+    if any(os.path.getsize(provider.path) != size for provider in providers[1:]):
+        return False
+    digest = github.sha256_file(first)
+    return all(github.sha256_file(provider.path) == digest for provider in providers[1:])
+
+
+def _declared(key, rule, providers, lead, vanilla_loader, strategies, notes):
+    """One declared merge. The entry decides how, and tolerates the mod set having moved since it was written."""
+    strategy = strategies.get(rule["strategy"])
+    if strategy is None:
+        raise ConflictError(
+            f"{key}: unknown merge strategy {rule['strategy']!r} (known: {', '.join(sorted(strategies))})"
+        )
+    names = [provider.mod for provider in providers]
+    detail = []
+    outside = sorted(set(names) - set(rule["mods"]))
+    if outside:
+        detail.append(
+            f"the [[merges]] entry does not name {', '.join(outside)}, but the strategy folds in every mod "
+            "that ships the file"
+        )
+    leader = rule["prefer"]
+    if leader not in names:
+        leader = names[-1]
+        detail.append(
+            f"prefer = {rule['prefer']!r} is not one of its providers, so {leader}, the highest priority, leads"
+        )
+    # `prefer` wins genuine collisions, so it is the base the strategy builds on.
+    ordered = [leader] + [mod for mod in names if mod != leader]
+    files = {provider.mod: provider.path for provider in providers}
+    blobs = [files[mod].read_bytes() for mod in ordered]
+    if lead is not None:
+        blobs = [lead] + blobs
+    vanilla = _load_vanilla(key, rule, vanilla_loader) if rule["strategy"] in merge.NEEDS_VANILLA else None
+    path_notes = [] if rule["strategy"] in merge.NEEDS_NOTES else None
+    out = blobs[0]
+    try:
+        for step, extra in enumerate(blobs[1:]):
+            args = (out, extra) if vanilla is None else (out, extra, vanilla)
+            kwargs = {"notes": path_notes} if path_notes is not None else {}
+            # Only the first step leads with the base the caller supplied; after
+            # it `out` is a merge of mods, and a strategy that treats its base as
+            # the game's file would read one mod's row as the game's.
+            if step == 0 and lead is not None and rule["strategy"] in merge.TAKES_GAME_BASE:
+                kwargs["base_is_game"] = True
+            out = strategy(*args, **kwargs)
+    except Exception as exc:  # a mod's file can be malformed in any way; the entry's merge stops with the reason
+        reason = str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
+        raise ConflictError(
+            f"{key}: the [[merges]] entry's {rule['strategy']} merge of {', '.join(names)} failed: {reason}. "
+            "Fix the mods, or delete the entry: without it the engine merges this file itself and, "
+            "when it cannot, the highest-priority mod wins."
+        ) from exc
+    if notes is not None and path_notes:
+        notes.extend((key, note) for note in path_notes)
+    return out, Decision(key, MERGED, tuple(names), None, rule["strategy"], True, "; ".join(detail))
+
+
+def _auto_fold(key, name, providers, strategies, auto):
+    """The providers merged onto the game's copy, highest priority first, and what the strategy could not carry over."""
+    strategy = strategies.get(name)
+    if strategy is None:
+        raise ConflictError(f"no merge strategy called {name!r}")
+    if auto is None:
+        raise ConflictError("the game's own copy is not available to merge against")
+    game = auto.game_copy(key)
+    blobs = [(provider.mod, provider.path.read_bytes()) for provider in reversed(providers)]
+    auto.check_inputs(key, blobs, game)
+    three_way = name in merge.NEEDS_VANILLA
+    path_notes: list = []
+    out = game
+    for step, (_mod, blob) in enumerate(blobs):
+        args = (out, blob, game) if three_way else (out, blob)
+        kwargs = {"notes": path_notes} if name in merge.NEEDS_NOTES else {}
+        # The game's copy leads the first step only; after it `out` is a merge of mods.
+        if step == 0 and name in merge.TAKES_GAME_BASE:
+            kwargs["base_is_game"] = True
+        out = strategy(*args, **kwargs)
+    auto.check_output(key, out, blobs, game)
+    return out, path_notes
+
+
+def _automatic(key, providers, strategies, auto, notes):
+    """A collision the profile declares nothing for: the same bytes, a merge, or the highest-priority mod's file."""
+    names = tuple(provider.mod for provider in providers)
+    winner = providers[-1]
+    if _identical(providers):
+        # One copy is enough, unless a mod's own spelling is about to be pruned: then the
+        # game's spelling needs a file of its own.
+        out = None if all(provider.rel == key for provider in providers) else winner.path
+        return out, Decision(key, IDENTICAL, names, None, None, False, "")
+    name = auto_strategy(key)
+    if name is None:
+        reason = "there is no way to merge this kind of file"
+    else:
+        try:
+            merged, path_notes = _auto_fold(key, name, providers, strategies, auto)
+        except Exception as exc:  # a mod's file can be malformed in any way; the reason goes in the warning
+            reason = str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
+        else:
+            if notes is not None:
+                notes.extend((key, note) for note in path_notes)
+            return merged, Decision(key, MERGED, names, None, name, False, "")
+    return winner.path, Decision(key, WINNER, names, winner.mod, name, False, reason)
+
 
 def plan(
     provided: dict[str, list[Provider]],
@@ -382,14 +565,17 @@ def plan(
     bases: dict[str, bytes] | None = None,
     notes: list | None = None,
     strategies: dict | None = None,
-) -> list[tuple[str, bytes]]:
-    """Every merge the profile declares, computed in memory: [(path, bytes)].
+    auto: AutoResolver | None = None,
+) -> Plan:
+    """Every colliding path resolved, computed in memory: the outputs to write and a Decision for each.
 
-    A path two mods provide with no declared merge is refused, since me3 would
-    load one and the other would silently not be in the game. `bases` maps a
-    path to bytes that lead the fold; with one, a single provider is a merge
-    too (the game's file on one side, the mod on the other). `notes` collects
-    what a strategy could not carry over cleanly, tagged with the path.
+    A path the profile declares a merge for is merged as declared. Any other
+    path two or more mods ship is merged automatically when the engine has a
+    strategy for it and the game's own copy to merge against, and goes whole to
+    the highest-priority mod otherwise. Nothing here refuses a launch because
+    mods collide. `bases` maps a path to bytes that lead a declared fold; with
+    one, a single provider is a merge too. `notes` collects what a strategy could
+    not carry over cleanly, tagged with the path.
     """
     strategies = merge.STRATEGIES if strategies is None else strategies
     installed = {contributor.mod for contributor in contributors}
@@ -401,60 +587,20 @@ def plan(
             gone = tuple(m for m in rule["mods"] if m in installed and m not in have)
             if gone:
                 notes.append((rel, merge.StaleContributor(rel, gone)))
-    planned = []
-    for rel, found in sorted(provided.items()):
-        providers = [provider.mod for provider in found]
-        if len(providers) < 2 and rel not in bases:
+    outputs: list = []
+    decisions: list[Decision] = []
+    for key, providers in sorted(provided.items()):
+        rule = declared.get(key)
+        if len(providers) < 2 and not (rule is not None and key in bases):
             continue
-        rule = declared.get(rel)
-        if rule is None:
-            raise ConflictError(
-                f"{rel} is provided by {', '.join(providers)}. me3 loads only one of them, so "
-                "the rest silently won't be in the game. Declare a [[merges]] entry for this "
-                "path, or drop one of the mods."
-            )
-        strategy = strategies.get(rule["strategy"])
-        if strategy is None:
-            raise ConflictError(
-                f"{rel}: unknown merge strategy {rule['strategy']!r} (known: {', '.join(sorted(strategies))})"
-            )
-        undeclared = set(providers) - set(rule["mods"])
-        if undeclared:
-            raise ConflictError(
-                f"{rel}: merge declares mods={sorted(rule['mods'])}, but the actual providers are "
-                f"{sorted(providers)}; {', '.join(sorted(undeclared))} also ship this path and "
-                "aren't declared. Update the [[merges]] entry to include them deliberately, or "
-                "drop the extra mod."
-            )
-        prefer = rule["prefer"]
-        if prefer not in providers:
-            raise ConflictError(
-                f"{rel}: merge names prefer={prefer!r}, but the actual providers are "
-                f"{', '.join(providers)}; prefer must be one of them"
-            )
-        # `prefer` wins genuine collisions, so it is the base the strategy builds on.
-        ordered = [prefer] + [m for m in providers if m != prefer]
-        files = {provider.mod: provider.path for provider in found}
-        blobs = [files[m].read_bytes() for m in ordered]
-        lead = bases.get(rel)
-        if lead is not None:
-            blobs = [lead] + blobs
-        vanilla = _load_vanilla(rel, rule, vanilla_loader) if rule["strategy"] in merge.NEEDS_VANILLA else None
-        path_notes = [] if rule["strategy"] in merge.NEEDS_NOTES else None
-        out = blobs[0]
-        for step, extra in enumerate(blobs[1:]):
-            args = (out, extra) if vanilla is None else (out, extra, vanilla)
-            kwargs = {"notes": path_notes} if path_notes is not None else {}
-            # Only the first step leads with the base the caller supplied; after
-            # it `out` is a merge of mods, and a strategy that treats its base as
-            # the game's file would read one mod's row as the game's.
-            if step == 0 and lead is not None and rule["strategy"] in merge.TAKES_GAME_BASE:
-                kwargs["base_is_game"] = True
-            out = strategy(*args, **kwargs)
-        planned.append((rel, out))
-        if notes is not None and path_notes:
-            notes.extend((rel, note) for note in path_notes)
-    return planned
+        if rule is not None:
+            out, decision = _declared(key, rule, providers, bases.get(key), vanilla_loader, strategies, notes)
+        else:
+            out, decision = _automatic(key, providers, strategies, auto, notes)
+        if out is not None:
+            outputs.append((key, out))
+        decisions.append(decision)
+    return Plan(outputs, decisions)
 
 
 # -- rebasing onto the installed game build -----------------------------------
@@ -468,15 +614,11 @@ class Rebase(NamedTuple):
 
 
 def rebase_bases(
-    game_dir, live, merges: list[dict], contributors: list[Contributor],
+    game_dir, live, merges: list[dict], provided: dict[str, list[Provider]],
     paths: state.InstancePaths, vanilla_loader: VanillaLoader,
 ) -> Rebase:
     """The per-path bases the merge should fold onto for the installed build."""
-    regulations = [
-        (c.mod, (c.source / REGULATION).read_bytes())
-        for c in contributors
-        if os.path.isfile(c.source / REGULATION)
-    ]
+    regulations = [(provider.mod, provider.path.read_bytes()) for provider in provided.get(REGULATION, ())]
     ancestor = declared_ancestor(merges, REGULATION, vanilla_loader) if len(regulations) > 1 else None
     rebased = heal.prepare_rebase(
         game_dir, live, ancestor, regulations, base=paths.baselines, cache_path=paths.regulation_cache
@@ -485,7 +627,7 @@ def rebase_bases(
     return Rebase(bases, bool(rebased), rebased.get(REGULATION), regulations)
 
 
-def verify_rebase(planned: list[tuple[str, bytes]], rebase: Rebase, live) -> None:
+def verify_rebase(planned: list, rebase: Rebase, live) -> None:
     """Prove a rebase did what it claims before anything is built from it.
 
     Both ways it can go wrong are invisible from outside: a merge that came out
@@ -500,6 +642,8 @@ def verify_rebase(planned: list[tuple[str, bytes]], rebase: Rebase, live) -> Non
             f"nothing merged {REGULATION}, but this run rebased it onto build {live.regulation}: "
             "the packages providing it changed underneath the merge; run it again"
         )
+    if isinstance(merged, Path):
+        merged = merged.read_bytes()  # a file that won whole is verified like merged bytes
     problems = heal.verify_rebase(merged, rebase.baseline, rebase.contributors, live)
     if problems:
         raise heal.HealError(
