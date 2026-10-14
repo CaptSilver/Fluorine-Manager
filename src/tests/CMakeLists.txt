@@ -1485,3 +1485,7 @@ add_test(
     NAME test_eldenring_merge_engine
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_merge_engine.py
 )
+add_test(
+    NAME test_eldenring_views
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_views.py
+)
