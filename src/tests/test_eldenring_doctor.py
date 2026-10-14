@@ -156,6 +156,75 @@ class SpawnerTests(DoctorCase):
         found = doctor.spawners_in([("one", mod), ("two", other), ("three", self.tmp / "gone")])
         self.assertEqual(found, [("one", "mods/Glorious_Merchant.DLL"), ("two", "erdtools.dll")])
 
+class RuntimeNoiseTests(unittest.TestCase):
+    def test_every_shape_the_runtime_writes_is_noise_whatever_its_case(self) -> None:
+        for rel in (
+            "vkd3d-proton.cache",
+            "vkd3d-proton.cache.write",
+            "eldenring_2026-10-14.dmp",
+            "ReShade.log",
+            "ELDENRING.LOG",
+            "sd/crash.dmp",
+            "SeamlessCoop/crashdumps/x.bin",
+            "seamlesscoop/CrashDumps/sub/y.dll",
+        ):
+            with self.subTest(rel):
+                self.assertTrue(doctor.is_noise(rel))
+
+    def test_nothing_under_mods_is_noise(self) -> None:
+        for rel in ("mods/logs/x.log", "Mods/x.dmp", "mods/Foo/log.txt"):
+            with self.subTest(rel):
+                self.assertFalse(doctor.is_noise(rel))
+
+    def test_programs_data_and_the_crashdumps_folder_itself_are_not_noise(self) -> None:
+        for rel in ("steam_api64.dll", "dinput8.dll", "regulation.bin", "SeamlessCoop/ersc.dll", "SeamlessCoop/crashdumps", ""):
+            with self.subTest(rel):
+                self.assertFalse(doctor.is_noise(rel))
+
+    def test_the_list_is_the_documented_one(self) -> None:
+        self.assertEqual(
+            doctor.RUNTIME_NOISE,
+            ("vkd3d-proton.cache", "vkd3d-proton.cache.write", "*.dmp", "*.log", "SeamlessCoop/crashdumps/**"),
+        )
+
+
+class ScanEdgeTests(DoctorCase):
+    def test_a_differently_spelled_dxgi_beside_reshades_link_is_still_reported(self) -> None:
+        reshade = self.tmp / "reshade/ReShade64.dll"
+        reshade.parent.mkdir()
+        reshade.write_bytes(b"x")
+        (self.game / "dxgi.dll").symlink_to(reshade)
+        self.put("Dxgi.dll")
+        self.assertEqual(self.names(), ["Dxgi.dll"])
+
+    def test_a_link_inside_seamlesscoop_is_an_install_whatever_it_is_called(self) -> None:
+        (self.game / "SeamlessCoop/crashdumps").mkdir(parents=True)
+        (self.game / "SeamlessCoop/crashdumps/x.dmp").symlink_to(self.tmp / "elsewhere.dll")
+        self.assertEqual(self.names(), ["SeamlessCoop"])
+
+    def test_a_linked_folder_inside_seamlesscoop_is_an_install(self) -> None:
+        target = self.tmp / "elsewhere"
+        target.mkdir()
+        (self.game / "SeamlessCoop").mkdir()
+        (self.game / "SeamlessCoop/locale").symlink_to(target)
+        self.assertEqual(self.names(), ["SeamlessCoop"])
+
+    def test_a_mod_folder_that_cannot_be_read_is_reported_by_the_spawner_search(self) -> None:
+        mod = self.tmp / "mod"
+        mod.mkdir()
+
+        def deny(folder, onerror=None):
+            onerror(PermissionError(13, "denied", str(folder)))
+            return iter(())
+
+        unreadable: list[str] = []
+        with mock.patch.object(doctor.os, "walk", deny):
+            found = doctor.spawners_in([("mod one", mod)], unreadable)
+        self.assertEqual(found, [])
+        self.assertEqual(len(unreadable), 1)
+        self.assertIn("mod one", unreadable[0])
+        self.assertIn(str(mod), unreadable[0])
+
 
 if __name__ == "__main__":
     unittest.main()
