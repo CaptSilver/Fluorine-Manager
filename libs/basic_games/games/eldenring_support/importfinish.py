@@ -499,6 +499,7 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
     )
     moved_now = None
     left_in_game = True
+    option_clear = False
     if saved:
         cleaned, moved = clean_game(organizer, installed, paths, host, ui, report, stamp)
     else:
@@ -511,10 +512,9 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
             moved = bool(importgame.quarantined(paths, found.gone))
             left_in_game = bool(found.moves() or found.carries)
             if moved and not left_in_game:
-                report.warn(
-                    "erm's files were moved out of Game/ earlier, while ER0000.sl2 was not settled. Steam's "
-                    "launch option is not looked at until it is."
-                )
+                report.warn("erm's files were moved out of Game/ earlier, while ER0000.sl2 was not settled.")
+                readable, found_options = host.launch_options()
+                option_clear = readable and not found_options
             else:
                 report.warn(
                     "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam "
@@ -532,16 +532,16 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
         option = launch_option_cleared(host, ui, report)
     else:
         report.info(
-            "Steam's launch option was not looked at: it stays as it is until ER0000.sl2 is settled and Game/ is "
-            "recorded as vanilla. Clearing it lets a Steam Play start the game under Easy Anti-Cheat, which must "
-            "not happen with erm's files still in Game/."
+            "Steam's launch option was not asked about: it is only asked about once ER0000.sl2 is settled and Game/ is recorded as "
+            "vanilla. Clearing it lets a Steam Play start the game under Easy Anti-Cheat, which must not "
+            "happen while erm's files could still load."
         )
-    if (cleaned or moved) and not option:
+    if (cleaned or moved) and not option and not option_clear:
         report.warn(
             "Do not press Play in Steam until the launch option is cleared: it starts me3 with erm's mods and "
             "without Seamless Co-op, into ER0000.sl2."
         )
-    if option and not saved:
+    if (option or option_clear) and not saved:
         report.warn(
             "The launch option is cleared while ER0000.sl2 is not settled. Do not press Play in Steam until it is: "
             "a Steam Play starts the game under Easy Anti-Cheat with that save."

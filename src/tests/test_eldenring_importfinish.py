@@ -800,7 +800,7 @@ class LaunchOptionOrderTests(FinishCase):
         self.assertIsNone(self.done())
         self.assertEqual(importsave.unreviewed(self.organizer), "20261014T010203000001Z")
         self.assertIn("ER0000.sl2 is still unreviewed", report.text())
-        self.assertIn("launch option was not looked at", report.text())
+        self.assertIn("launch option was not asked about", report.text())
         self.assertIn("erm's files stay in Game/ until ER0000.sl2 is settled", report.text())
         # Steam is closed on the next run: the question resumes, the save goes, the option is asked about
         self.steam_up = False
@@ -945,7 +945,7 @@ class MoveAnywayTests(OverrideCase):
         report = self.finish()
         self.assertFalse(self.erm_files_left())
         self.assertNotIn("launch-option", self.script.kinds_shown())
-        self.assertIn("Steam's launch option was not looked at", report.text())
+        self.assertIn("Steam's launch option was not asked about", report.text())
         self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
         self.assertIsNone(self.done())
 
@@ -976,6 +976,7 @@ class MoveAnywayTests(OverrideCase):
 
     def test_running_again_after_a_move_without_the_check_still_warns_against_play(self) -> None:
         self.script.anyway = importfinish.MOVE_ONLY
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
         self.finish("20260101-000000")
         report = self.finish()
         text = report.text()
@@ -997,8 +998,19 @@ class MoveAnywayTests(OverrideCase):
         self.assertIn("moved out of Game/ earlier", text)
         self.assertNotIn("erm's files stay in Game/", text)
         self.assertNotIn("erm's files are still in Game/", text)
-        self.assertIn("Do not press Play in Steam until", text)
+        self.assertIn("The launch option is cleared while ER0000.sl2 is not settled", text)
+        self.assertNotIn("it starts me3 with erm's mods", text)
+        self.assertNotIn("stays as it is", text)
+        self.assertNotIn("is not looked at until", text)
+        self.assertNotIn("still in Game/", text)
         self.assertIsNone(self.done())
+
+    def test_running_again_after_a_move_with_the_option_already_empty_says_it_is_cleared(self) -> None:
+        self.script.anyway = importfinish.MOVE_ONLY
+        self.finish("20260101-000000")
+        text = self.finish().text()
+        self.assertIn("The launch option is cleared while ER0000.sl2 is not settled", text)
+        self.assertNotIn("Do not press Play in Steam until the launch option is cleared", text)
 
     def test_declining_the_move_list_after_choosing_to_move_changes_nothing(self) -> None:
         self.script.accept = False
