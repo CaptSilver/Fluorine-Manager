@@ -279,8 +279,14 @@ class SessionCheckTests(GateCase):
         self.assertTrue(self.launch())
 
     def test_a_pending_restore_blocks_the_launch(self) -> None:
+        sentinel = {
+            "stamp": "20261013T120000000001Z", "save_dir": str(self.save_dir),
+            "snapshot_dir": str(self.paths.save_snapshots / "20261013T120000000001Z"),
+            "files": {name: None for name in saves.GUARDED}, "swept": None,
+        }
         session.save_last_launch(
-            self.paths, {"pending_restore": {"reason": "game-running", "changed": ["ER0000.sl2"]}}
+            self.paths,
+            {"pending_restore": {"reason": "game-running", "sentinel": sentinel, "changed": ["ER0000.sl2"]}},
         )
         self.assertFalse(self.launch())
         self.assert_vetoed(gate.SAVE_RESTORE_PENDING, "ER0000.sl2", "Save tools")
@@ -298,6 +304,68 @@ class SessionCheckTests(GateCase):
         self.assertIn("still running", texts["game-running"])
         self.assertIn("Steam Play in between", texts["unseen-session"])
         self.assertIn("disk full", texts["restore-failed"])
+
+
+class RecordShapeTests(GateCase):
+    """A record that parses but lacks what the restore indexes is a damaged record."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.assertTrue(self.launch())
+        self.gate.finished(str(self.binary), 0)
+        self.append("ER0000.sl2")
+        self.written = (self.save_dir / "ER0000.sl2").read_bytes()
+        self.vetoes.clear()
+        self.good = self.last_launch()
+
+    def damage(self, mutate) -> str:
+        data = json.loads(json.dumps(self.good))
+        data["sentinel"]["swept"] = None
+        data["pending_restore"] = {
+            "reason": "game-running", "sentinel": data["sentinel"], "changed": ["ER0000.sl2"]}
+        mutate(data)
+        text = json.dumps(data)
+        self.paths.last_launch.write_text(text)
+        return text
+
+    def assert_refused_and_untouched(self, text: str) -> None:
+        self.assertFalse(self.new_gate().run(str(self.binary), str(self.paths.root), self.args))
+        self.assert_vetoed(None, "Last launch record", recorded=False)
+        self.assertEqual(self.paths.last_launch.read_text(), text)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), self.written)
+        self.assertFalse((self.paths.save_backups / "quarantine").exists())
+
+    def test_a_sentinel_missing_a_guarded_name_never_reads_as_absent(self) -> None:
+        text = self.damage(lambda d: d["sentinel"]["files"].pop("ER0000.sl2"))
+        self.assert_refused_and_untouched(text)
+
+    def test_files_as_a_list_is_refused(self) -> None:
+        text = self.damage(lambda d: d["sentinel"].update(files=[]))
+        self.assert_refused_and_untouched(text)
+
+    def test_pending_restore_as_a_string_is_refused(self) -> None:
+        text = self.damage(lambda d: d.update(pending_restore="yes"))
+        self.assert_refused_and_untouched(text)
+
+    def test_an_entry_missing_its_hash_is_refused(self) -> None:
+        text = self.damage(lambda d: d["sentinel"]["files"]["ER0000.sl2"].pop("sha256"))
+        self.assert_refused_and_untouched(text)
+
+    def test_the_startup_check_logs_it_and_moves_nothing(self) -> None:
+        text = self.damage(lambda d: d["sentinel"]["files"].pop("ER0000.sl2"))
+        self.assertIsNone(self.new_gate().sweep_stale())
+        self.assertEqual(self.paths.last_launch.read_text(), text)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), self.written)
+
+    def test_the_post_session_sweep_does_not_run_on_it(self) -> None:
+        text = self.damage(lambda d: d["sentinel"]["files"].pop("ER0000.sl2"))
+        gate_ = self.new_gate()
+        gate_._session_stamp = self.good["sentinel"]["stamp"]
+        gate_.finished(str(self.binary), 0)
+        self.assertEqual(self.paths.last_launch.read_text(), text)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), self.written)
+        self.assertEqual(len(self.modals), 1)
 
 
 class WholeBodyTests(GateCase):
@@ -334,6 +402,21 @@ class WholeBodyTests(GateCase):
 
         self.assertTrue(self.gate.run("/usr/bin/xterm", Broken(), ""))
         self.assertEqual(self.vetoes, [])
+
+    def test_an_unexpected_failure_is_recorded_for_the_diagnose_pass(self) -> None:
+        with mock.patch.object(gate.LaunchGate, "_mode", side_effect=RuntimeError("boom")):
+            self.assertFalse(self.launch())
+        report = self.last_launch()["report"]
+        self.assertEqual(report["outcome"], "vetoed")
+        self.assertIsNone(report["key"])
+        self.assertEqual(report["step"], "Unexpected failure")
+        self.assertIn("RuntimeError: boom", report["text"])
+
+    def test_an_unexpected_failure_whose_record_cannot_be_written_is_still_a_veto(self) -> None:
+        with mock.patch.object(gate.LaunchGate, "_mode", side_effect=RuntimeError("boom")), \
+                mock.patch.object(gate.session, "save_last_launch", side_effect=RuntimeError("deep")):
+            self.assertFalse(self.launch())
+        self.assertIn("RuntimeError: boom", self.last_veto())
 
     def test_a_dialog_that_raises_does_not_escape(self) -> None:
         def broken(title, text):

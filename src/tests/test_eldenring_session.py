@@ -105,6 +105,91 @@ class LastLaunchTests(SessionCase):
             session.load_last_launch(self.paths)
 
 
+class RecordShapeTests(SessionCase):
+    """A record that parses but cannot be acted on is damaged, not empty."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_saves()
+        self.record = self.sentinel()
+
+    def damaged(self, mutate, expected: str = "") -> None:
+        record = json.loads(json.dumps(self.record))
+        data = {"sentinel": record, "pending_restore": {
+            "reason": "game-running", "sentinel": record, "changed": ["ER0000.sl2"]}}
+        mutate(data)
+        session.save_last_launch(self.paths, data)
+        with self.assertRaises(session.LaunchStateError) as caught:
+            session.load_last_launch(self.paths)
+        self.assertIn(str(self.paths.last_launch), str(caught.exception))
+        self.assertIn(expected, str(caught.exception))
+
+    def test_a_whole_record_loads(self) -> None:
+        self.pend(self.record)
+        self.assertIn("pending_restore", session.load_last_launch(self.paths))
+
+    def test_a_sentinel_missing_a_guarded_name_is_damaged(self) -> None:
+        self.damaged(lambda d: d["sentinel"]["files"].pop("ER0000.sl2.bak"), "ER0000.sl2.bak")
+
+    def test_files_that_is_not_a_dict_is_damaged(self) -> None:
+        self.damaged(lambda d: d["sentinel"].update(files=[]), "files")
+
+    def test_a_sentinel_that_is_not_a_dict_is_damaged(self) -> None:
+        self.damaged(lambda d: d.update(sentinel="x"), "sentinel")
+
+    def test_pending_restore_that_is_not_a_dict_is_damaged(self) -> None:
+        self.damaged(lambda d: d.update(pending_restore="yes"), "pending_restore")
+
+    def test_pending_restore_without_a_valid_sentinel_is_damaged(self) -> None:
+        self.damaged(lambda d: d["pending_restore"].pop("sentinel"), "pending_restore")
+
+    def test_an_entry_missing_its_hash_is_damaged(self) -> None:
+        self.damaged(lambda d: d["sentinel"]["files"]["ER0000.sl2"].pop("sha256"), "ER0000.sl2")
+
+    def test_an_entry_with_a_wrongly_typed_field_is_damaged(self) -> None:
+        for field, value in (("size", "5"), ("mtime_ns", 1.5), ("sha256", 7), ("size", True)):
+            with self.subTest(field=field, value=value):
+                self.damaged(lambda d: d["sentinel"]["files"]["ER0000.sl2"].update({field: value}))
+
+    def test_an_entry_that_is_neither_null_nor_a_dict_is_damaged(self) -> None:
+        self.damaged(lambda d: d["sentinel"]["files"].update({"ER0000.sl2": "gone"}))
+
+    def test_null_entries_and_a_null_or_absent_pending_restore_are_whole(self) -> None:
+        bare = {"stamp": STAMP, "save_dir": str(self.save_dir), "snapshot_dir": "x",
+                "files": {"ER0000.sl2": None, "ER0000.sl2.bak": None}, "swept": None}
+        for pending in ({}, {"pending_restore": None}):
+            session.save_last_launch(self.paths, {"sentinel": bare, **pending})
+            self.assertEqual(session.load_last_launch(self.paths)["sentinel"], bare)
+
+    def test_a_record_with_no_sentinel_is_whole(self) -> None:
+        session.save_last_launch(self.paths, {"report": {"outcome": "vetoed"}})
+        self.assertEqual(session.load_last_launch(self.paths), {"report": {"outcome": "vetoed"}})
+
+    def test_a_restore_from_a_damaged_record_moves_nothing(self) -> None:
+        self.pend(self.record)
+        (self.save_dir / "ER0000.sl2").write_bytes(b"session")
+        data = json.loads(self.paths.last_launch.read_text())
+        del data["pending_restore"]["sentinel"]["files"]["ER0000.sl2"]
+        self.paths.last_launch.write_text(json.dumps(data))
+        with self.assertRaises(session.LaunchStateError):
+            session.restore_pending(self.paths, running=lambda: [])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"session")
+        self.assertEqual(self.quarantined(), [])
+
+    def test_comparing_a_sentinel_with_a_missing_name_raises_instead_of_reading_as_absent(self) -> None:
+        del self.record["files"]["ER0000.sl2"]
+        with self.assertRaises(KeyError):
+            session.compare_sentinel(self.record)
+
+    def test_restoring_a_sentinel_with_a_missing_name_raises_before_anything_moves(self) -> None:
+        (self.save_dir / "ER0000.sl2.bak").write_bytes(b"session")
+        del self.record["files"]["ER0000.sl2"]
+        with self.assertRaises(KeyError):
+            session.restore_changed(self.paths, self.record)
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), b"session")
+        self.assertEqual(self.quarantined(), [])
+
+
 class StampTests(unittest.TestCase):
     def test_a_stamp_is_digits_with_microseconds(self) -> None:
         self.assertRegex(session.now_stamp(), r"^\d{8}T\d{12}Z$")
@@ -352,7 +437,10 @@ class PruneTests(SessionCase):
         self.assertEqual(self.left(), [stamps[0], *stamps[-2:]])
 
     def sentinel_for(self, name: str) -> dict:
-        return {"stamp": name, "snapshot_dir": str(self.paths.save_snapshots / name), "files": {}}
+        return {
+            "stamp": name, "snapshot_dir": str(self.paths.save_snapshots / name),
+            "save_dir": str(self.save_dir), "files": {n: None for n in session.saves.GUARDED},
+        }
 
     def test_the_live_sentinels_snapshot_stays(self) -> None:
         stamps = [f"2026010{n}T000000000000Z" for n in range(1, 6)]

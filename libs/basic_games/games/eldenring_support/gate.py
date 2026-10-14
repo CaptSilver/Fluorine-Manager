@@ -153,11 +153,10 @@ class LaunchGate:
         except Exception:
             detail = traceback.format_exc()
             self._warn(f"Elden Ring launch gate: unexpected failure\n{detail}")
+            text = "The launch gate failed unexpectedly, so nothing was launched.\n\n" + detail
+            self._record_veto(None, "Unexpected failure", text)
             with contextlib.suppress(Exception):
-                self._show_veto(
-                    TITLE,
-                    "The launch gate failed unexpectedly, so nothing was launched.\n\n" + detail,
-                )
+                self._show_veto(TITLE, text)
             return False
 
     def _mode(self, binary: str) -> str:
@@ -388,6 +387,11 @@ class LaunchGate:
         return saves.library_root(self._game.gameDirectory().absolutePath())
 
     def _report_veto(self, veto: _Veto) -> None:
+        self._record_veto(veto.key, veto.step, veto.text())
+        with contextlib.suppress(Exception):
+            self._show_veto(TITLE, veto.text())
+
+    def _record_veto(self, key: str | None, step: str, text: str) -> None:
         # The record is for the diagnose pass; failing to write it must not stop
         # the dialog or let an exception out of run(). A damaged record is the
         # expected case (OSError, ErmError); anything else is logged.
@@ -397,9 +401,9 @@ class LaunchGate:
             data["report"] = {
                 "outcome": "vetoed",
                 "time": datetime.now(timezone.utc).isoformat(),
-                "key": veto.key,
-                "step": veto.step,
-                "text": veto.text(),
+                "key": key,
+                "step": step,
+                "text": text,
             }
             session.save_last_launch(paths, data)
         except (OSError, ErmError):
@@ -409,8 +413,6 @@ class LaunchGate:
                 self._warn(
                     "Elden Ring launch gate: could not record the veto\n" + traceback.format_exc()
                 )
-        with contextlib.suppress(Exception):
-            self._show_veto(TITLE, veto.text())
 
     def _current_save_dir(self) -> Path:
         return saves.save_dir(self._library())

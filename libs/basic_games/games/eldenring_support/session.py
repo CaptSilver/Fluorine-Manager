@@ -70,7 +70,9 @@ def load_last_launch(paths: state.InstancePaths) -> dict:
 
     This is not a cache. It remembers a save the plugin may still owe a
     restore for, so a file that is damaged raises LaunchStateError, which
-    stops the launch, instead of reading as "nothing pending".
+    stops the launch, instead of reading as "nothing pending". Damaged
+    includes valid JSON of the wrong shape: a sentinel with no entry for a
+    guarded name, `files` that is not an object, an entry without its hash.
     """
     try:
         text = paths.last_launch.read_text(encoding="utf-8")
@@ -84,7 +86,58 @@ def load_last_launch(paths: state.InstancePaths) -> dict:
         raise LaunchStateError(f"{paths.last_launch} is damaged: {exc}") from exc
     if not isinstance(data, dict):
         raise LaunchStateError(f"{paths.last_launch} does not hold a JSON object")
+    try:
+        _check_shape(data)
+    except LaunchStateError as exc:
+        raise LaunchStateError(f"{paths.last_launch} is damaged: {exc}") from None
     return data
+
+
+def _check_shape(data: dict) -> None:
+    """Raise LaunchStateError unless what the sweep and the restore index is there.
+
+    A sentinel without a guarded name would otherwise read as "that file was
+    not there before the launch", and the restore would quarantine a real save
+    and put nothing back.
+    """
+    if "sentinel" in data:
+        _check_sentinel(data["sentinel"], "sentinel")
+    pending = data.get("pending_restore")
+    if pending is None:
+        return
+    if not isinstance(pending, dict):
+        raise LaunchStateError("pending_restore is not an object")
+    _check_sentinel(pending.get("sentinel"), "pending_restore.sentinel")
+    changed = pending.get("changed", [])
+    if not isinstance(changed, list) or not all(isinstance(n, str) for n in changed):
+        raise LaunchStateError("pending_restore.changed is not a list of names")
+    if not isinstance(pending.get("reason", ""), str):
+        raise LaunchStateError("pending_restore.reason is not text")
+
+
+def _check_sentinel(sentinel: object, where: str) -> None:
+    if not isinstance(sentinel, dict):
+        raise LaunchStateError(f"{where} is not an object")
+    for key in ("save_dir", "snapshot_dir"):
+        if not isinstance(sentinel.get(key), str):
+            raise LaunchStateError(f"{where}.{key} is not a path")
+    if sentinel.get("swept") is not None and not isinstance(sentinel["swept"], dict):
+        raise LaunchStateError(f"{where}.swept is not an object")
+    files = sentinel.get("files")
+    if not isinstance(files, dict):
+        raise LaunchStateError(f"{where}.files is not an object")
+    for name in saves.GUARDED:
+        if name not in files:
+            raise LaunchStateError(f"{where}.files has no entry for {name}")
+        entry = files[name]
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            raise LaunchStateError(f"{where}.files[{name}] is neither null nor an object")
+        for field, kind in (("size", int), ("mtime_ns", int), ("sha256", str)):
+            value = entry.get(field)
+            if not isinstance(value, kind) or isinstance(value, bool):
+                raise LaunchStateError(f"{where}.files[{name}].{field} is missing or the wrong type")
 
 
 def save_last_launch(paths: state.InstancePaths, data: dict) -> None:
@@ -136,7 +189,7 @@ def compare_sentinel(sentinel: dict) -> tuple[list[str], dict]:
     changed: list[str] = []
     kept: dict = {}
     for name in saves.GUARDED:
-        differs, entry = check_file(sentinel["files"].get(name), save_dir / name)
+        differs, entry = check_file(sentinel["files"][name], save_dir / name)
         if differs:
             changed.append(name)
         kept[name] = entry
@@ -264,7 +317,7 @@ def restore_changed(paths: state.InstancePaths, sentinel: dict, stamp: str | Non
     snapshot_dir = Path(sentinel["snapshot_dir"])
     work: list[tuple[str, dict | None, bytes | None]] = []
     for name in saves.GUARDED:
-        recorded = sentinel["files"].get(name)
+        recorded = sentinel["files"][name]
         differs, _ = check_file(recorded, save_dir / name)
         if not differs:
             continue
