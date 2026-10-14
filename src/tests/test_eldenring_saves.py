@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import types
 import unittest
@@ -13,6 +14,9 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_saves_tests")
 saves = support.module(PACKAGE, "saves")
 errors = support.module(PACKAGE, "ermlib.errors")
+
+sys.path.insert(0, str(support.ROOT / "src/tests/eldenring"))
+from tests.build_fixtures import build_bnd4  # noqa: E402  (needs the aliased ermlib)
 
 STEAM_ID = "76561198000000000"
 SAVE_FOLDER = "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing"
@@ -726,6 +730,49 @@ class MoveToModdedTests(SaveFolderCase):
             with self.assertRaises(errors.ErmError):
                 self.move(self.folder / "ER0000.sl2")
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
+
+
+class AuditTextTests(SaveFolderCase):
+    def container(self, **kwargs) -> bytes:
+        # Twelve entries is the shape of a save; the bodies are too short to hold a
+        # character list, which the audit reports as a finding of its own.
+        return build_bnd4([b"body %d" % i for i in range(12)], **kwargs)
+
+    def test_findings_are_listed_with_their_weight_and_the_caveat_closes_the_text(self) -> None:
+        path = self.write("ER0000.co2", self.container(break_md5=(3,)))
+        text = saves.audit_text(path)
+        self.assertTrue(text.startswith("ER0000.co2\n"))
+        self.assertIn("[decisive] slot 3: entry USER_DATA003 MD5 mismatch", text)
+        self.assertIn("[decisive] character list unreadable", text)
+        self.assertTrue(text.endswith(saves.audit.CAVEAT))
+        self.assertIn("CANNOT certify", text)
+
+    def test_a_save_with_no_findings_still_carries_the_caveat(self) -> None:
+        path = self.write("ER0000.co2", self.container())
+        with mock.patch.object(saves.audit, "audit_save", return_value=saves.audit.AuditResult([])):
+            text = saves.audit_text(path)
+        self.assertIn("The audit found nothing.", text)
+        self.assertTrue(text.endswith(saves.audit.CAVEAT))
+
+    def test_a_file_that_is_not_a_save_is_an_error_with_the_audits_own_words(self) -> None:
+        with self.assertRaises(errors.ErmError) as caught:
+            saves.audit_text(self.write("ER0000.co2", b"nope"))
+        self.assertIn("not a BND4", str(caught.exception))
+
+    def test_a_save_that_is_cut_short_is_an_error_not_a_crash(self) -> None:
+        with self.assertRaises(errors.ErmError):
+            saves.audit_text(self.write("ER0000.co2", self.container()[:100]))
+
+    def test_a_file_that_cannot_be_read_is_an_error_naming_it(self) -> None:
+        with self.assertRaises(errors.ErmError) as caught:
+            saves.audit_text(self.folder / "ER0000.co2")
+        self.assertIn("ER0000.co2", str(caught.exception))
+
+    def test_the_audit_leaves_the_file_as_it_was(self) -> None:
+        path = self.write("ER0000.co2", self.container())
+        before = path.read_bytes()
+        saves.audit_text(path)
+        self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":

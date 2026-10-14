@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Callable
 
 from . import atomic, procs
-from .ermlib import github, paths
+from .ermlib import audit, github, paths
 from .ermlib import saves as ermsaves
 from .ermlib import steam
 from .ermlib.errors import ErmError, PathError, SafetyError
+from .ermlib.savefile import SaveFile
 
 _SAVE_FOLDER = "pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing"
 
@@ -391,3 +392,29 @@ def move_to_modded(
     except OSError as exc:
         raise ErmError(f"cannot move {source} to {destination}: {exc}") from exc
     return Placed(destination, safety)
+
+
+# -- looking at a save ------------------------------------------------------------
+
+
+def audit_text(path) -> str:
+    """What the audit finds in the save at `path`, ending with the caveat.
+
+    The audit can flag the marks careless tampering leaves. It cannot prove a
+    save clean, and the text says so every time. A file that is not an Elden
+    Ring PC save raises the audit's own NotAnEldenRingSave, which is an ErmError.
+    """
+    path = Path(path)
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise ErmError(f"cannot read {path}: {exc}") from exc
+    result = audit.audit_save(SaveFile.from_bytes(data))
+    lines = [path.name, ""]
+    if not result.findings:
+        lines.append("The audit found nothing.")
+    for finding in result.findings:
+        where = f"slot {finding.slot}: " if finding.slot is not None else ""
+        lines.append(f"[{finding.severity}] {where}{finding.message}")
+    lines += ["", result.caveat]
+    return "\n".join(lines)
