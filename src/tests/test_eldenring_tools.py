@@ -113,6 +113,7 @@ gate = support.module(PACKAGE, "gate")
 hardening = support.module(PACKAGE, "hardening")
 problems = support.module(PACKAGE, "problems")
 importer = support.module(PACKAGE, "importer")
+importsave = support.module(PACKAGE, "importsave")
 kinds = support.module(PACKAGE, "kinds")
 errors = support.module(PACKAGE, "ermlib.errors")
 session = support.module(PACKAGE, "session")
@@ -250,7 +251,12 @@ class SaveToolsCase(ToolCase):
         super().setUp()
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.organizer = SimpleNamespace(basePath=lambda: str(self.tmp / "instance"))
+        self.persist: dict = {}
+        self.organizer = SimpleNamespace(
+            basePath=lambda: str(self.tmp / "instance"),
+            persistent=lambda plugin, key, default=None: self.persist.get((plugin, key), default),
+            setPersistent=lambda plugin, key, value, sync=True: self.persist.__setitem__((plugin, key), value),
+        )
         self.paths = state.InstancePaths(self.organizer)
         self.save_dir = self.tmp / "saves/1"
         self.save_dir.mkdir(parents=True)
@@ -842,6 +848,169 @@ class MarkReviewedToolTests(SaveToolsMenuCase):
         with self.menu(tools.REVIEWED):
             self.tool.display()
         self.assertIn("sentinel_tripped", session.load_last_launch(self.paths))
+
+
+class ErmImportFlagToolTests(SaveToolsMenuCase):
+    def raise_the_flag(self) -> None:
+        self.persist[(kinds.PLUGIN, "save_unreviewed")] = STAMP
+
+    def raised(self) -> bool:
+        return bool(self.persist.get((kinds.PLUGIN, "save_unreviewed")))
+
+    def decision(self) -> str:
+        return self.persist.get((kinds.PLUGIN, "erm_import_save"), "")
+
+    def test_the_review_choice_is_offered_while_only_the_flag_is_up(self) -> None:
+        self.raise_the_flag()
+        with self.menu(None) as menu:
+            self.tool.display()
+        self.assertEqual(menu.call_args.args[3][-1], tools.REVIEWED)
+
+    def test_quarantining_steams_save_settles_the_import_question(self) -> None:
+        self.raise_the_flag()
+        with self.menu(tools.QUARANTINE):
+            self.tool.display()
+        self.assertFalse(self.raised())
+        self.assertEqual(self.decision(), "quarantine")
+        self.assertIn("erm import's question about ER0000.sl2 is settled", SHOWN[-1][2])
+
+    def test_moving_steams_save_to_the_modded_name_settles_it(self) -> None:
+        self.raise_the_flag()
+        with self.menu([tools.TO_MODDED, "ER0000.sl2 in the Steam folder"]):
+            self.tool.display()
+        self.assertFalse(self.raised())
+        self.assertEqual(self.decision(), "modded")
+
+    def test_moving_a_sessions_copy_does_not_settle_the_question_about_steams_save(self) -> None:
+        self.raise_the_flag()
+        name = f"quarantine/ER0000.sl2.{STAMP}-modded-session"
+        self.put_backup(name, b"the session's character")
+        with self.menu([tools.TO_MODDED, f"{name}  (what a modded session wrote)"]):
+            self.tool.display()
+        self.assertTrue(self.raised())
+        self.assertEqual(self.decision(), "")
+
+    def test_a_refused_quarantine_leaves_the_flag_up(self) -> None:
+        self.raise_the_flag()
+        with self.menu(tools.QUARANTINE), mock.patch.object(tools.saves.steam, "steam_running", return_value=True):
+            self.tool.display()
+        self.assertTrue(self.raised())
+
+    def review_with(self, picks, clean: bool = True):
+        """The Save tools' review with the answer and the action picked in turn; the audit's verdict is set."""
+        text = "ER0000.sl2\n\nThe audit found nothing." if clean else "ER0000.sl2\n\n[high] a finding"
+        audited = saves.Audited(clean, text)
+        with self.menu(tools.REVIEWED), mock.patch.object(tools, "_choose", side_effect=list(picks)) as choose, \
+                mock.patch.object(tools.saves, "audit_file", return_value=audited):
+            self.tool.display()
+        return choose
+
+    def files(self) -> list:
+        return sorted((p.name, p.read_bytes()) for p in self.save_dir.iterdir())
+
+    def test_keeping_the_save_after_no_and_a_clean_audit_clears_the_flag_and_records_it(self) -> None:
+        self.raise_the_flag()
+        before = self.files()
+        choose = self.review_with([1, 2])  # "No, it never did", then "Keep it as vanilla"
+        self.assertIn("without Seamless Co-op", choose.call_args_list[0].args[2])
+        self.assertFalse(self.raised())
+        self.assertEqual(self.decision(), "keep:no:clean")
+        self.assertEqual(self.files(), before)
+
+    def test_an_audit_finding_leaves_the_flag_up_when_the_save_is_kept(self) -> None:
+        self.raise_the_flag()
+        before = self.files()
+        self.review_with([1, 2], clean=False)
+        self.assertTrue(self.raised())
+        self.assertEqual(self.decision(), "")
+        self.assertEqual(self.files(), before)
+        self.assertIn("was not kept as vanilla", SHOWN[-1][2])
+
+    def test_a_yes_or_dont_know_answer_cannot_keep_the_save(self) -> None:
+        for answer in (0, 2):
+            with self.subTest(answer=answer):
+                self.raise_the_flag()
+                self.review_with([answer, 2])
+                self.assertTrue(self.raised())
+                self.assertEqual(self.decision(), "")
+
+    def test_cancelling_either_question_keeps_the_flag(self) -> None:
+        for picks in ([None], [1, None]):
+            with self.subTest(picks=picks):
+                self.raise_the_flag()
+                self.review_with(picks)
+                self.assertTrue(self.raised())
+                self.assertEqual(self.decision(), "")
+
+    def test_the_review_can_quarantine_the_save_through_the_imports_own_path(self) -> None:
+        self.raise_the_flag()
+        self.review_with([0, 0])  # "Yes, it did", then "Quarantine ER0000.sl2"
+        self.assertFalse(self.raised())
+        self.assertEqual(self.decision(), "quarantine:yes:clean")
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+
+    def test_the_review_is_refused_while_a_restore_is_pending(self) -> None:
+        self.raise_the_flag()
+        self.pend()
+        with self.choose(2) as choose, self.menu(tools.REVIEWED):
+            self.tool.display()
+        self.assertEqual(choose.call_count, 1)  # only the snapshot choice: no question about the save was asked
+        self.assertTrue(self.raised())
+        self.assertIn("restore of the pre-session snapshot is pending", SHOWN[-1][2])
+
+    def test_the_review_works_when_last_launch_json_is_damaged(self) -> None:
+        self.raise_the_flag()
+        self.paths.root.mkdir(parents=True, exist_ok=True)
+        self.paths.last_launch.write_text("{nope")
+        self.review_with([1, 2])
+        self.assertFalse(self.raised())
+
+    def test_the_other_note_is_asked_about_separately_and_a_failure_clearing_it_is_reported(self) -> None:
+        self.raise_the_flag()
+        self.note_a_tripped_session()
+        with mock.patch.object(tools.session, "clear_tripped", side_effect=OSError(13, "read-only")):
+            self.review_with([1, 2])
+        self.assertFalse(self.raised())
+        self.assertEqual(SHOWN[-1][0], "information")
+        self.assertIn("could not clear the note", SHOWN[-1][2])
+        self.assertIn("vouched for it", SHOWN[-1][2])
+
+
+class ChooseButtonTests(unittest.TestCase):
+    def test_the_default_button_is_the_one_asked_for_and_cancel_is_never_the_default(self) -> None:
+        class Box:
+            Icon = SimpleNamespace(Question=1)
+            StandardButton = SimpleNamespace(NoButton=0, Cancel=2)
+            ButtonRole = SimpleNamespace(ActionRole=3)
+            last = None
+
+            def __init__(self, icon, title, text, buttons, parent) -> None:
+                self.added = []
+                self.default = None
+                self.clicked = None
+                Box.last = self
+
+            def addButton(self, what, role=None):
+                button = ("button", what)
+                self.added.append(button)
+                return button
+
+            def setDefaultButton(self, button) -> None:
+                self.default = button
+
+            def exec(self) -> None:
+                self.clicked = self.added[1]
+
+            def clickedButton(self):
+                return self.clicked
+
+        with mock.patch.object(tools, "QMessageBox", Box):
+            picked = tools._choose(None, "T", "text", ["a", "b"], default=1)
+        self.assertEqual(picked, 1)
+        self.assertEqual(Box.last.default, ("button", "b"))
+        with mock.patch.object(tools, "QMessageBox", Box):
+            tools._choose(None, "T", "text", ["a", "b"])
+        self.assertIsNone(Box.last.default)
 
 
 class DescribePendingTests(unittest.TestCase):

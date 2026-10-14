@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import QMessageBox
 import mobase
 
 from .. import (
-    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importer, kinds, listfile, listimport,
-    me3_host, problems, procs, qtui, saves, session, state,
+    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importer, importsave, kinds, listfile,
+    listimport, me3_host, problems, procs, qtui, saves, session, state,
 )
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
@@ -58,6 +58,20 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
 
     def setParentWidget(self, parent) -> None:
         self._parent = parent
+
+    def _ask_answer(self, text: str, title: str | None = None) -> str | None:
+        answers = [importsave.YES, importsave.NO, importsave.UNKNOWN]
+        labels = ["Yes, it did", "No, it never did", "I do not know"]
+        index = _choose(self._parent, title or self.displayName(), text, labels)
+        return None if index is None else answers[index]
+
+    def _ask_action(self, text: str, preselect: str, title: str | None = None) -> str | None:
+        actions = [importsave.QUARANTINE, importsave.MODDED, importsave.KEEP]
+        index = _choose(
+            self._parent, title or self.displayName(), text, [ACTION_LABELS[a] for a in actions],
+            default=actions.index(preselect),
+        )
+        return None if index is None else actions[index]
 
     def run(self) -> None:
         raise NotImplementedError
@@ -168,14 +182,26 @@ class InstallMe3Tool(EldenRingTool):
         QMessageBox.information(self._parent, self.displayName(), describe(result))
 
 
-def _choose(parent, title: str, text: str, labels: list[str]) -> int | None:
-    """Ask which of `labels` to do; the index, or None for Cancel or a closed box."""
+def _choose(parent, title: str, text: str, labels: list[str], default: int | None = None) -> int | None:
+    """Ask which of `labels` to do; the index, or None for Cancel or a closed box.
+
+    `default` is the index of the button Enter presses; Cancel never is.
+    """
     box = QMessageBox(QMessageBox.Icon.Question, title, text, QMessageBox.StandardButton.NoButton, parent)
     buttons = [box.addButton(label, QMessageBox.ButtonRole.ActionRole) for label in labels]
+    if default is not None:
+        box.setDefaultButton(buttons[default])
     box.addButton(QMessageBox.StandardButton.Cancel)
     box.exec()
     clicked = box.clickedButton()
     return buttons.index(clicked) if clicked in buttons else None
+
+
+ACTION_LABELS = {
+    importsave.QUARANTINE: "Quarantine ER0000.sl2",
+    importsave.MODDED: "Move it to the modded save",
+    importsave.KEEP: "Keep it as vanilla",
+}
 
 
 UNCHECKED = (
@@ -372,8 +398,8 @@ class SaveToolsTool(EldenRingTool):
             actions[QUARANTINE] = lambda: self._quarantine(paths, pending)
             actions[TO_MODDED] = lambda: self._to_modded(paths)
         actions[AUDIT] = lambda: self._audit(paths)
-        if "sentinel_tripped" in record:
-            actions[REVIEWED] = lambda: self._reviewed(paths)
+        if "sentinel_tripped" in record or importsave.unreviewed(self._organizer):
+            actions[REVIEWED] = lambda: self._reviewed(paths, pending)
         picked = qtui.pick_item(self._parent, self.displayName(), "Save tool:", list(actions))
         if picked is not None:
             actions[picked]()
@@ -388,14 +414,23 @@ class SaveToolsTool(EldenRingTool):
     def _listed(found: list) -> str:
         return "\n".join(f"  {path}" for path in found)
 
-    def _cleared(self, paths: state.InstancePaths) -> str:
-        """The sentence to add after an action that settles the note about a session's save, or ''."""
+    def _cleared(self, paths: state.InstancePaths, settled: str | None = None) -> str:
+        """The sentences to add after an action that settles a note about ER0000.sl2, or ''.
+
+        `settled` names how the erm import's question about ER0000.sl2 ended
+        when this action answers it (the file left Steam's folder); None for
+        an action that does not.
+        """
+        text = ""
         try:
             if session.clear_tripped(paths):
-                return "\n\nThe note that a modded session wrote the vanilla save is cleared."
+                text += "\n\nThe note that a modded session wrote the vanilla save is cleared."
         except (OSError, ErmError) as exc:
-            return f"\n\nFluorine could not clear the note that a modded session wrote the vanilla save: {exc}"
-        return ""
+            text += f"\n\nFluorine could not clear the note that a modded session wrote the vanilla save: {exc}"
+        if settled is not None and importsave.unreviewed(self._organizer):
+            importsave.settle(self._organizer, settled)
+            text += "\n\nThe erm import's question about ER0000.sl2 is settled by this."
+        return text
 
     def _backup(self, paths: state.InstancePaths, pending: dict | None, damaged: bool = False) -> None:
         folder, files = saves.save_files(self._organizer)
@@ -466,13 +501,7 @@ class SaveToolsTool(EldenRingTool):
         self._info(f"Restored {placed.destination}.{aside}")
 
     def _quarantine(self, paths: state.InstancePaths, pending: dict | None) -> None:
-        if pending and pending.get("unswept"):
-            raise ErmError(UNCHECKED)
-        if pending:
-            raise ErmError(
-                "A restore of the pre-session snapshot is pending, so ER0000.sl2 may hold what the session wrote. "
-                "Settle the pending restore first."
-            )
+        self._refuse_pending(pending)
         folder, _ = saves.save_files(self._organizer)
         if not self._yes(
             "Move ER0000.sl2 out of the Steam folder?\n\nSteam must be closed. A copy is kept in "
@@ -481,7 +510,7 @@ class SaveToolsTool(EldenRingTool):
         ):
             return
         lines = saves.quarantine_vanilla(folder, paths.save_backups, session.now_stamp())
-        self._info("\n".join(lines) + self._cleared(paths))
+        self._info("\n".join(lines) + self._cleared(paths, importsave.QUARANTINE))
 
     def _to_modded(self, paths: state.InstancePaths) -> None:
         folder, _ = saves.save_files(self._organizer)
@@ -505,7 +534,8 @@ class SaveToolsTool(EldenRingTool):
             return
         placed = saves.move_to_modded(options[picked], folder, paths.save_backups, session.now_stamp())
         aside = f"\n\nThe modded save that was there is kept at {placed.safety_copy}." if placed.safety_copy else ""
-        self._info(f"{placed.destination} is now that save.{aside}{self._cleared(paths)}")
+        settled = importsave.MODDED if options[picked] == folder / saves.VANILLA else None
+        self._info(f"{placed.destination} is now that save.{aside}{self._cleared(paths, settled)}")
 
     def _audit(self, paths: state.InstancePaths) -> None:
         _, files = saves.save_files(self._organizer)
@@ -519,13 +549,47 @@ class SaveToolsTool(EldenRingTool):
         if picked is not None:
             qtui.show_text(self._parent, self.displayName(), saves.audit_text(options[picked]))
 
-    def _reviewed(self, paths: state.InstancePaths) -> None:
-        if self._yes(
+    def _refuse_pending(self, pending: dict | None) -> None:
+        if pending and pending.get("unswept"):
+            raise ErmError(UNCHECKED)
+        if pending:
+            raise ErmError(
+                "A restore of the pre-session snapshot is pending, so ER0000.sl2 may hold what the session wrote. "
+                "Settle the pending restore first."
+            )
+
+    def _tripped(self, paths: state.InstancePaths) -> bool:
+        try:
+            return "sentinel_tripped" in session.load_last_launch(paths)
+        except session.LaunchStateError:
+            return False
+
+    def _review_import(self, paths: state.InstancePaths, pending: dict | None) -> str:
+        """The import's own review of ER0000.sl2 (audit, question, action), run from here. The report to show."""
+        self._refuse_pending(pending)
+        folder, _ = saves.save_files(self._organizer)
+        report = importer.Report()
+        importsave.review(
+            self._organizer, paths, folder, session.now_stamp(), report,
+            ask_answer=self._ask_answer, ask_action=self._ask_action,
+        )
+        return report.text()
+
+    def _reviewed(self, paths: state.InstancePaths, pending: dict | None) -> None:
+        done = []
+        if importsave.unreviewed(self._organizer):
+            done.append(self._review_import(paths, pending))
+        if self._tripped(paths) and self._yes(
             "Mark the note about the session that wrote the vanilla save as reviewed?\n\n"
             "It only clears the note. Nothing in the save folder changes."
         ):
-            session.clear_tripped(paths)
-            self._info("The note is cleared.")
+            try:
+                session.clear_tripped(paths)
+                done.append("The note is cleared.")
+            except (OSError, ErmError) as exc:
+                done.append(f"Fluorine could not clear the note that a modded session wrote the vanilla save: {exc}")
+        if done:
+            self._info("\n\n".join(done))
 
 
 HARDEN = "Harden"

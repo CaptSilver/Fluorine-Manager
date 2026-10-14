@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, coop_settings, deploy, doctor, environment, fsprobe, gate, generated, hardening, inventory, kinds, listfile,
-    me3_host, mods, pe, prepare, procs, qtui, saves, session, state,
+    archives, coop_settings, deploy, doctor, environment, fsprobe, gate, generated, hardening, importsave, inventory,
+    kinds, listfile, me3_host, mods, pe, prepare, procs, qtui, saves, session, state,
 )
 from .ermlib import gamebuild, steam
 from .ermlib import paths as ermpaths
@@ -441,6 +441,20 @@ class Diagnosis:
                     "GAME_RUNNING",
                     "Elden Ring or me3 is running: " + ", ".join(f"{name} (pid {pid})" for pid, name in up)
                     + ". A launch waits for it to exit, and nothing edits Game/ under it.",
+                    informational=True,
+                )
+            )
+        if importsave.unreviewed(self._organizer):
+            rows.append(
+                Problem(
+                    "SAVE_SENTINEL_TRIPPED",
+                    "The erm import is waiting on ER0000.sl2. A profile without Seamless Co-op may have written it, "
+                    "and once erm's Steam launch option is gone a Steam Play loads it under Easy Anti-Cheat. In "
+                    'Tools > "Elden Ring: Save tools…", "Quarantine ER0000.sl2…" or "Move a save to the modded '
+                    'name…" takes it out of Steam\'s reach, and "Mark the session\'s save as reviewed" audits it and asks '
+                    "whether it ever ran under a profile without Seamless Co-op, as the import does. Until then the "
+                    "import is not marked done.",
+                    TOOL_SAVES,
                     informational=True,
                 )
             )

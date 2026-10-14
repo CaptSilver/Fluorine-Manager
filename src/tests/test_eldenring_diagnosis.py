@@ -524,6 +524,25 @@ class SessionRowTests(DiagnosisCase):
         session.save_last_launch(self.paths, {"sentinel_tripped": {"quarantined": "x"}})
         self.assertIn("(not recorded)", self.one("SAVE_SENTINEL_TRIPPED").text)
 
+    def test_an_erm_import_waiting_on_the_save_is_an_informational_row_with_the_save_tools(self) -> None:
+        self.organizer.setPersistent(kinds.PLUGIN, "save_unreviewed", "20261014T120000000001Z")
+        problem = self.one("SAVE_SENTINEL_TRIPPED")
+        self.assertEqual((problem.informational, problem.fix), (True, "tool:saves"))
+        self.assertIn("erm import is waiting on ER0000.sl2", problem.text)
+        self.assertIn("Quarantine ER0000.sl2", problem.text)
+
+    def test_a_settled_question_is_no_row(self) -> None:
+        self.organizer.setPersistent(kinds.PLUGIN, "save_unreviewed", "")
+        self.assertNotIn("SAVE_SENTINEL_TRIPPED", self.keys())
+
+    def test_the_import_row_does_not_depend_on_last_launch_json(self) -> None:
+        self.organizer.setPersistent(kinds.PLUGIN, "save_unreviewed", "20261014T120000000001Z")
+        self.paths.root.mkdir(parents=True, exist_ok=True)
+        self.paths.last_launch.write_text("{nope")
+        keys = self.keys()
+        self.assertIn("SAVE_SENTINEL_TRIPPED", keys)
+        self.assertIn("LAST_LAUNCH_DAMAGED", keys)
+
     def test_a_blocked_launch_is_shown_with_the_reason_it_recorded(self) -> None:
         session.save_last_launch(
             self.paths, {"report": {"outcome": "vetoed", "key": "NATIVE_DLL_INVALID", "step": "me3 profile", "text": "x.dll is empty"}}
