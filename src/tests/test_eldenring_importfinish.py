@@ -85,9 +85,11 @@ class Script:
         # The overrides are offered only when a test switches them on, so the other tests see no extra dialog.
         self.offer_route, self.route, self.confirm_accept = False, importsave.ROUTE_ACCEPT, True
         self.offer_anyway, self.anyway = False, importfinish.MOVE_ONLY
+        self.offer_launcher, self.launcher = False, hardening.ACT_REHARDEN
         self.shown: list[tuple[str, str]] = []
         self.preselected: list[str] = []
         self.progress: list[str] = []
+        self.offered: list[str] = []
 
     def kinds_shown(self) -> list[str]:
         return [kind for kind, _ in self.shown]
@@ -126,11 +128,18 @@ class Script:
             self.shown.append(("anyway", text))
             return self.anyway
 
+        def ask_launcher(text, options):
+            self.shown.append(("launcher", text))
+            self.offered = list(options)
+            return self.launcher
+
         extra = {}
         if self.offer_route:
             extra.update(ask_save_route=ask_route, confirm_accept=confirm_accept)
         if self.offer_anyway:
             extra["move_anyway"] = move_anyway
+        if self.offer_launcher:
+            extra["ask_launcher"] = ask_launcher
         return importfinish.Ui(
             ask_answer=ask_answer, ask_action=ask_action, review=review, confirm_adoption=confirm,
             launch_option=launch_option, busy=lambda title: Busy(self.progress), **extra,
@@ -1018,6 +1027,145 @@ class MoveAnywayTests(OverrideCase):
         self.finish()
         self.assertEqual(base.tree(self.game), before)
         self.assertEqual([(o["kind"], o["choice"]) for o in self.recorded()], [("game-files", "move before ER0000.sl2 is settled")])
+
+
+class LauncherFixTests(FinishCase):
+    """Re-harden and Unharden through the hardening code, with the system password prompt always a fake."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.locked = False
+        self.lock_calls: list = []
+        self.lock_error = None
+        for patcher in (
+            mock.patch.object(importfinish.hardening, "is_immutable", side_effect=lambda path: self.locked),
+            mock.patch.object(importfinish.hardening.ermharden, "set_immutable", side_effect=self.fake_lock),
+            mock.patch.object(importfinish.hardening.ermharden.subprocess, "run", side_effect=AssertionError("real pkexec")),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.script.offer_launcher = True
+        self.run_import(stamp=STAMP)
+
+    def fake_lock(self, path, on) -> None:
+        self.lock_calls.append(on)
+        if self.lock_error is not None:
+            raise self.lock_error
+        self.locked = on
+
+    def launcher_bytes(self) -> bytes:
+        return (self.game / "start_protected_game.exe").read_bytes()
+
+    def recorded(self) -> list[dict]:
+        return json.loads(self.paths.import_overrides.read_text())["imports"][-1]["overrides"]
+
+    def test_a_swapped_launcher_that_is_not_locked_offers_reharden_and_unharden(self) -> None:
+        self.script.launcher = None
+        self.finish()
+        self.assertEqual(self.script.offered, [hardening.ACT_REHARDEN, hardening.ACT_UNHARDEN])
+        self.assertIn("is not locked", dict(self.script.shown)["launcher"])
+
+    def test_reharden_locks_the_swap_and_leaves_the_backup(self) -> None:
+        report = self.finish()
+        self.assertEqual(self.lock_calls, [True])
+        self.assertEqual(hardening.state(self.game), hardening.HARDENED)
+        self.assertEqual((self.game / "start_protected_game.exe.erm-backup").read_bytes(), b"MZ eac")
+        self.assertIn("Locked start_protected_game.exe", report.text())
+        self.assertEqual([(o["kind"], o["choice"]) for o in self.recorded()], [("launcher", "Re-harden")])
+
+    def test_unharden_puts_the_real_launcher_back_and_removes_the_backup(self) -> None:
+        self.script.launcher = hardening.ACT_UNHARDEN
+        report = self.finish()
+        self.assertEqual(self.launcher_bytes(), b"MZ eac")
+        self.assertFalse(os.path.lexists(self.game / "start_protected_game.exe.erm-backup"))
+        self.assertEqual(hardening.state(self.game), hardening.VANILLA)
+        self.assertIn("Restored the real start_protected_game.exe", report.text())
+        self.assertEqual(self.lock_calls, [])
+
+    def test_leaving_it_changes_nothing_and_is_recorded(self) -> None:
+        self.script.launcher = None
+        before = base.tree(self.game)
+        self.finish()
+        self.assertEqual(self.lock_calls, [])
+        self.assertEqual(self.launcher_bytes(), b"MZ")
+        self.assertEqual([(o["kind"], o["choice"]) for o in self.recorded()], [("launcher", "left as it is")])
+        self.assertEqual(
+            {k: v for k, v in base.tree(self.game).items() if k.startswith("start_protected")},
+            {k: v for k, v in before.items() if k.startswith("start_protected")},
+        )
+
+    def test_a_stale_launcher_is_kept_in_the_imports_quarantine_before_the_swap(self) -> None:
+        self.put("start_protected_game.exe", b"MZ the game before the patch")
+        self.finish()
+        kept = self.where() / "start_protected_game.exe"
+        self.assertEqual(kept.read_bytes(), b"MZ the game before the patch")
+        self.assertEqual(self.launcher_bytes(), b"MZ")
+
+    def test_a_dismissed_password_prompt_leaves_the_swap_unlocked_and_says_so(self) -> None:
+        self.lock_error = errors.ErmError("pkexec authentication dialog was dismissed (rc 126)")
+        report = self.finish()
+        self.assertEqual(hardening.state(self.game), hardening.SWAPPED_UNLOCKED)
+        self.assertIn("swapped but not locked", report.text())
+        self.assertTrue(any(level == "warn" and "not locked" in text for level, text in report.lines))
+
+    def test_unharden_is_refused_while_config_files_are_deployed_and_the_launcher_is_left_alone(self) -> None:
+        self.report = report = importer.Report()
+        log = importoverrides.OverrideLog.open(self.paths, report, STAMP)
+        self.script.launcher = hardening.ACT_UNHARDEN
+        entry = deploy.Entry("0" * 64, 1, "adjust-the-fov")
+        deploy.write_manifest(
+            self.paths, deploy.Manifest({"mods/AdjustTheFov/config.ini": entry}, ["mods/AdjustTheFov"])
+        )
+        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=True)
+        self.assertEqual(self.launcher_bytes(), b"MZ")
+        self.assertTrue((self.game / "start_protected_game.exe.erm-backup").is_file())
+        self.assertIn("deployed config file", report.text())
+        self.assertIn("left as it was", report.text())
+
+    def test_a_running_game_refuses_the_action_and_the_launcher_stays(self) -> None:
+        self.report = importer.Report()
+        log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
+        self.host.running = lambda: [(7, "eldenring.exe")]
+        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), self.report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=True)
+        self.assertEqual(self.launcher_bytes(), b"MZ")
+        self.assertEqual(self.lock_calls, [])
+        self.assertTrue(any(level == "warn" and "eldenring.exe (pid 7)" in text for level, text in self.report.lines))
+
+    def test_a_backup_that_is_a_link_offers_nothing(self) -> None:
+        self.report = importer.Report()
+        log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
+        backup = self.game / "start_protected_game.exe.erm-backup"
+        backup.unlink()
+        elsewhere = self.tmp / "elsewhere.exe"
+        elsewhere.write_bytes(b"MZ eac")
+        backup.symlink_to(elsewhere)
+        self.put("start_protected_game.exe", b"MZ older")
+        importfinish.fix_launcher(self.host, self.paths, self.script.ui(), self.report, hardening.STALE, STAMP, log, cleaned=True)
+        self.assertEqual(self.script.shown, [])
+        self.assertEqual(self.lock_calls, [])
+        self.assertEqual(self.launcher_bytes(), b"MZ older")
+
+    def test_unharden_is_not_offered_while_erms_files_are_still_in_game(self) -> None:
+        self.report = importer.Report()
+        log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
+        self.script.launcher = None
+        importfinish.fix_launcher(
+            self.host, self.paths, self.script.ui(), self.report, hardening.SWAPPED_UNLOCKED, STAMP, log, cleaned=False
+        )
+        self.assertEqual(self.script.offered, [hardening.ACT_REHARDEN])
+        self.assertTrue(any("Unharden is not offered" in text for _, text in self.report.lines))
+
+    def test_a_launcher_that_needs_no_fix_is_not_offered_one(self) -> None:
+        self.locked = True
+        self.finish()
+        self.assertNotIn("launcher", self.script.kinds_shown())
+        self.assertEqual(self.lock_calls, [])
+
+    def test_without_the_callable_nothing_is_offered(self) -> None:
+        self.script.offer_launcher = False
+        self.finish()
+        self.assertEqual(self.lock_calls, [])
+        self.assertFalse(self.paths.import_overrides.exists())
 
 
 class UiTests(unittest.TestCase):

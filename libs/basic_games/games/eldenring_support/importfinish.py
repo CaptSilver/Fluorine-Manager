@@ -5,10 +5,12 @@ in Game/. This part settles the question about ER0000.sl2, moves erm's files
 out of Game/, reports the launcher as erm left it, records what is left of
 Game/ as vanilla and checks that Steam no longer carries erm's launch option.
 It asks before it moves or records anything and moves files only out (into
-quarantine-game/, nothing is deleted). It never touches the launcher.
+quarantine-game/, nothing is deleted). It changes the launcher only when the
+user picks Re-harden or Unharden for one that is not locked.
 
 The user can override what would otherwise hold the import: accept ER0000.sl2
-as the vanilla save, or move erm's files out before that is settled. Each choice goes into the import report and the instance's
+as the vanilla save, move erm's files out before that is settled, or fix the
+launcher. Each choice goes into the import report and the instance's
 import-overrides.json (importoverrides) before it takes effect.
 
 Every part is safe to repeat. A part that cannot finish says why in the report
@@ -29,6 +31,7 @@ from . import (
     deploy,
     environment,
     fixes,
+    fsprobe,
     hardening,
     importer,
     importgame,
@@ -63,11 +66,12 @@ class Ui:
     Fluorine should look again. `busy(title)` returns a context manager with
     `update(message)`.
 
-    The three after `busy` are the overrides, each skipped when it is None.
+    The four after `busy` are the overrides, each skipped when it is None.
     `ask_save_route(text)` returns importsave.ROUTE_QUESTIONS or ROUTE_ACCEPT (None when
     closed) and `confirm_accept(text)` says whether the user confirmed accepting
     ER0000.sl2; they come as a pair. `move_anyway(text)` returns MOVE_ONLY,
-    MOVE_AND_CHECK or None.
+    MOVE_AND_CHECK or None. `ask_launcher(text, options)` returns one of
+    `options` (hardening.ACT_REHARDEN, ACT_UNHARDEN) or None to leave the launcher.
     """
 
     ask_answer: Callable[[str], str | None]
@@ -79,6 +83,7 @@ class Ui:
     ask_save_route: Callable[[str], str | None] | None = None
     confirm_accept: Callable[[str], bool] | None = None
     move_anyway: Callable[[str], str | None] | None = None
+    ask_launcher: Callable[[str, list[str]], str | None] | None = None
 
     def __post_init__(self) -> None:
         if (self.ask_save_route is None) != (self.confirm_accept is None):
@@ -173,6 +178,71 @@ def launcher_report(host: Host, paths: state.InstancePaths, report: importer.Rep
     else:
         report.warn(text)
     return found
+
+
+LAUNCHER_TEXT = (
+    "{state}\n\n"
+    "Re-harden puts a locked copy of the game back over start_protected_game.exe; Unharden puts the real launcher "
+    "back from its backup. Either one may ask for your password through the system prompt. The backup of the "
+    "real launcher is never overwritten."
+)
+_NEEDS_A_FIX = (hardening.SWAPPED_UNLOCKED, hardening.STALE, hardening.RESTORED)
+
+
+def fix_launcher(
+    host: Host, paths: state.InstancePaths, ui: Ui, report: importer.Report, current: str, stamp: str, log, cleaned: bool
+) -> None:
+    """Offer Re-harden or Unharden for a launcher that is not locked, restored by Steam or stale.
+
+    Does nothing when the launcher is fine, when the user was not given the
+    choice (`ui.ask_launcher` is None) or when no backup file makes either
+    action safe. The choice is recorded before the action runs. Re-harden and
+    Unharden are hardening.reharden and hardening.unharden, so the system
+    password prompt and every refusal (a running game, files deployed into
+    Game/mods/) are theirs; a refusal is reported and the launcher stays as it was.
+    While erm's files remain in Game/ (`cleaned` is False) Unharden is not offered:
+    the swapped launcher is what keeps a proxy DLL from loading under Easy
+    Anti-Cheat if the launch option is cleared by hand.
+    """
+    if ui.ask_launcher is None or current not in _NEEDS_A_FIX:
+        return
+    options = [
+        action for action in hardening.choices(current, fsprobe.kind(host.game_dir / hardening.BACKUP) == fsprobe.FILE)
+        if action != hardening.ACT_HARDEN
+    ]
+    if not cleaned and hardening.ACT_UNHARDEN in options:
+        options.remove(hardening.ACT_UNHARDEN)
+        report.info("Unharden is not offered while erm's files are in Game/: the swapped launcher is the backstop.")
+    if not options:
+        return
+    picked = ui.ask_launcher(LAUNCHER_TEXT.format(state=hardening.describe(current)), options)
+    if picked not in options:
+        log.add(importoverrides.LAUNCHER, hardening.LAUNCHER, "left as it is", f"it was {current}")
+        return
+    log.add(importoverrides.LAUNCHER, hardening.LAUNCHER, picked, f"it was {current}")
+    folder = importgame.folder_name(stamp)
+    try:
+        with archives.hash_cache(paths) as cache, ui.busy("Elden Ring: changing the launcher"):
+            if picked == hardening.ACT_REHARDEN:
+                outcome = hardening.reharden(
+                    host.game_dir, paths, running=host.running, cache=cache, stamp=folder
+                )
+            else:
+                outcome = hardening.unharden(
+                    host.game_dir, paths, deployed=len(deploy.read_manifest(paths).files), running=host.running,
+                    cache=cache, stamp=folder,
+                )
+    except hardening.DeployedFilesError as exc:
+        report.warn(f"{exc} The launcher was left as it was.")
+        return
+    except ErmError as exc:
+        report.warn(f"{picked} was not done: {exc}")
+        return
+    for line in outcome.lines:
+        report.ok(line)
+    (report.ok if outcome.state in (hardening.HARDENED, hardening.VANILLA) else report.warn)(
+        hardening.describe(outcome.state)
+    )
 
 
 # -- the vanilla inventory ----------------------------------------------------
@@ -521,7 +591,7 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
                     "meanwhile. Moving them first would leave Steam's launch option starting me3 with erm's mods "
                     "but without Seamless Co-op."
                 )
-    launcher_report(host, paths, report)
+    fix_launcher(host, paths, ui, report, launcher_report(host, paths, report), stamp, log, cleaned)
     adopted = False
     if cleaned:
         adopted = adopt_inventory(installed, paths, host, ui, report)
