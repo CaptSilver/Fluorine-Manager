@@ -21,10 +21,11 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from . import atomic, fsprobe, kinds, mods, procs, quarantine, session, state
+from . import atomic, fsprobe, hardening, kinds, mods, procs, quarantine, session, state
 from .ermlib import github
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
+from .veto import Veto
 
 DEPLOY_DRIFT = "DEPLOY_DRIFT"
 DEPLOY_COLLISION = "DEPLOY_COLLISION"
@@ -628,3 +629,95 @@ def sync_removes(
         names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
         return Applied(skipped=f"{names} is running")
     return apply_removes(plan(desired(organizer), manifest, game_dir), manifest, paths, game_dir)
+
+
+# -- the whole deploy ---------------------------------------------------------
+
+STEP = "Deployed config files"
+_SYNC_TOOL = 'Tools > "Elden Ring: Sync deployed files…"'
+_HARDEN_TOOL = 'Tools > "Elden Ring: Harden/Unharden launcher…"'
+_SET_KIND_FIX = 'Open Tools > "Elden Ring: Set mod kind…" and correct the config files of that mod.'
+_FIXES = {
+    DEPLOY_COLLISION: "Disable one of those mods.",
+    DEPLOY_RESERVED: _SET_KIND_FIX,
+    DEPLOY_CONFIG_INVALID: _SET_KIND_FIX,
+}
+
+
+def sync(
+    wanted: Desired,
+    paths: state.InstancePaths,
+    game_dir,
+    *,
+    launcher: Callable[[], str],
+    verify_first: bool = False,
+    stamp: str | None = None,
+) -> Applied:
+    """Make Game/mods/ hold exactly the wanted config files. Raises Veto.
+
+    The launch and the Sync tool both run this, so they cannot disagree. The
+    order is the point: with `verify_first` a deployed file that no longer
+    matches the record is a veto before anything else (after a Steam update
+    that is a question for the user, not something to copy over); then the
+    removals, because undeploying needs no lock and a veto would only leave
+    files in Game/ longer; then the findings, strays and harden vetoes; then
+    the copies. A mod with a finding wants nothing, so its files go in the
+    removals. Nothing is copied unless the launcher is hardened, and that is
+    asked of `launcher()` only when a file is, or is about to be, deployed:
+    the hardened launcher has to be in place before the first file exists.
+    `launcher` returns hardening.state(...).
+    """
+    game_dir, stamp = Path(game_dir), stamp or session.now_stamp()
+    try:
+        manifest = read_manifest(paths)
+    except state.StateError as exc:
+        raise Veto(
+            STEP,
+            str(exc),
+            "Look at the file. Deleting it forgets which files in Game/mods/ the plugin placed, "
+            "and they then show up as strays.",
+            DEPLOY_MANIFEST_DAMAGED,
+        ) from exc
+    if verify_first:
+        drift = verify(manifest, game_dir)
+        if drift:
+            listed = "\n".join(f"  {item.rel}: {item.why}" for item in drift)
+            raise Veto(
+                STEP,
+                f"Files the plugin deployed are not what it recorded:\n{listed}",
+                f"Open {_SYNC_TOOL}: it keeps what is there in quarantine-game and copies the mod's file again.",
+                DEPLOY_DRIFT,
+            )
+    result = plan(wanted, manifest, game_dir)
+    done = Applied()
+    try:
+        done.extend(apply_removes(result, manifest, paths, game_dir, stamp))
+    except DeployError as exc:
+        raise Veto(STEP, str(exc), f"Fix that folder, then run {_SYNC_TOOL}.", DEPLOY_DRIFT) from exc
+    if wanted.findings:
+        first = wanted.findings[0]
+        raise Veto(STEP, "\n".join(finding.text for finding in wanted.findings), _FIXES[first.key], first.key)
+    if result.strays:
+        listed = "\n".join(f"  {rel}" for rel in result.strays)
+        raise Veto(
+            "Game folder",
+            "These are in the way of a deployed config file but are not the plugin's, so they were not touched:\n"
+            + listed,
+            "Move them into this instance's eldenring/quarantine-game folder and try again.",
+            GAME_DIR_STRAYS,
+        )
+    if result.copies or result.adopts or manifest.files:
+        current = launcher()
+        if current != hardening.HARDENED:
+            raise Veto(
+                "Hardened launcher",
+                "Config files are, or are about to be, deployed into Game/mods/, and a Steam Play must "
+                f"not start Easy Anti-Cheat over them. {hardening.describe(current)}",
+                f"Open {_HARDEN_TOOL}.",
+                hardening.HARDEN_REQUIRED,
+            )
+    try:
+        done.extend(apply_copies(result, manifest, paths, game_dir, stamp))
+    except DeployError as exc:
+        raise Veto(STEP, str(exc), f"Fix that folder, then run {_SYNC_TOOL}.", DEPLOY_DRIFT) from exc
+    return done

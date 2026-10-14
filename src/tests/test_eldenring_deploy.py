@@ -15,7 +15,9 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_deploy_tests")
 deploy = support.module(PACKAGE, "deploy")
+hardening = support.module(PACKAGE, "hardening")
 kinds = support.module(PACKAGE, "kinds")
+veto = support.module(PACKAGE, "veto")
 state = support.module(PACKAGE, "state")
 
 SHA = "a" * 64
@@ -762,6 +764,177 @@ class UndeployAndSyncRemovesTests(ApplyCase):
         self.paths.deploy_manifest.write_text("{")
         with self.assertRaises(state.StateError):
             deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+
+
+class SyncTests(ModListCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.mod = self.native("Thing mod")
+        self.launcher_state = hardening.HARDENED
+        self.asked = 0
+
+    def launcher(self) -> str:
+        self.asked += 1
+        return self.launcher_state
+
+    def sync(self, **kwargs):
+        return deploy.sync(
+            deploy.desired(self.organizer), self.paths, self.game, launcher=self.launcher, stamp=STAMP, **kwargs
+        )
+
+    def refused(self, **kwargs) -> "veto.Veto":
+        with self.assertRaises(veto.Veto) as caught:
+            self.sync(**kwargs)
+        return caught.exception
+
+    def deployed_game_file(self) -> Path:
+        return self.game / "mods/Thing/config.ini"
+
+    def test_a_hardened_launcher_lets_the_files_through_and_they_are_recorded(self) -> None:
+        applied = self.sync()
+        self.assertEqual(applied.copied, ["mods/Thing/config.ini"])
+        self.assertEqual(self.deployed_game_file().read_text(), "[Thing mod]\nvalue=1\n")
+        self.assertIn("mods/Thing/config.ini", deploy.read_manifest(self.paths).files)
+
+    def test_a_launcher_that_is_not_hardened_refuses_before_a_single_file_is_copied(self) -> None:
+        for launcher in (hardening.VANILLA, hardening.RESTORED, hardening.STALE, hardening.SWAPPED_UNLOCKED):
+            with self.subTest(launcher):
+                self.launcher_state = launcher
+                refusal = self.refused()
+                self.assertEqual(refusal.key, hardening.HARDEN_REQUIRED)
+                self.assertIn("Harden/Unharden launcher", refusal.text())
+                self.assertIn(hardening.describe(launcher), refusal.text())
+                self.assertFalse((self.game / "mods").exists())
+                self.assertEqual(deploy.read_manifest(self.paths), deploy.Manifest())
+
+    def test_the_launcher_is_asked_about_only_when_something_is_deployed_or_about_to_be(self) -> None:
+        self.organizer.mod_list.active.discard("Thing mod")
+        self.sync()
+        self.assertEqual(self.asked, 0)
+
+    def test_removals_run_even_with_an_unhardened_launcher(self) -> None:
+        self.sync()
+        self.organizer.mod_list.active.discard("Thing mod")
+        self.launcher_state = hardening.VANILLA
+        applied = self.sync()
+        self.assertEqual(applied.removed, ["mods/Thing/config.ini"])
+        self.assertFalse((self.game / "mods/Thing").exists())
+
+    def test_removals_run_before_the_veto_that_follows_when_other_files_stay(self) -> None:
+        second = self.native("Second mod", dll="mods/Second.dll", config=("mods/Second/config.ini",))
+        self.sync()
+        self.organizer.mod_list.active.discard("Thing mod")
+        self.launcher_state = hardening.RESTORED
+        self.assertEqual(self.refused().key, hardening.HARDEN_REQUIRED)
+        self.assertFalse(self.deployed_game_file().exists())
+        self.assertTrue((self.game / "mods/Second/config.ini").exists())
+
+    def test_findings_refuse_after_the_removals_and_before_anything_is_copied(self) -> None:
+        self.sync()
+        self.native("Other", dll="mods/thing.dll", config=("mods/thing/config.ini",))
+        refusal = self.refused()
+        self.assertEqual(refusal.key, deploy.DEPLOY_COLLISION)
+        self.assertIn("Disable one of those mods", refusal.text())
+        self.assertFalse(self.deployed_game_file().exists())
+        self.assertEqual(deploy.read_manifest(self.paths).files, {})
+
+    def test_a_reserved_or_invalid_list_refuses_with_the_set_mod_kind_tool_named(self) -> None:
+        self.mod.setPluginSetting(kinds.PLUGIN, "deploy_config", json.dumps(["mods/Thing/x.dll"]))
+        refusal = self.refused()
+        self.assertEqual(refusal.key, deploy.DEPLOY_RESERVED)
+        self.assertIn("Set mod kind", refusal.text())
+        self.mod.setPluginSetting(kinds.PLUGIN, "deploy_config", json.dumps(["mods/Thing/missing.ini"]))
+        self.assertEqual(self.refused().key, deploy.DEPLOY_CONFIG_INVALID)
+        self.assertFalse((self.game / "mods").exists())
+
+    def test_an_unrecorded_file_in_the_way_is_a_stray_veto_and_is_left_as_it_is(self) -> None:
+        stray = self.deployed_game_file()
+        stray.parent.mkdir(parents=True)
+        stray.write_text("someone else's\n")
+        refusal = self.refused()
+        self.assertEqual(refusal.key, deploy.GAME_DIR_STRAYS)
+        self.assertIn("mods/Thing/config.ini", refusal.text())
+        self.assertEqual(stray.read_text(), "someone else's\n")
+
+    def test_the_stray_key_is_the_one_the_gate_records(self) -> None:
+        self.assertEqual(deploy.GAME_DIR_STRAYS, "GAME_DIR_STRAYS")
+
+    def test_a_file_in_place_with_the_wanted_bytes_is_adopted_under_a_hardened_launcher_only(self) -> None:
+        path = self.deployed_game_file()
+        path.parent.mkdir(parents=True)
+        path.write_text("[Thing mod]\nvalue=1\n")
+        self.launcher_state = hardening.VANILLA
+        self.assertEqual(self.refused().key, hardening.HARDEN_REQUIRED)
+        self.assertEqual(deploy.read_manifest(self.paths).files, {})
+        self.launcher_state = hardening.HARDENED
+        self.assertEqual(self.sync().adopted, ["mods/Thing/config.ini"])
+
+    def test_a_file_the_dll_rewrote_is_kept_and_copied_again(self) -> None:
+        self.sync()
+        self.deployed_game_file().write_text("written by the DLL\n")
+        applied = self.sync()
+        self.assertEqual(applied.copied, ["mods/Thing/config.ini"])
+        self.assertEqual([rel for rel, _ in applied.quarantined], ["mods/Thing/config.ini"])
+
+    def test_after_a_sync_the_next_one_does_nothing(self) -> None:
+        self.sync()
+        self.assertEqual(self.sync(), deploy.Applied())
+
+    def test_verify_first_refuses_on_a_changed_file_and_changes_nothing(self) -> None:
+        self.sync()
+        self.deployed_game_file().write_text("written by the DLL\n")
+        refusal = self.refused(verify_first=True)
+        self.assertEqual(refusal.key, deploy.DEPLOY_DRIFT)
+        self.assertIn("mods/Thing/config.ini: its bytes changed", refusal.text())
+        self.assertIn("Sync deployed files", refusal.text())
+        self.assertEqual(self.deployed_game_file().read_text(), "written by the DLL\n")
+        self.assertFalse(self.paths.quarantine_game.exists())
+
+    def test_verify_first_lets_an_intact_deploy_through(self) -> None:
+        self.sync()
+        self.assertEqual(self.sync(verify_first=True), deploy.Applied())
+
+    def test_a_damaged_manifest_refuses_with_its_own_key_and_touches_nothing(self) -> None:
+        self.paths.deploy_manifest.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.deploy_manifest.write_text("{")
+        refusal = self.refused()
+        self.assertEqual(refusal.key, deploy.DEPLOY_MANIFEST_DAMAGED)
+        self.assertIn("deploy-manifest.json", refusal.text())
+        self.assertFalse((self.game / "mods").exists())
+
+    def test_a_copy_that_fails_refuses_with_the_path_and_the_drift_key(self) -> None:
+        real = deploy.atomic.write_bytes_atomic
+
+        def fail_on_the_config(path, data, *args, **kwargs):
+            if Path(path).name == "config.ini":
+                raise OSError("disk full")
+            return real(path, data, *args, **kwargs)
+
+        with mock.patch.object(deploy.atomic, "write_bytes_atomic", side_effect=fail_on_the_config):
+            refusal = self.refused()
+        self.assertEqual(refusal.key, deploy.DEPLOY_DRIFT)
+        self.assertIn("disk full", refusal.text())
+        self.assertIn("config.ini", refusal.text())
+
+    def test_a_removal_that_fails_refuses_with_the_path_and_the_drift_key(self) -> None:
+        self.sync()
+        self.organizer.mod_list.active.discard("Thing mod")
+        with mock.patch.object(deploy.os, "unlink", side_effect=PermissionError("denied")):
+            refusal = self.refused()
+        self.assertEqual(refusal.key, deploy.DEPLOY_DRIFT)
+        self.assertIn("denied", refusal.text())
+        self.assertIn("mods/Thing/config.ini", deploy.read_manifest(self.paths).files)
+
+    def test_nothing_outside_mods_is_written_by_a_whole_sync(self) -> None:
+        for name in ("regulation.bin", "start_protected_game.exe", "sd/Data0.bdt"):
+            path = self.game / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"vanilla")
+        before = {k: v for k, v in tree(self.game).items() if not k.startswith("mods")}
+        self.sync()
+        self.organizer.mod_list.active.discard("Thing mod")
+        self.sync()
+        self.assertEqual({k: v for k, v in tree(self.game).items() if not k.startswith("mods")}, before)
 
 
 class AppliedTests(unittest.TestCase):
