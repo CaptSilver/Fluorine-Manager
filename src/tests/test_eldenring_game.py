@@ -373,6 +373,16 @@ class ModKindWiringTests(GameCase):
         self.assertIn("Some Mod", warn.call_args.args[0])
         self.assertIn("unreadable", warn.call_args.args[0])
 
+    def test_a_mod_that_cannot_say_its_name_does_not_make_the_failure_report_raise(self) -> None:
+        mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
+        mod.name = mock.Mock(side_effect=RuntimeError("gone"))
+        with mock.patch.object(GAME, "qWarning") as warn, \
+                mock.patch.object(GAME.kinds, "record_on_install", side_effect=OSError("unreadable")):
+            self.organizer.mod_list.installed_callbacks[0](mod)
+        warn.assert_called_once()
+        self.assertIn("a mod", warn.call_args.args[0])
+        self.assertIn("unreadable", warn.call_args.args[0])
+
     def test_an_installed_mod_is_left_alone_when_another_game_is_managed(self) -> None:
         self.game.active = False
         mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
@@ -408,9 +418,15 @@ class ModKindWiringTests(GameCase):
 
     def test_the_co_op_password_is_a_plugin_setting_with_an_empty_default(self) -> None:
         self.assertEqual(
-            [setting[0] for setting in self.game.settings()], ["coop_password"]
+            [setting[0] for setting in self.game.settings()], ["coop_password", "nexus_premium"]
         )
         self.assertEqual(self.game.settings()[0][2], "")
+
+    def test_a_premium_nexus_account_is_a_plugin_setting_that_defaults_to_off(self) -> None:
+        name, description, default = self.game.settings()[1]
+        self.assertEqual((name, default), ("nexus_premium", False))
+        self.assertIn("Premium", description)
+        self.assertIn("browser", description)
 
 
 class FakeTimer:

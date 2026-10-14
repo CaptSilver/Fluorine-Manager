@@ -23,13 +23,21 @@ import mobase
 
 from ..basic_game import BasicGame
 from .eldenring_support import (
-    checker, deploy, gate, kinds, me3, me3_host, prepare, problems, qtui, saves, state,
+    checker, deploy, fetch, gate, kinds, me3, me3_host, prepare, problems, qtui, saves, state,
 )
 
 ENTRY_TITLE = "Elden Ring (me3)"
 
 # What a path check or a Qt call on a hand-picked or unreadable folder can throw.
 _PATH_ERRORS = (OSError, ValueError, TypeError, RuntimeError)
+
+
+def _name_of(mod) -> str:
+    """The mod's name for a log line. A mod that cannot say it must not turn one failure report into another."""
+    try:
+        return mod.name()
+    except Exception:
+        return "a mod"
 
 
 class EldenRingGame(BasicGame):
@@ -97,7 +105,14 @@ class EldenRingGame(BasicGame):
                 "Shared password written into the Seamless Co-op settings at every launch. "
                 "Stored as plain text in ModOrganizer.ini.",
                 "",
-            )
+            ),
+            mobase.PluginSetting(
+                fetch.NEXUS_PREMIUM_SETTING,
+                "Tick when your Nexus Mods account is Premium. Importing a list then starts the Nexus downloads "
+                "in Fluorine; otherwise each one opens its page in the browser, where you click "
+                "\"Download with manager\".",
+                False,
+            ),
         ]
 
     def _on_mod_installed(self, mod) -> None:
@@ -111,7 +126,7 @@ class EldenRingGame(BasicGame):
         try:
             kinds.record_on_install(mod)
         except Exception as exc:
-            qWarning(f"Elden Ring: could not record the kind of {mod.name()}: {exc!r}")
+            qWarning(f"Elden Ring: could not record the kind of {_name_of(mod)}: {exc!r}")
         finally:
             problems.invalidate()
 
