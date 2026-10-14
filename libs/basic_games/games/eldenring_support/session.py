@@ -409,6 +409,108 @@ def _read_snapshot(path: Path, recorded: dict | None) -> bytes | None:
     return data
 
 
+_SESSION_COPY = re.compile(
+    "^(?:" + "|".join(re.escape(name) for name in saves.GUARDED) + r")\.(\d{8}T\d{12}Z)-modded-session$"
+)
+
+
+def quarantined_since(paths: state.InstancePaths, stamp: object) -> list[Path]:
+    """The session copies in save-backups/quarantine/ that were moved after `stamp`.
+
+    A restore names them with the time it ran, not the session's stamp, so
+    nothing links them to a launch but the order of the two stamps. This is how
+    the record is rebuilt when an earlier attempt moved files and then could
+    not write down where they went. Only one session is ever open (a pending
+    restore blocks the next launch), so everything newer than its stamp is its
+    own. A clock that stepped backwards hides a file from this list, never
+    invents one.
+    """
+    if not isinstance(stamp, str) or not _STAMP.fullmatch(stamp):
+        return []
+    folder = paths.save_backups / "quarantine"
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        match = _SESSION_COPY.match(name)
+        if match and match[1] >= stamp and os.path.isfile(folder / name):
+            found.append(folder / name)
+    return found
+
+
+def moved_files(paths: state.InstancePaths, pending: dict) -> list[str]:
+    """The session copies a restore moved out of the save folder, named or not.
+
+    The record's own list, plus the files quarantined_since finds: a restore
+    that moved files and then could not write the record leaves a pending
+    restore with no list at all.
+    """
+    return _merged(
+        list(pending.get("quarantined") or []), quarantined_since(paths, pending["sentinel"].get("stamp"))
+    )
+
+
+def with_moved(paths: state.InstancePaths, pending: dict) -> dict:
+    """`pending` with its "quarantined" list completed. Every text about a pending restore reads this form."""
+    return {**pending, "quarantined": moved_files(paths, pending)}
+
+
+def _unmoved(pending: dict) -> list[str]:
+    """The changed files that have no moved copy, so the save folder may still hold the session's bytes."""
+    moved = [os.path.basename(path) for path in pending.get("quarantined") or []]
+    return [
+        name
+        for name in pending.get("changed") or []
+        if not any(re.fullmatch(re.escape(name) + r"\.\d{8}T\d{12}Z-modded-session", m) for m in moved)
+    ]
+
+
+def kept_text(pending: dict) -> str:
+    """The sentence naming the session's files a restore already moved out of the save folder.
+
+    Empty when it moved none. The gate's veto and the Save tools both show it,
+    because after a partial restore the save folder no longer holds the session's save
+    and the dialog must not read as if it did. A restore handles one file at a
+    time, so one that stopped early can leave a later file (ER0000.sl2.bak, which
+    the game falls back to) exactly as the session wrote it; the text says so.
+    """
+    quarantined = pending.get("quarantined") or []
+    if not quarantined:
+        return ""
+    text = (
+        "The session's copy of these files has already been moved out of the save folder, to:\n"
+        + "\n".join(f"  {path}" for path in quarantined)
+        + "\nNothing was deleted."
+    )
+    left = _unmoved(pending)
+    if left:
+        text += (
+            f"\n\nThe save folder may still hold what the session wrote to {', '.join(left)}. "
+            "It must not go online: do not press Play in Steam."
+        )
+    return text
+
+
+def _not_recorded(paths: state.InstancePaths, cause: OSError, where: list[Path] | list[str]) -> str:
+    kept = "\n".join(f"  {path}" for path in where)
+    return (
+        f"Fluorine also could not write {paths.last_launch}: {cause}."
+        + (f" The session's files are at:\n{kept}" if kept else "")
+    )
+
+
+def clear_tripped(paths: state.InstancePaths) -> bool:
+    """Drop the note that a session wrote the vanilla save. False when there was none."""
+    data = load_last_launch(paths)
+    if "sentinel_tripped" not in data:
+        return False
+    del data["sentinel_tripped"]
+    save_last_launch(paths, data)
+    return True
+
+
 def restore_pending(
     paths: state.InstancePaths, running: Callable[[], list] | None = None
 ) -> Restored:
@@ -416,25 +518,44 @@ def restore_pending(
 
     Refuses while the game is up: it would race the game's own writes. Files
     an earlier attempt already quarantined stay on the record, whether this
-    attempt finishes or fails again.
+    attempt finishes or fails again; ones that attempt could not record are
+    found again by name (quarantined_since).
+
+    A record that cannot be written is reported as a SnapshotError that says
+    so and names the files that moved, never as the bare OSError, which would
+    hide why the restore itself stopped.
     """
     data = load_last_launch(paths)
     pending = data.get("pending_restore")
     if not pending:
         raise ErmError("No save restore is pending.")
     procs.refuse_while_running(running, "restore")
-    earlier = list(pending.get("quarantined", []))
+    earlier = moved_files(paths, pending)
     try:
         result = restore_changed(paths, pending["sentinel"])
     except SnapshotError as exc:
         if exc.quarantined:
             pending["quarantined"] = _merged(earlier, exc.quarantined)
-            save_last_launch(paths, data)
+            try:
+                save_last_launch(paths, data)
+            except OSError as write_error:
+                raise SnapshotError(
+                    f"{exc}\n\n{_not_recorded(paths, write_error, pending['quarantined'])}",
+                    quarantined=exc.quarantined,
+                ) from exc
         raise
     _close_pending(data, pending, "restored")
     result.quarantined = [Path(p) for p in _merged(earlier, result.quarantined)]
     data["sentinel_tripped"] = tripped(result)
-    save_last_launch(paths, data)
+    try:
+        save_last_launch(paths, data)
+    except OSError as write_error:
+        raise SnapshotError(
+            "The pre-session save is back, but Fluorine could not record that.\n\n"
+            + _not_recorded(paths, write_error, result.quarantined)
+            + "\n\nOpen the Save tools again to finish.",
+            quarantined=result.quarantined,
+        ) from write_error
     return result
 
 
@@ -449,7 +570,9 @@ def keep_session_save(
     """The Save tools' "keep the session's save": the snapshot goes to save-backups/.
 
     Refuses while the game is up, like the restore: a save the game is still
-    writing is not one to settle.
+    writing is not one to settle. After a partial restore the session's own
+    files are already in save-backups/quarantine/; they are written to
+    sentinel_tripped so the problems list and the Save tools can still name them.
     """
     data = load_last_launch(paths)
     pending = data.get("pending_restore")
@@ -465,8 +588,20 @@ def keep_session_save(
             shutil.move(str(snapshot), str(moved))
         except OSError as exc:
             raise SnapshotError(f"cannot move {snapshot} to {moved}: {exc}") from exc
+    elsewhere = moved_files(paths, pending)
     _close_pending(data, pending, "kept")
-    save_last_launch(paths, data)
+    if elsewhere:
+        data["sentinel_tripped"] = tripped(Restored(restored=[], quarantined=[Path(p) for p in elsewhere]))
+    try:
+        save_last_launch(paths, data)
+    except OSError as write_error:
+        done = f"The pre-session copy was moved to {moved}, but" if moved else "The pending restore was closed, but"
+        raise SnapshotError(
+            f"{done} Fluorine could not record that.\n\n"
+            + _not_recorded(paths, write_error, elsewhere)
+            + "\n\nOpen the Save tools again to finish.",
+            quarantined=[Path(p) for p in elsewhere],
+        ) from write_error
     return moved
 
 

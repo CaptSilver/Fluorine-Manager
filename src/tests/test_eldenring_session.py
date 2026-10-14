@@ -702,6 +702,81 @@ class RestorePendingTests(SessionCase):
                 session.restore_pending(self.paths)
 
 
+    def fail_sl2_write(self):
+        real = session.atomic.write_bytes_atomic
+
+        def write(path, data, *args, **kwargs):
+            if Path(path).name == "ER0000.sl2":
+                raise OSError(28, "disk full")
+            return real(path, data, *args, **kwargs)
+
+        return mock.patch.object(session.atomic, "write_bytes_atomic", side_effect=write)
+
+    @staticmethod
+    def refuse_record():
+        def refuse(paths, data):
+            raise OSError(13, "record is read-only")
+
+        return mock.patch.object(session, "save_last_launch", side_effect=refuse)
+
+    def test_a_record_that_cannot_be_written_after_a_partial_restore_reports_both_causes(self) -> None:
+        before = self.paths.last_launch.read_bytes()
+        with self.fail_sl2_write(), self.refuse_record():
+            with self.assertRaises(session.SnapshotError) as caught:
+                session.restore_pending(self.paths, running=lambda: [])
+        [kept] = self.quarantined()
+        text = str(caught.exception)
+        self.assertIn("disk full", text)
+        self.assertIn("record is read-only", text)
+        self.assertIn(str(kept), text)
+        self.assertEqual(caught.exception.quarantined, [kept])
+        self.assertEqual(self.paths.last_launch.read_bytes(), before)
+
+    def test_a_restore_that_finished_but_could_not_be_recorded_says_so_and_names_the_copy(self) -> None:
+        with self.refuse_record():
+            with self.assertRaises(session.SnapshotError) as caught:
+                session.restore_pending(self.paths, running=lambda: [])
+        [kept] = self.quarantined()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertIn("is back, but Fluorine could not record that", str(caught.exception))
+        self.assertIn(str(kept), str(caught.exception))
+        self.assertIn("pending_restore", self.data())
+
+    def test_files_a_lost_record_never_named_are_found_by_name_on_the_next_try(self) -> None:
+        with self.fail_sl2_write(), self.refuse_record():
+            with self.assertRaises(session.SnapshotError):
+                session.restore_pending(self.paths, running=lambda: [])
+        [kept] = self.quarantined()
+        self.assertNotIn("quarantined", self.data()["pending_restore"])
+        session.restore_pending(self.paths, running=lambda: [])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(self.data()["sentinel_tripped"]["quarantined"], [str(kept)])
+        self.assertNotIn("pending_restore", self.data())
+
+    def test_a_write_that_fails_on_the_first_file_leaves_the_second_as_the_session_wrote_it(self) -> None:
+        (self.save_dir / "ER0000.sl2.bak").write_bytes(BAK + b"modded")
+        self.pend(self.record, changed=("ER0000.sl2", "ER0000.sl2.bak"))
+        with self.fail_sl2_write():
+            with self.assertRaises(session.SnapshotError):
+                session.restore_pending(self.paths, running=lambda: [])
+        # The restore stopped at ER0000.sl2, so the .bak was never looked at.
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), BAK + b"modded")
+        pending = self.data()["pending_restore"]
+        self.assertEqual(len(pending["quarantined"]), 1)
+        text = session.kept_text(pending)
+        self.assertIn("may still hold what the session wrote to ER0000.sl2.bak", text)
+        self.assertIn("must not go online", text)
+
+    def test_the_files_of_a_lost_record_are_reported_by_moved_files_before_any_retry(self) -> None:
+        with self.fail_sl2_write(), self.refuse_record():
+            with self.assertRaises(session.SnapshotError):
+                session.restore_pending(self.paths, running=lambda: [])
+        [kept] = self.quarantined()
+        pending = self.data()["pending_restore"]
+        self.assertEqual(session.moved_files(self.paths, pending), [str(kept)])
+        self.assertEqual(session.with_moved(self.paths, pending)["quarantined"], [str(kept)])
+
+
 class KeepSessionSaveTests(SessionCase):
     def setUp(self) -> None:
         super().setUp()
@@ -751,6 +826,162 @@ class KeepSessionSaveTests(SessionCase):
             with self.assertRaises(session.SnapshotError):
                 session.keep_session_save(self.paths)
         self.assertIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
+
+
+    def test_after_a_partial_restore_the_session_files_are_carried_into_the_record(self) -> None:
+        data = json.loads(self.paths.last_launch.read_text())
+        data["pending_restore"]["quarantined"] = ["/q/ER0000.sl2.x-modded-session"]
+        self.paths.last_launch.write_text(json.dumps(data))
+        session.keep_session_save(self.paths)
+        data = json.loads(self.paths.last_launch.read_text())
+        self.assertNotIn("pending_restore", data)
+        self.assertEqual(data["sentinel_tripped"]["quarantined"], ["/q/ER0000.sl2.x-modded-session"])
+        self.assertEqual(data["sentinel_tripped"]["restored"], [])
+
+    def test_copies_a_lost_record_never_named_are_carried_too(self) -> None:
+        kept = self.paths.save_backups / "quarantine" / "ER0000.sl2.20261014T000000000000Z-modded-session"
+        kept.parent.mkdir(parents=True)
+        kept.write_bytes(b"x")
+        session.keep_session_save(self.paths)
+        data = json.loads(self.paths.last_launch.read_text())
+        self.assertEqual(data["sentinel_tripped"]["quarantined"], [str(kept)])
+
+    def test_without_a_partial_restore_no_note_is_written(self) -> None:
+        session.keep_session_save(self.paths)
+        self.assertNotIn("sentinel_tripped", json.loads(self.paths.last_launch.read_text()))
+
+    def test_a_record_that_cannot_be_written_after_the_move_says_where_the_snapshot_went(self) -> None:
+        with mock.patch.object(session, "save_last_launch", side_effect=OSError(13, "record is read-only")):
+            with self.assertRaises(session.SnapshotError) as caught:
+                session.keep_session_save(self.paths)
+        self.assertTrue((self.paths.save_backups / STAMP / "ER0000.sl2").is_file())
+        self.assertIn(str(self.paths.save_backups / STAMP), str(caught.exception))
+        self.assertIn("record is read-only", str(caught.exception))
+        self.assertIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
+        # The snapshot is already where it was moved: this attempt has nothing to
+        # move, and its error must not say it moved the copy "to None".
+        with mock.patch.object(session, "save_last_launch", side_effect=OSError(13, "record is read-only")):
+            with self.assertRaises(session.SnapshotError) as again:
+                session.keep_session_save(self.paths)
+        self.assertNotIn("moved to None", str(again.exception))
+        self.assertIn("The pending restore was closed, but", str(again.exception))
+        self.assertIsNone(session.keep_session_save(self.paths))
+        self.assertNotIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
+
+
+class QuarantinedSinceTests(SessionCase):
+    def make(self, name: str, directory: bool = False) -> Path:
+        path = self.paths.save_backups / "quarantine" / name
+        if directory:
+            path.mkdir(parents=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
+        return path
+
+    def test_the_session_copies_newer_than_the_stamp_are_found_in_name_order(self) -> None:
+        newer = self.make("ER0000.sl2.20261013T120000000002Z-modded-session")
+        bak = self.make("ER0000.sl2.bak.20261014T000000000000Z-modded-session")
+        same = self.make("ER0000.sl2.20261013T120000000001Z-modded-session")
+        self.assertEqual(session.quarantined_since(self.paths, STAMP), [same, newer, bak])
+
+    def test_older_copies_other_saves_and_plain_quarantines_are_not_the_sessions(self) -> None:
+        self.make("ER0000.sl2.20260101T000000000000Z-modded-session")
+        self.make("ER0000.sl2.20261014T000000000000Z")
+        self.make("ER0000.co2.20261014T000000000000Z-modded-session")
+        self.make("ER0000.sl2.20261014T000000000000Z-modded-session.txt")
+        self.make("ER0000.sl2.20261014T000000000001Z-modded-session", directory=True)
+        self.assertEqual(session.quarantined_since(self.paths, STAMP), [])
+
+    def test_no_quarantine_folder_or_a_stamp_that_is_not_one_gives_nothing(self) -> None:
+        self.assertEqual(session.quarantined_since(self.paths, STAMP), [])
+        self.make("ER0000.sl2.20261014T000000000000Z-modded-session")
+        for odd in (None, "", "yesterday", 5):
+            self.assertEqual(session.quarantined_since(self.paths, odd), [], repr(odd))
+
+
+class MovedFilesTests(SessionCase):
+    def make(self, name: str) -> Path:
+        path = self.paths.save_backups / "quarantine" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        return path
+
+    def pending(self, **extra) -> dict:
+        return {"reason": "restore-failed", "changed": ["ER0000.sl2"], "sentinel": {"stamp": STAMP}, **extra}
+
+    def test_the_names_on_the_record_and_the_ones_found_on_disk_are_merged_without_repeats(self) -> None:
+        named = self.make("ER0000.sl2.20261013T120000000002Z-modded-session")
+        found = self.make("ER0000.sl2.bak.20261013T120000000003Z-modded-session")
+        got = session.moved_files(self.paths, self.pending(quarantined=[str(named)]))
+        self.assertEqual(got, [str(named), str(found)])
+
+    def test_a_record_without_the_list_gets_what_is_on_disk(self) -> None:
+        found = self.make("ER0000.sl2.20261013T120000000002Z-modded-session")
+        self.assertEqual(session.moved_files(self.paths, self.pending()), [str(found)])
+        self.assertEqual(session.with_moved(self.paths, self.pending())["quarantined"], [str(found)])
+
+    def test_nothing_anywhere_is_an_empty_list(self) -> None:
+        self.assertEqual(session.moved_files(self.paths, self.pending()), [])
+
+
+class KeptTextTests(unittest.TestCase):
+    def test_nothing_moved_gives_no_sentence(self) -> None:
+        self.assertEqual(session.kept_text({}), "")
+        self.assertEqual(session.kept_text({"quarantined": []}), "")
+
+    def test_every_moved_file_is_named_and_the_reader_is_told_nothing_was_deleted(self) -> None:
+        text = session.kept_text({"quarantined": ["/q/ER0000.sl2.x-modded-session", "/q/ER0000.sl2.bak.x-modded-session"]})
+        self.assertIn("  /q/ER0000.sl2.x-modded-session\n", text)
+        self.assertIn("  /q/ER0000.sl2.bak.x-modded-session\n", text)
+        self.assertIn("moved out of the save folder", text)
+        self.assertTrue(text.endswith("Nothing was deleted."))
+
+    def test_a_changed_file_with_no_moved_copy_is_still_in_the_folder_and_the_text_says_so(self) -> None:
+        text = session.kept_text(
+            {"changed": ["ER0000.sl2", "ER0000.sl2.bak"],
+             "quarantined": ["/q/ER0000.sl2.20261014T000000000000Z-modded-session"]}
+        )
+        self.assertIn("may still hold what the session wrote to ER0000.sl2.bak. It must not go online", text)
+        self.assertIn("do not press Play in Steam", text)
+
+    def test_the_copy_of_the_bak_does_not_stand_in_for_the_copy_of_the_save(self) -> None:
+        text = session.kept_text(
+            {"changed": ["ER0000.sl2"],
+             "quarantined": ["/q/ER0000.sl2.bak.20261014T000000000000Z-modded-session"]}
+        )
+        self.assertIn("what the session wrote to ER0000.sl2. It must not go online", text)
+
+    def test_when_every_changed_file_was_moved_there_is_no_warning(self) -> None:
+        text = session.kept_text(
+            {"changed": ["ER0000.sl2", "ER0000.sl2.bak"],
+             "quarantined": ["/q/ER0000.sl2.20261014T000000000000Z-modded-session",
+                             "/q/ER0000.sl2.bak.20261014T000000000000Z-modded-session"]}
+        )
+        self.assertNotIn("must not go online", text)
+        self.assertTrue(text.endswith("Nothing was deleted."))
+
+
+class ClearTrippedTests(SessionCase):
+    def test_the_note_goes_and_the_rest_of_the_record_stays(self) -> None:
+        session.save_last_launch(self.paths, {"report": {"outcome": "launched"}, "sentinel_tripped": {"quarantined": []}})
+        self.assertTrue(session.clear_tripped(self.paths))
+        self.assertEqual(session.load_last_launch(self.paths), {"report": {"outcome": "launched"}})
+
+    def test_with_no_note_nothing_is_written(self) -> None:
+        self.assertFalse(session.clear_tripped(self.paths))
+        self.assertFalse(self.paths.last_launch.exists())
+        session.save_last_launch(self.paths, {"report": {}})
+        before = self.paths.last_launch.stat().st_mtime_ns
+        self.assertFalse(session.clear_tripped(self.paths))
+        self.assertEqual(self.paths.last_launch.stat().st_mtime_ns, before)
+
+    def test_a_damaged_record_is_an_error_and_is_left_alone(self) -> None:
+        self.paths.last_launch.parent.mkdir(parents=True)
+        self.paths.last_launch.write_text("{")
+        with self.assertRaises(session.LaunchStateError):
+            session.clear_tripped(self.paths)
+        self.assertEqual(self.paths.last_launch.read_text(), "{")
 
 
 class QuarantineAcrossFilesystemsTests(SessionCase):
