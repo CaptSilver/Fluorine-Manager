@@ -30,6 +30,18 @@ def rules_for(mod: str, prunes: list[dict], renames: list[dict]) -> tuple[list[d
     )
 
 
+def _occupied(files: dict[str, Path], target: str) -> bool:
+    """True when `target` is a shipped file, a shipped folder, or sits under a shipped file."""
+    folder = target.rstrip("/") + "/"
+    parts = target.rstrip("/").split("/")
+    ancestors = ("/".join(parts[:i]) for i in range(1, len(parts)))
+    return (
+        target in files
+        or any(name.startswith(folder) for name in files)
+        or any(ancestor in files for ancestor in ancestors)
+    )
+
+
 def view_files(mod: str, mod_dir, prunes: list[dict], renames: list[dict]) -> dict[str, Path]:
     """{path as me3 will see it: the mod's file}, renames applied, then prunes.
 
@@ -45,7 +57,7 @@ def view_files(mod: str, mod_dir, prunes: list[dict], renames: list[dict]) -> di
                     raise ConflictError(f"unsafe rename path (refusing to move): {rel}")
             if source not in files:
                 continue  # already fixed upstream: what the rename wanted
-            if target in files and target != source:
+            if target != source and _occupied(files, target):
                 raise ConflictError(
                     f"{mod}: can't rename {source!r} to {target!r}: the mod ships both, "
                     "and moving one over the other would destroy content. Prune "

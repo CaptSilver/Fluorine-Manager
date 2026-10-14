@@ -85,6 +85,16 @@ class ViewFilesTests(ViewsCase):
         with self.assertRaises(merge_engine.ConflictError):
             views.view_files("pack", self.mod, [], renames)
 
+    def test_a_rename_onto_a_folder_the_mod_ships_is_refused(self) -> None:
+        renames = self.renames({"regulation.bin": "msg/engUS"})
+        with self.assertRaises(merge_engine.ConflictError):
+            views.view_files("pack", self.mod, [], renames)
+
+    def test_a_rename_into_a_file_the_mod_ships_is_refused(self) -> None:
+        renames = self.renames({"msg/engUS/item.msgbnd.dcx": "regulation.bin/item.msgbnd.dcx"})
+        with self.assertRaises(merge_engine.ConflictError):
+            views.view_files("pack", self.mod, [], renames)
+
     def test_unsafe_paths_are_refused_whichever_rule_carries_them(self) -> None:
         for prunes, renames in (
             (self.prunes("../x"), []),
