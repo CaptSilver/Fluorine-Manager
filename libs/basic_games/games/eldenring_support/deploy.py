@@ -110,6 +110,24 @@ def read_manifest(paths: state.InstancePaths) -> Manifest:
     return Manifest(files, list(data["dirs"]))
 
 
+def load_manifest(paths: state.InstancePaths) -> Manifest:
+    """read_manifest for the launch path: a damaged file is a Veto, not an exception.
+
+    A manifest that is wrong must not read as "nothing deployed", so everything
+    that runs before a launch stops on it and names the file.
+    """
+    try:
+        return read_manifest(paths)
+    except state.StateError as exc:
+        raise Veto(
+            STEP,
+            str(exc),
+            "Look at the file. Deleting it forgets which files in Game/mods/ the plugin placed, "
+            "and they then show up as strays.",
+            DEPLOY_MANIFEST_DAMAGED,
+        ) from exc
+
+
 def write_manifest(paths: state.InstancePaths, manifest: Manifest) -> None:
     state.write_json(
         paths.deploy_manifest,
@@ -674,16 +692,7 @@ def sync(
     `launcher` returns hardening.state(...).
     """
     game_dir, stamp = Path(game_dir), stamp or session.now_stamp()
-    try:
-        manifest = read_manifest(paths)
-    except state.StateError as exc:
-        raise Veto(
-            STEP,
-            str(exc),
-            "Look at the file. Deleting it forgets which files in Game/mods/ the plugin placed, "
-            "and they then show up as strays.",
-            DEPLOY_MANIFEST_DAMAGED,
-        ) from exc
+    manifest = load_manifest(paths)
     if verify_first:
         drift = verify(manifest, game_dir)
         if drift:

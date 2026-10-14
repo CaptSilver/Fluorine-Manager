@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import types
@@ -13,7 +14,10 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_prepare_tests")
 prepare = support.module(PACKAGE, "prepare")
+deploy = support.module(PACKAGE, "deploy")
+doctor = support.module(PACKAGE, "doctor")
 generated = support.module(PACKAGE, "generated")
+inventory = support.module(PACKAGE, "inventory")
 merge_engine = support.module(PACKAGE, "merge_engine")
 state = support.module(PACKAGE, "state")
 kinds = support.module(PACKAGE, "kinds")
@@ -25,6 +29,9 @@ errors = support.module(PACKAGE, "ermlib.errors")
 
 LIVE = gamebuild.BuildId(
     exe="2.7.1.0", app="1.17.1", regulation="11711000", steam_buildid="25080141", regulation_sha="a" * 64
+)
+NEW_LIVE = LIVE._replace(
+    exe="2.8.0.0", regulation="11811000", steam_buildid="25999999", regulation_sha="b" * 64
 )
 TEMPLATE = "[PASSWORD]\ncooppassword = @COOP_PASSWORD@\n[SAVE]\nsave_file_extension = co2\n"
 RULE = {"path": "msg/x.dcx", "strategy": "concat", "mods": ["a", "b"], "prefer": "a"}
@@ -61,6 +68,10 @@ class PrepareCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = self.tmp / "home"
+        env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
         self.library = self.tmp / "lib"
         self.install = self.library / "steamapps/common/ELDEN RING"
         (self.install / "Game").mkdir(parents=True)
@@ -85,8 +96,28 @@ class PrepareCase(unittest.TestCase):
             if getattr(patcher, "attribute", "") == "prepare_rebase":
                 self.prepare_rebase = started
         state.write_build_stamp(self.paths, LIVE)
+        self.recorded = self.adopt_game("eldenring.exe")
         self.game_tree = tree(self.install)
         self.addCleanup(lambda: self.assertEqual(tree(self.install), self.game_tree, "Game/ was written"))
+
+    def adopt_game(self, *rels: str):
+        """Record these paths of Game/ as vanilla at LIVE's build, as the Problems list's fix would."""
+        return inventory.adopt(self.paths, self.install / "Game", deploy.Manifest(), LIVE, list(rels))
+
+    def put(self, rel: str, data: bytes = b"x") -> Path:
+        """Write into Game/ and take it as the new state the end-of-test check compares with."""
+        path = self.install / "Game" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        self.game_tree = tree(self.install)
+        return path
+
+    def native(self, config) -> support.FakeMod:
+        mod = self.modlist.add(
+            "thing", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n", "mods/Thing/x.ini": "b=2\n"}
+        )
+        kinds.set_kind(mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=config)
+        return mod
 
     def package(self, name: str, files: dict) -> support.FakeMod:
         return self.modlist.add(name, kind="package", files=files)
@@ -111,15 +142,46 @@ class PrepareCase(unittest.TestCase):
 
 
 class IdentityTests(PrepareCase):
-    def test_no_stamp_is_a_veto_before_anything_can_adopt_a_baseline(self) -> None:
+    def test_no_stamp_and_another_regulation_than_the_recorded_one_is_a_veto_before_any_baseline_is_adopted(self) -> None:
         self.paths.build_stamp.unlink()
+        inventory.write(self.paths, inventory.repin(self.recorded, LIVE._replace(regulation_sha="d" * 64)))
         self.package("a", {"regulation.bin": "RA"})
         self.package("b", {"regulation.bin": "RB"})
         veto = self.veto(prepare.REGULATION_UNPINNED)
         self.assertIn("build-stamp.json", veto.text())
+        self.assertIn("Problems list", veto.text())
         self.adopt.assert_not_called()
         self.prepare_rebase.assert_not_called()
         self.assertEqual(self.generated_files(), {})
+
+    def test_no_stamp_and_the_recorded_regulation_goes_on_and_still_writes_no_stamp(self) -> None:
+        self.paths.build_stamp.unlink()
+        self.package("a", {"msg/x.dcx": "A"})
+        prepared = self.run_prepare()
+        self.assertEqual(prepared.live, LIVE)
+        self.adopt.assert_not_called()
+        self.assertFalse(self.paths.build_stamp.exists())
+
+    def test_no_stamp_and_no_inventory_is_the_unknown_game_folder_veto_and_nothing_adopts(self) -> None:
+        self.paths.build_stamp.unlink()
+        self.paths.vanilla_inventory.unlink()
+        self.package("a", {"regulation.bin": "RA"})
+        veto = self.veto(prepare.VANILLA_UNKNOWN)
+        self.assertIn("Nothing records what a vanilla Game/ holds", veto.text())
+        self.adopt.assert_not_called()
+        self.prepare_rebase.assert_not_called()
+        self.assertEqual(self.generated_files(), {})
+
+    def test_a_stamp_does_not_stand_in_for_the_inventory(self) -> None:
+        self.paths.vanilla_inventory.unlink()
+        self.veto(prepare.VANILLA_UNKNOWN)
+        self.adopt.assert_not_called()
+
+    def test_a_damaged_inventory_is_a_veto_naming_it_and_is_left_alone(self) -> None:
+        self.paths.vanilla_inventory.write_text("{nope")
+        veto = self.veto(prepare.VANILLA_UNKNOWN)
+        self.assertIn("vanilla-inventory.json", veto.text())
+        self.assertEqual(self.paths.vanilla_inventory.read_text(), "{nope")
 
     def test_a_damaged_stamp_is_a_veto_and_is_left_alone(self) -> None:
         self.paths.build_stamp.write_text("{nope")
@@ -157,6 +219,192 @@ class IdentityTests(PrepareCase):
     def test_an_unchanged_build_adopts_nothing(self) -> None:
         self.run_prepare()
         self.adopt.assert_not_called()
+
+
+class GameFolderTests(PrepareCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.put("sd/old.bin", b"old")
+        self.put("steam_api64.dll", b"MZ steam")
+        self.recorded = self.adopt_game("eldenring.exe", "sd/old.bin", "steam_api64.dll")
+
+    def inventory_bytes(self) -> bytes:
+        return self.paths.vanilla_inventory.read_bytes()
+
+    def test_a_vanilla_folder_passes_and_leaves_the_inventory_alone(self) -> None:
+        before = self.inventory_bytes()
+        self.run_prepare()
+        self.assertEqual(self.inventory_bytes(), before)
+
+    def test_a_stray_vetoes_with_the_strays_key_and_nothing_is_built(self) -> None:
+        self.put("bink2w64.dll")
+        self.package("a", {"msg/x.dcx": "A"})
+        veto = self.veto(prepare.GAME_DIR_STRAYS)
+        self.assertIn("  bink2w64.dll", veto.text())
+        self.assertIn("quarantine-game", veto.text())
+        self.assertEqual(self.generated_files(), {})
+
+    def test_the_names_that_load_code_come_first(self) -> None:
+        self.put("aaa.bin")
+        self.put("Dinput8.dll")
+        text = self.veto(prepare.GAME_DIR_STRAYS).text()
+        self.assertLess(text.index("Dinput8.dll"), text.index("aaa.bin"))
+
+    def test_a_link_vetoes_whatever_it_points_at_and_is_not_followed(self) -> None:
+        elsewhere = self.tmp / "their mods"
+        (elsewhere / "inner").mkdir(parents=True)
+        (elsewhere / "inner/loaded.dll").write_bytes(b"x")
+        (self.install / "Game/mods").symlink_to(elsewhere)
+        self.game_tree = tree(self.install)
+        text = self.veto(prepare.GAME_DIR_STRAYS).text()
+        self.assertIn(f"mods -> {elsewhere}", text)
+        self.assertNotIn("loaded.dll", text)
+
+    def test_a_folder_that_cannot_be_read_vetoes_with_its_path(self) -> None:
+        real = os.scandir
+
+        def deny(path):
+            if str(path).endswith("sd"):
+                raise PermissionError(13, "denied", str(path))
+            return real(path)
+
+        with mock.patch.object(os, "scandir", deny):
+            veto = self.veto(prepare.GAME_DIR_STRAYS)
+        self.assertIn("  sd  (cannot be read)", veto.text())
+
+    def test_a_replaced_dll_vetoes_as_changed_and_a_removed_one_as_gone(self) -> None:
+        self.put("steam_api64.dll", b"MZ stoam")
+        os.utime(self.install / "Game/steam_api64.dll", ns=(1, 1))
+        (self.install / "Game/sd/old.bin").unlink()
+        self.game_tree = tree(self.install)
+        text = self.veto(prepare.VANILLA_CHANGED).text()
+        self.assertIn("steam_api64.dll  (changed)", text)
+        self.assertIn("sd/old.bin  (gone)", text)
+
+    def test_a_moved_mtime_with_the_same_bytes_passes_and_is_written_back_to_the_inventory(self) -> None:
+        path = self.install / "Game/steam_api64.dll"
+        os.utime(path, ns=(1, 1))
+        self.run_prepare()
+        self.assertEqual(inventory.read(self.paths).files["steam_api64.dll"].mtime_ns, 1)
+        self.assertEqual(path.read_bytes(), b"MZ steam")
+
+    def test_runtime_noise_the_harden_pair_and_regulation_bin_are_not_this_checks_business(self) -> None:
+        self.put("vkd3d-proton.cache")
+        self.put("SeamlessCoop/crashdumps/x.dmp")
+        self.put("start_protected_game.exe", b"MZ a copy of the game")
+        self.put("start_protected_game.exe.erm-backup", b"MZ eac")
+        self.put("regulation.bin", b"edited by a mod, which the build identity judges")
+        self.run_prepare()
+
+    def test_a_damaged_deploy_manifest_is_its_own_veto(self) -> None:
+        self.paths.deploy_manifest.write_text("{nope")
+        veto = self.veto(deploy.DEPLOY_MANIFEST_DAMAGED)
+        self.assertIn("deploy-manifest.json", veto.text())
+
+    def test_a_deployed_file_and_the_log_its_dll_writes_beside_it_pass(self) -> None:
+        manifest = deploy.Manifest({"mods/Thing/config.ini": deploy.Entry("0" * 64, 4, "thing")}, ["mods/Thing"])
+        deploy.write_manifest(self.paths, manifest)
+        self.put("mods/Thing/config.ini", b"rewritten by the dll\n")
+        self.put("mods/Thing/log.txt")
+        self.run_prepare()
+
+    def test_a_file_a_native_wants_there_with_exactly_its_bytes_is_not_a_stray(self) -> None:
+        self.native(["mods/Thing/config.ini"])
+        self.put("mods/Thing/config.ini", b"a=1\n")
+        self.run_prepare()
+
+    def test_the_same_path_with_other_bytes_is_a_stray(self) -> None:
+        self.native(["mods/Thing/config.ini"])
+        self.put("mods/Thing/config.ini", b"someone else's\n")
+        self.veto(prepare.GAME_DIR_STRAYS)
+
+    def test_reshade_is_reported_in_the_notes_and_never_blocks(self) -> None:
+        shared = self.home / ".local/share/reshade"
+        shared.mkdir(parents=True)
+        (shared / "ReShade64.dll").write_bytes(b"MZ reshade")
+        (self.install / "Game/dxgi.dll").symlink_to(shared / "ReShade64.dll")
+        self.put("ReShade.log")
+        self.recorded = self.adopt_game("eldenring.exe", "sd/old.bin", "steam_api64.dll", "dxgi.dll")
+        notes = self.run_prepare().warnings
+        self.assertIn(f"ReShade is left alone: dxgi.dll -> {shared / 'ReShade64.dll'}", notes)
+
+    def test_a_rebuild_and_a_launch_meet_the_same_check_because_they_are_one_function(self) -> None:
+        self.put("bink2w64.dll")
+        with mock.patch.object(prepare.generated, "build") as build:
+            self.veto(prepare.GAME_DIR_STRAYS)
+        build.assert_not_called()
+
+
+class SteamUpdateTests(PrepareCase):
+    """Steam moved the build: plain data is taken, anything that could carry code waits."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.put("sd/old.bin", b"old")
+        self.put("Data0.bdt", b"d" * 20)
+        self.put("steam_api64.dll", b"MZ steam")
+        self.put("bink2w64.dll", b"MZ bink")
+        self.recorded = self.adopt_game("eldenring.exe", "sd/old.bin", "Data0.bdt", "steam_api64.dll", "bink2w64.dll")
+        state.write_build_stamp(self.paths, LIVE)
+        patcher = mock.patch.object(prepare.gamebuild, "identify", return_value=NEW_LIVE)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_plain_changes_are_recorded_without_asking_and_the_build_and_regulation_move(self) -> None:
+        self.put("sd/new.bin", b"new")
+        self.put("Data0.bdt", b"e" * 25)
+        (self.install / "Game/sd/old.bin").unlink()
+        self.game_tree = tree(self.install)
+        notes = self.run_prepare().warnings
+        moved = inventory.read(self.paths)
+        self.assertEqual((moved.steam_buildid, moved.regulation_sha, moved.regulation), ("25999999", "b" * 64, "11811000"))
+        self.assertIn("sd/new.bin", moved.files)
+        self.assertEqual(moved.files["Data0.bdt"].size, 25)
+        self.assertNotIn("sd/old.bin", moved.files)
+        self.assertTrue(any("build 25999999" in note and "3 data file" in note for note in notes))
+
+    def test_a_patch_adopts_the_new_baseline_before_the_folder_is_looked_at_and_the_inventory_follows(self) -> None:
+        self.run_prepare()
+        self.adopt.assert_called_once_with(self.install / "Game", NEW_LIVE, base=self.paths.baselines)
+        self.assertEqual(inventory.read(self.paths).steam_buildid, "25999999")
+
+    def test_a_new_program_vetoes_as_added_and_the_inventory_is_left_alone(self) -> None:
+        before = self.paths.vanilla_inventory.read_bytes()
+        self.put("version.dll")
+        self.put("newfolder/x.bin")
+        veto = self.veto(prepare.VANILLA_ADDED)
+        self.assertIn("version.dll  (new)", veto.text())
+        self.assertIn("newfolder/x.bin  (new)", veto.text())
+        self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+
+    def test_a_changed_or_removed_program_vetoes_as_changed_and_nothing_is_recorded(self) -> None:
+        before = self.paths.vanilla_inventory.read_bytes()
+        self.put("steam_api64.dll", b"MZ stoam")
+        (self.install / "Game/bink2w64.dll").unlink()
+        self.game_tree = tree(self.install)
+        veto = self.veto(prepare.VANILLA_CHANGED)
+        self.assertIn("steam_api64.dll  (changed)", veto.text())
+        self.assertIn("bink2w64.dll  (gone)", veto.text())
+        self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+
+    def test_plain_changes_are_not_recorded_when_a_program_is_waiting_for_an_answer(self) -> None:
+        self.put("sd/new.bin")
+        self.put("version.dll")
+        self.veto(prepare.VANILLA_ADDED)
+        self.assertNotIn("sd/new.bin", inventory.read(self.paths).files)
+
+    def test_a_link_is_a_stray_whatever_the_build(self) -> None:
+        (self.install / "Game/version.dll").symlink_to(self.tmp / "x.dll")
+        self.game_tree = tree(self.install)
+        self.veto(prepare.GAME_DIR_STRAYS)
+
+    def test_a_deploy_that_drifted_is_the_deploys_veto_before_this_one_in_a_launch(self) -> None:
+        # The gate runs deploy.sync, which verifies at a changed build, before preparing the mods;
+        # this only pins that the inventory never reports a manifest file itself.
+        manifest = deploy.Manifest({"mods/Thing/config.ini": deploy.Entry("0" * 64, 4, "thing")}, ["mods/Thing"])
+        deploy.write_manifest(self.paths, manifest)
+        self.put("mods/Thing/config.ini", b"changed by the update\n")
+        self.run_prepare()
 
 
 class PlacementTests(PrepareCase):
@@ -364,13 +612,6 @@ class ModListTests(PrepareCase):
         veto = self.veto(prepare.NATIVE_DLL_MISSING)
         self.assertIn("broken native", veto.text())
 
-    def native(self, config) -> support.FakeMod:
-        mod = self.modlist.add(
-            "thing", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n", "mods/Thing/x.ini": "b=2\n"}
-        )
-        kinds.set_kind(mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=config)
-        return mod
-
     def test_a_native_with_deployable_config_files_passes(self) -> None:
         self.native(["mods/Thing/config.ini"])
         self.assertEqual([label for label, _ in self.run_prepare().natives], ["thing"])
@@ -407,6 +648,20 @@ class ModListTests(PrepareCase):
         warnings = self.run_prepare().warnings
         self.assertTrue(any("mystery" in w and "not loaded" in w for w in warnings))
         self.assertTrue(any("shop" in w and "item spawner" in w for w in warnings))
+
+    def test_a_mod_folder_that_cannot_be_read_is_a_warning_that_spawners_were_not_looked_for(self) -> None:
+        self.modlist.add("shop", kind="package", files={"msg/a.dcx": b"x"})
+        real = os.walk
+
+        def deny(folder, onerror=None, **kwargs):
+            if str(folder).endswith("shop") and onerror is not None:
+                onerror(PermissionError(13, "denied", str(folder)))
+                return iter(())
+            return real(folder, onerror=onerror, **kwargs)
+
+        with mock.patch.object(doctor.os, "walk", deny):
+            warnings = self.run_prepare().warnings
+        self.assertTrue(any("Could not read" in w and "shop" in w and "spawners" in w for w in warnings))
 
     def test_disabled_mods_are_not_checked(self) -> None:
         self.modlist.add("off", enabled=False, kind="native", files={"x.dll": b"MZ"})

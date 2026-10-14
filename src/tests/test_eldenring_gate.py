@@ -18,6 +18,7 @@ PACKAGE = support.load_support("_eldenring_gate_tests")
 deploy = support.module(PACKAGE, "deploy")
 gate = support.module(PACKAGE, "gate")
 hardening = support.module(PACKAGE, "hardening")
+inventory = support.module(PACKAGE, "inventory")
 kinds = support.module(PACKAGE, "kinds")
 me3 = support.module(PACKAGE, "me3")
 me3_host = support.module(PACKAGE, "me3_host")
@@ -1399,6 +1400,7 @@ class RealPrepareTests(GateCase):
         self.real_organizer = support.FakeOrganizer(self.base)
         self.mods = self.real_organizer.mod_list
         state.write_build_stamp(self.paths, LIVE)
+        inventory.adopt(self.paths, self.install / "Game", deploy.Manifest(), LIVE, ["eldenring.exe"])
         self.package = self.mods.add("A package", kind="package", files={"msg/engus/item.msgbnd.dcx": b"A"})
         self.native = self.mods.add("A native", kind="native", files={"mods/n.dll": synthetic_pe()})
         self.native.setPluginSetting("Elden Ring Support Plugin", "native_dll", "mods/n.dll")
@@ -1448,6 +1450,19 @@ class RealPrepareTests(GateCase):
         )
         # The one test in this class that writes Game/mods/: the check on exit compares with what it left.
         self.game_tree = tree(self.install)
+
+    def test_a_file_only_the_inventory_knows_is_a_stray_vetoes_from_the_real_preparation(self) -> None:
+        (self.install / "Game/bink2w64.dll").write_bytes(b"MZ")
+        self.game_tree = tree(self.install)
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.GAME_DIR_STRAYS, "bink2w64.dll")
+        self.assertFalse(self.paths.current_me3.exists())
+
+    def test_no_inventory_is_the_unknown_game_folder_veto_and_it_is_recorded_for_the_diagnose_pass(self) -> None:
+        self.paths.vanilla_inventory.unlink()
+        self.assertFalse(self.launch())
+        self.assert_vetoed("VANILLA_UNKNOWN", "Nothing records what a vanilla Game/ holds")
+        self.assertFalse(self.paths.current_me3.exists())
 
     def test_a_missing_generated_mod_is_a_veto_from_the_real_preparation(self) -> None:
         self.mods.order.remove("Elden Ring Generated")
