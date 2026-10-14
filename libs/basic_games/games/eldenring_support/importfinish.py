@@ -419,12 +419,20 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
         organizer, paths, host.save_dir, stamp, report, ask_answer=ui.ask_answer, ask_action=ui.ask_action,
         running=host.running, steam_running=host.steam_running, install_root=host.steam_root,
     )
-    cleaned = clean_game(organizer, installed, paths, host, ui, report, stamp)
+    if saved:
+        cleaned = clean_game(organizer, installed, paths, host, ui, report, stamp)
+    else:
+        cleaned = False
+        report.warn(
+            "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam meanwhile. "
+            "Moving them first would leave Steam's launch option starting me3 with erm's mods but without "
+            "Seamless Co-op."
+        )
     launcher_report(host, paths, report)
     adopted = False
     if cleaned:
         adopted = adopt_inventory(installed, paths, host, ui, report)
-    else:
+    elif saved:
         report.warn("Game/ was not recorded as vanilla: erm's files are still in it.")
     option = False
     if saved and adopted:
@@ -434,6 +442,11 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
             "Steam's launch option was not looked at: it stays as it is until ER0000.sl2 is settled and Game/ is "
             "recorded as vanilla. Clearing it lets a Steam Play start the game under Easy Anti-Cheat, which must "
             "not happen with erm's files still in Game/."
+        )
+    if cleaned and not option:
+        report.warn(
+            "Do not press Play in Steam until the launch option is cleared: it starts me3 with erm's mods and "
+            "without Seamless Co-op, into ER0000.sl2."
         )
     blockers = []
     if not saved:

@@ -683,6 +683,13 @@ class LaunchOptionOrderTests(FinishCase):
         self.assertIsNone(self.done())
         self.assertIn(self.VALUE, report.text())
         self.assertIn("Steam still carries a launch option", report.text())
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+
+    def test_no_play_warning_when_the_option_is_cleared(self) -> None:
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: self.options.clear() or True
+        self.assertNotIn("Do not press Play", self.finish().text())
 
     def test_an_option_cleared_when_asked_finishes_the_import(self) -> None:
         self.run_import()
@@ -700,17 +707,20 @@ class LaunchOptionOrderTests(FinishCase):
         self.steam_up = True
         report = self.finish()
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"vanilla")
-        self.assertEqual(self.script.kinds_shown(), ["answer", "action", "review", "adoption"])
+        self.assertEqual(self.script.kinds_shown(), ["answer", "action"])
+        self.assertIn("SeamlessCoop/ersc.dll", base.tree(self.game))
+        self.assertFalse(os.path.lexists(self.paths.vanilla_inventory))
         self.assertIsNone(self.done())
         self.assertEqual(importsave.unreviewed(self.organizer), "20261014T010203000001Z")
         self.assertIn("ER0000.sl2 is still unreviewed", report.text())
         self.assertIn("launch option was not looked at", report.text())
+        self.assertIn("erm's files stay in Game/ until ER0000.sl2 is settled", report.text())
         # Steam is closed on the next run: the question resumes, the save goes, the option is asked about
         self.steam_up = False
         self.script.recheck = lambda: self.options.clear() or True
         self.finish(stamp=STAMP2)
         self.assertFalse((self.save_dir / "ER0000.sl2").exists())
-        self.assertEqual(self.script.kinds_shown()[4:], ["answer", "action", "launch-option"])
+        self.assertEqual(self.script.kinds_shown()[2:], ["answer", "action", "review", "adoption", "launch-option"])
         self.assertEqual(self.done(), STAMP2)
         self.assertEqual(importsave.unreviewed(self.organizer), "")
 
