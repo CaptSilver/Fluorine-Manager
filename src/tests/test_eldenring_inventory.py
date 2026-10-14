@@ -784,6 +784,17 @@ class DiffCase(InventoryCase):
     def diff(self, recorded=None, **kwargs):
         return inventory.diff(self.game, kwargs.pop("manifest", self.manifest), recorded or self.recorded, **kwargs)
 
+    def _hash_fails(self, rel: str, make_error):
+        """sha256_file as a file that vanishes or cannot be read just before it is read."""
+        real = inventory.github.sha256_file
+
+        def failing(path, *args, **kwargs):
+            if Path(path) == self.game / rel:
+                raise make_error(path)
+            return real(path, *args, **kwargs)
+
+        return mock.patch.object(inventory.github, "sha256_file", failing)
+
 
 class DiffTests(DiffCase):
     def test_an_untouched_folder_has_no_difference(self) -> None:
@@ -824,6 +835,32 @@ class DiffTests(DiffCase):
         self.assertEqual(found.removed_suspect, ["bink2w64.dll"])
         self.assertEqual(found.changed_plain, ["Data0.bdt"])
         self.assertEqual(found.removed_plain, ["sd/old.bin"])
+
+    def test_a_program_that_vanishes_while_it_is_hashed_is_removed_suspect(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        with self._hash_fails("steam_api64.dll", lambda p: FileNotFoundError(2, "No such file", str(p))):
+            found = self.diff()
+        self.assertEqual(found.removed_suspect, ["steam_api64.dll"])
+        self.assertFalse(found.plain())
+
+    def test_an_archive_that_vanishes_while_it_is_hashed_is_removed_plain(self) -> None:
+        touch(self.game / "sd/old.bin")
+        with self._hash_fails("sd/old.bin", lambda p: FileNotFoundError(2, "No such file", str(p))):
+            found = self.diff()
+        self.assertEqual(found.removed_plain, ["sd/old.bin"])
+
+    def test_a_wanted_copy_that_vanishes_while_it_is_hashed_is_dropped(self) -> None:
+        self.put("mods/Fov/config.ini", b"fov=90\n")
+        with self._hash_fails("mods/Fov/config.ini", lambda p: FileNotFoundError(2, "No such file", str(p))):
+            found = self.diff(desired={"mods/Fov/config.ini": sha(b"fov=90\n")})
+        self.assertEqual((found.appeared_suspect, found.appeared_plain), ([], []))
+
+    def test_a_file_that_cannot_be_read_while_it_is_hashed_is_unreadable(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        with self._hash_fails("steam_api64.dll", lambda p: PermissionError(13, "Permission denied", str(p))):
+            found = self.diff()
+        self.assertEqual(found.unreadable, ["steam_api64.dll"])
+        self.assertFalse(found.plain())
 
     def test_the_game_executable_every_patch_changes_is_still_a_question(self) -> None:
         self.put("eldenring.exe", b"MZ the patched game")

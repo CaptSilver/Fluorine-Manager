@@ -644,12 +644,20 @@ def diff(
         if excluded(rel, ctx):
             continue
         entry = inventory.files.get(rel)
-        if entry is None:
-            if _is_wanted_copy(game_dir, rel, info, ctx, cache):
+        try:
+            if entry is None:
+                if not _is_wanted_copy(game_dir, rel, info, ctx, cache):
+                    (found.appeared_suspect if _suspect(rel, True, known_tops) else found.appeared_plain).append(rel)
                 continue
-            (found.appeared_suspect if _suspect(rel, True, known_tops) else found.appeared_plain).append(rel)
+            verdict = _compare(game_dir, rel, info, entry, cache)
+        except FileNotFoundError:
+            # Listed by walk, gone before it was hashed: a stray that left is nothing, a recorded file is removed.
+            if entry is not None:
+                (found.removed_suspect if _suspect(rel, False, known_tops) else found.removed_plain).append(rel)
             continue
-        verdict = _compare(game_dir, rel, info, entry, cache)
+        except OSError:
+            found.unreadable.append(rel)
+            continue
         if verdict == _CHANGED:
             (found.changed_suspect if _suspect(rel, False, known_tops) else found.changed_plain).append(rel)
         elif verdict == _REFRESH:
@@ -657,6 +665,7 @@ def diff(
     for rel in sorted(inventory.files):
         if rel not in tree.files and not excluded(rel, ctx):
             (found.removed_suspect if _suspect(rel, False, known_tops) else found.removed_plain).append(rel)
+    found.unreadable.sort()
     found.changed_suspect.sort()
     return found
 
