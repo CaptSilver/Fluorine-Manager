@@ -1461,3 +1461,7 @@ add_test(
     NAME test_eldenring_checker
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_checker.py
 )
+add_test(
+    NAME test_eldenring_archives
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_archives.py
+)
