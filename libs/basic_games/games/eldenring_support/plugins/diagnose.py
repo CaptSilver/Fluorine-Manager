@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Callable
 
 from PyQt6.QtCore import qWarning
@@ -38,6 +39,19 @@ def _dialogs() -> fixes.Ui:
         inform=lambda title, text: qtui.inform(_parent(), title, text),
         busy=lambda title: qtui.Busy(title, _parent()),
     )
+
+
+def _one_row_per_key(rows: list[diagnosis.Problem]) -> list[diagnosis.Problem]:
+    """The core knows a problem by its number, so rows sharing a key become one:
+    texts joined, the first fix kept (and the first row's informational flag)."""
+    merged: dict[str, diagnosis.Problem] = {}
+    for row in rows:
+        first = merged.get(row.key)
+        if first is None:
+            merged[row.key] = row
+        else:
+            merged[row.key] = dataclasses.replace(first, text=f"{first.text}\n{row.text}", fix=first.fix or row.fix)
+    return list(merged.values())
 
 
 class EldenRingDiagnose(mobase.IPluginDiagnose):
@@ -122,6 +136,10 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
             # A Python exception out of a guided fix is not caught by the core.
             qWarning(f"Elden Ring: the fix for {diagnosis.key_of(key)} failed: {exc!r}")
             qtui.critical(_parent(), diagnosis.TITLES[diagnosis.key_of(key)], f"The fix failed: {exc}")
+        finally:
+            # Only some tools invalidate themselves, and the 60 s watch does not see
+            # me3, saves, mod kinds or the generated mod, so the row would linger.
+            problems.invalidate()
 
     # -- the pass -------------------------------------------------------------------
 
@@ -141,7 +159,7 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
                 game = self._organizer.managedGame()
                 if self._diagnosis is None:
                     self._diagnosis = diagnosis.Diagnosis(self._organizer, game)
-                self._cache = self._diagnosis.problems()
+                self._cache = _one_row_per_key(self._diagnosis.problems())
             except Exception as exc:
                 qWarning(f"Elden Ring: the problems check failed: {exc!r}")
                 self._cache = [diagnosis.Problem("DIAGNOSE_FAILED", f"{type(exc).__name__}: {exc}")]

@@ -194,11 +194,36 @@ class ProblemTests(PluginCase):
         self.assertIn("RuntimeError: boom", self.plugin.fullDescription(diagnosis.number("DIAGNOSE_FAILED")))
         self.assertTrue(any("boom" in warning for warning in WARNINGS))
 
+    def test_two_rows_under_one_key_are_one_problem_carrying_both_texts(self) -> None:
+        self.canned = [
+            diagnosis.Problem("DIAGNOSE_FAILED", "first failure"),
+            diagnosis.Problem("DIAGNOSE_FAILED", "second failure", "adopt"),
+        ]
+        code = diagnosis.number("DIAGNOSE_FAILED")
+        self.assertEqual(self.plugin.activeProblems(), [code])
+        description = self.plugin.fullDescription(code)
+        self.assertIn("first failure", description)
+        self.assertIn("second failure", description)
+        self.assertTrue(self.plugin.hasGuidedFix(code))
+
 
 class FixTests(PluginCase):
     def test_a_tool_fix_opens_that_tool(self) -> None:
         self.plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
         self.assertEqual(self.tool.displayed, 1)
+
+    def test_a_tool_fix_triggers_a_fresh_pass_afterwards(self) -> None:
+        self.plugin.activeProblems()
+        self.plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
+        self.plugin.activeProblems()
+        self.assertEqual(self.passes, 2)
+
+    def test_a_tool_fix_that_raises_still_triggers_a_fresh_pass(self) -> None:
+        self.tool.display = mock.Mock(side_effect=RuntimeError("nope"))
+        self.plugin.activeProblems()
+        self.plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
+        self.plugin.activeProblems()
+        self.assertEqual(self.passes, 2)
 
     def test_any_other_fix_runs_by_name_with_the_organizer_and_the_game(self) -> None:
         self.organizer.managedGame = lambda: self.game
