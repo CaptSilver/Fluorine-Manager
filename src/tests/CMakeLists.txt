@@ -1453,3 +1453,7 @@ add_test(
     NAME test_eldenring_fakes
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_fakes.py
 )
+add_test(
+    NAME test_eldenring_kinds
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_kinds.py
+)
