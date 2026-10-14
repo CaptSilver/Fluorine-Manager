@@ -1,8 +1,12 @@
 """The launch gate: what has to be true before me3 starts Elden Ring, and what
 to do about the save file when it exits.
 
-No Qt and no mobase in here. The game plugin hands in the dialogs and the
-process scan as plain callables, which is also what lets the tests run it.
+No Qt and no mobase in here, bar one call: the me3 entry's stored wrapper
+options are read through qtui.stored_wrapper_options, which imports QSettings
+only when it runs, because the core stores executables through QSettings and a
+hand-rolled read of its INI would get the array syntax wrong. The game plugin
+hands in the dialogs and the process scan as plain callables, which is also
+what lets the tests run it.
 
 A Python exception in an onAboutToRun callback is not caught by the core, so
 `LaunchGate.run` catches everything itself and turns it into a veto.
@@ -19,8 +23,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, deploy, doctor, hardening, inventory, me3, me3_host, pe, prepare as preparing, problems, procs,
-    saves, session, state,
+    archives, deploy, doctor, environment, hardening, inventory, me3, me3_host, pe, prepare as preparing, problems,
+    procs, qtui, saves, session, state,
 )
 from .ermlib import steam
 from .ermlib.errors import ErmError
@@ -37,6 +41,9 @@ GAME_RUNNING = "GAME_RUNNING"
 SAVE_RESTORE_PENDING = "SAVE_RESTORE_PENDING"
 NATIVE_DLL_INVALID = "NATIVE_DLL_INVALID"
 ME3_INSTALL_FAILED = "ME3_INSTALL_FAILED"
+ENTRY_WRAPPER_OPTIONS = "ENTRY_WRAPPER_OPTIONS"
+ME3_CONFIG_OVERRIDE = "ME3_CONFIG_OVERRIDE"
+ME3_CONFIG_STEAM_DIR = "ME3_CONFIG_STEAM_DIR"
 GAME_DIR_STRAYS = deploy.GAME_DIR_STRAYS
 
 ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
@@ -105,6 +112,10 @@ class LaunchGate:
     (deploy.desired over the organizer unless supplied), `running()` is
     procs.game_running, `warn(message)` logs and `invalidate()` tells the
     problems listeners that something they report may have changed.
+    `wrapper_options()` returns (title, options) for every stored me3 entry that
+    has wrapper options (qtui.stored_wrapper_options over ModOrganizer.ini
+    unless supplied): the wrapper is the one input the three-argument
+    onAboutToRun cannot show the gate.
     """
 
     def __init__(
@@ -120,6 +131,7 @@ class LaunchGate:
         warn: Callable[[str], None] | None = None,
         desired: Callable[[], deploy.Desired] | None = None,
         invalidate: Callable[[], None] | None = None,
+        wrapper_options: Callable[[], list[tuple[str, str]]] | None = None,
     ) -> None:
         self._organizer = organizer
         self._game = game
@@ -132,6 +144,11 @@ class LaunchGate:
         self._running = running
         self._warn = warn or (lambda message: None)
         self._desired = desired or (lambda: deploy.desired(self._organizer))
+        self._wrapper_options = wrapper_options or (
+            lambda: qtui.stored_wrapper_options(
+                Path(self._organizer.basePath()) / "ModOrganizer.ini", binary_real=me3_host.binary_path()
+            )
+        )
         # Looked up at call time, so a listener subscribed later is heard.
         self._invalidate = invalidate or (lambda: problems.invalidate())
         self._session_stamp: str | None = None
@@ -418,9 +435,11 @@ class LaunchGate:
         ):
             if not check(path):
                 raise _Veto("me3 profile", f"the {what} {path} is not there after writing it.")
-        self._check_entry(paths, binary, cwd, args)
+        self._check_entry(paths, binary, cwd, args, prepared.warnings)
 
-    def _check_entry(self, paths: state.InstancePaths, binary: str, cwd: str, args: str) -> None:
+    def _check_entry(
+        self, paths: state.InstancePaths, binary: str, cwd: str, args: str, notes: list[str]
+    ) -> None:
         step = "Elden Ring (me3) entry"
         fix = (
             "Reset the entry to the plugin's defaults in Fluorine's Executables "
@@ -458,6 +477,43 @@ class LaunchGate:
                 f"{paths.root / 'me3.toml'} exists. me3 reads a me3.toml from its working "
                 "folder and it could change what gets loaded.",
                 "Move the file away.",
+                ME3_CONFIG_OVERRIDE,
+            )
+        self._check_environment(step, notes)
+
+    # The two inputs the token check cannot see: the entry's stored wrapper
+    # options (environment variables and a program in front of me3) and the
+    # config files me3 reads from /etc and the user's config folder.
+    def _check_environment(self, step: str, notes: list[str]) -> None:
+        wrappers = self._wrapper_options()
+        if wrappers:
+            listed = "; ".join(f"{title}: {options}" for title, options in wrappers)
+            raise _Veto(
+                step,
+                f"An entry for me3 carries wrapper options ({listed}). They become environment "
+                "variables and a program started in front of me3, and the gate is never shown "
+                "either, so a wrapper could load code or move the save folder unseen.",
+                "Clear the wrapper options of that entry in Fluorine's Executables dialog.",
+                ENTRY_WRAPPER_OPTIONS,
+            )
+        for finding in environment.scan_me3_config(environment.me3_config_files()):
+            if finding.blocking and finding.key == environment.STEAM_DIR:
+                raise _Veto(
+                    step,
+                    f"{finding.path} sets {finding.key}: {finding.note}.",
+                    f"Remove the {finding.key} key from that file.",
+                    ME3_CONFIG_STEAM_DIR,
+                )
+            if finding.blocking:
+                raise _Veto(
+                    step,
+                    f"{finding.path} is not a file the gate can read: {finding.note}.",
+                    "Replace it with a regular file, or remove the link, so that it can be checked.",
+                    ME3_CONFIG_STEAM_DIR,
+                )
+            notes.append(
+                f"{finding.path} sets {finding.key}: {finding.note}. Reset the entry to the plugin's "
+                "defaults, or remove the key from the file."
             )
 
     @staticmethod

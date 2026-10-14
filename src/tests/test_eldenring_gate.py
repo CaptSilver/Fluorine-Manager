@@ -16,6 +16,7 @@ from eldenring_testsupport import synthetic_pe
 
 PACKAGE = support.load_support("_eldenring_gate_tests")
 deploy = support.module(PACKAGE, "deploy")
+environment = support.module(PACKAGE, "environment")
 gate = support.module(PACKAGE, "gate")
 hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
@@ -79,10 +80,14 @@ class GateCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.home = self.tmp / "home"
         env = mock.patch.dict(
-            os.environ, {"HOME": str(self.home), "XDG_DATA_HOME": str(self.tmp / "xdg")}
+            os.environ,
+            {"HOME": str(self.home), "XDG_DATA_HOME": str(self.tmp / "xdg"), "XDG_CONFIG_HOME": ""},
         )
         env.start()
         self.addCleanup(env.stop)
+        system = mock.patch.object(environment, "SYSTEM_DIR", self.tmp / "etc/me3")
+        system.start()
+        self.addCleanup(system.stop)
         self.library = self.tmp / "lib with space"
         self.install = self.library / "steamapps/common/ELDEN RING"
         (self.install / "Game").mkdir(parents=True)
@@ -646,9 +651,9 @@ class EntryTests(GateCase):
         super().setUp()
         self.make_saves()
 
-    def refused(self, args: str | None = None, **kwargs) -> None:
+    def refused(self, args: str | None = None, key: str | None = None, **kwargs) -> None:
         self.assertFalse(self.launch(args=args, **kwargs))
-        self.assert_vetoed(None, "Elden Ring (me3) entry")
+        self.assert_vetoed(key, "Elden Ring (me3) entry")
         self.assertFalse(self.paths.save_snapshots.exists())
 
     def test_the_canonical_line_is_accepted(self) -> None:
@@ -720,7 +725,7 @@ class EntryTests(GateCase):
     def test_a_me3_toml_in_the_working_folder_is_refused(self) -> None:
         self.paths.root.mkdir(parents=True)
         (self.paths.root / "me3.toml").write_text("[options]\n")
-        self.refused()
+        self.refused(key=gate.ME3_CONFIG_OVERRIDE)
         self.assertIn("me3.toml", self.last_veto())
 
     def test_a_me3_that_is_not_the_managed_one_is_refused_even_under_the_right_name(self) -> None:
@@ -734,6 +739,111 @@ class EntryTests(GateCase):
         self.refused("")
         self.vetoes.clear()
         self.refused('"')
+
+
+class EnvironmentTests(GateCase):
+    """The two inputs the token check cannot see: wrapper options and me3's own config files."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.system = self.tmp / "etc/me3/me3.toml"
+        self.personal = self.home / ".config/me3/me3.toml"
+
+    def write(self, path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def with_wrappers(self, options: list[tuple[str, str]]) -> None:
+        self.gate = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: self.vetoes.append((t, x)),
+            show_modal=lambda t, x: None, prepare=self.fake_prepare, running=lambda: [],
+            desired=lambda: deploy.Desired(), wrapper_options=lambda: options,
+        )
+
+    def test_wrapper_options_on_a_me3_entry_veto_with_their_own_key_and_nothing_is_written(self) -> None:
+        self.with_wrappers([("Elden Ring (me3)", "FOO=1")])
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ENTRY_WRAPPER_OPTIONS, "Elden Ring (me3): FOO=1", "Executables")
+        self.assertFalse(self.paths.save_snapshots.exists())
+        self.assertFalse(self.paths.build_stamp.exists())
+
+    def test_no_wrapper_options_pass(self) -> None:
+        self.with_wrappers([])
+        self.assertTrue(self.launch(), self.vetoes)
+
+    def test_the_default_reader_looks_at_the_instances_ini_through_qsettings(self) -> None:
+        from PyQt6.QtCore import QSettings
+
+        ini = self.base / "ModOrganizer.ini"
+        for options, passes in (("", True), ("FOO=1", False), ("env X=1", False), ("sh -c 'x'", False)):
+            with self.subTest(options):
+                self.vetoes.clear()
+                ini.parent.mkdir(parents=True, exist_ok=True)
+                settings = QSettings(str(ini), QSettings.Format.IniFormat)
+                settings.beginWriteArray("customExecutables", 1)
+                settings.setArrayIndex(0)
+                settings.setValue("title", "Elden Ring (me3)")
+                settings.setValue("binary", "Z:" + str(self.binary).replace("/", "\\"))
+                settings.setValue("wrapperOptions", options)
+                settings.endArray()
+                settings.sync()
+                self.assertEqual(self.launch(), passes, self.vetoes)
+                if not passes:
+                    self.assert_vetoed(gate.ENTRY_WRAPPER_OPTIONS, options)
+
+    def test_a_posix_path_in_the_entry_is_read_as_well(self) -> None:
+        from PyQt6.QtCore import QSettings
+
+        ini = self.base / "ModOrganizer.ini"
+        ini.parent.mkdir(parents=True, exist_ok=True)
+        settings = QSettings(str(ini), QSettings.Format.IniFormat)
+        settings.beginWriteArray("customExecutables", 1)
+        settings.setArrayIndex(0)
+        settings.setValue("title", "Elden Ring (me3)")
+        settings.setValue("binary", str(self.binary))
+        settings.setValue("wrapperOptions", "FOO=1")
+        settings.endArray()
+        settings.sync()
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ENTRY_WRAPPER_OPTIONS, "FOO=1")
+
+    def test_a_steam_dir_behind_a_link_vetoes_and_so_does_a_link_that_leads_nowhere(self) -> None:
+        real = self.tmp / "dotfiles/me3.toml"
+        self.write(real, 'steam_dir = "/other/steam"\n')
+        self.personal.parent.mkdir(parents=True, exist_ok=True)
+        self.personal.symlink_to(real)
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ME3_CONFIG_STEAM_DIR, str(self.personal), "steam_dir", "Remove")
+        self.vetoes.clear()
+        real.unlink()
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ME3_CONFIG_STEAM_DIR, str(self.personal), "not a file the gate can read", "link")
+
+    def test_a_steam_dir_in_either_config_file_vetoes(self) -> None:
+        for path in (self.system, self.personal):
+            with self.subTest(path.parent.parent.name):
+                self.vetoes.clear()
+                self.write(path, 'steam_dir = "/other/steam"\n')
+                self.assertFalse(self.launch())
+                self.assert_vetoed(gate.ME3_CONFIG_STEAM_DIR, str(path), "steam_dir", "Remove")
+                path.unlink()
+
+    def test_the_other_keys_only_warn_and_the_launch_report_names_file_and_key(self) -> None:
+        self.write(self.personal, 'windows_binaries_dir = "/x"\n[game.eldenring]\nskip_logos = true\n')
+        self.assertTrue(self.launch(), self.vetoes)
+        warnings = self.last_launch()["report"]["warnings"]
+        self.assertTrue(any(str(self.personal) in w and "windows_binaries_dir" in w for w in warnings))
+        self.assertTrue(any("[game.eldenring] skip_logos" in w and "no token" in w for w in warnings))
+
+    def test_a_config_file_that_is_not_toml_warns_and_does_not_stop_the_launch(self) -> None:
+        self.write(self.system, "not [toml")
+        self.assertTrue(self.launch(), self.vetoes)
+        self.assertTrue(any("TOML" in w for w in self.last_launch()["report"]["warnings"]))
+
+    def test_neither_file_existing_is_the_normal_case(self) -> None:
+        self.assertTrue(self.launch(), self.vetoes)
+        self.assertEqual(self.last_launch()["report"]["warnings"], [])
 
 
 class SnapshotTests(GateCase):

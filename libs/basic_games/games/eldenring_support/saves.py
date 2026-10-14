@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .ermlib import paths
@@ -74,3 +75,18 @@ def save_dir(library: Path | None) -> Path:
     except (OSError, ValueError):
         folders = []
     return folders[0] if folders else base
+
+
+def steam_install_root() -> Path | None:
+    """Steam's install folder, the one with userdata/ in it, or None.
+
+    Not the library that holds the game: a game in a second library still has
+    its per-user settings here. None when no Steam is found, or the one found has
+    no userdata/, because steam.cloud_saves answers [] for such a root and an
+    empty list must never pass for "no cloud saves".
+    """
+    try:
+        root = paths.find_steam_root()
+    except (PathError, OSError, RuntimeError, ValueError):
+        return None
+    return root if os.path.isdir(root / "userdata") else None

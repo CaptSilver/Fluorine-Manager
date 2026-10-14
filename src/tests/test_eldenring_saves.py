@@ -145,6 +145,34 @@ class DefaultLibraryTests(TempDirCase):
         self.assertIsInstance(saves.save_dir(Path("/x\0y")), Path)
 
 
+class SteamInstallRootTests(TempDirCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.home = self.tmp / "home"
+        env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_the_steam_folder_with_userdata_is_the_install_root(self) -> None:
+        root = self.home / ".local/share/Steam"
+        (root / "steamapps").mkdir(parents=True)
+        (root / "userdata").mkdir()
+        self.assertEqual(saves.steam_install_root(), root)
+
+    def test_a_steam_without_userdata_is_none_because_an_empty_cloud_listing_would_look_like_no_cloud_saves(self) -> None:
+        (self.home / ".local/share/Steam/steamapps").mkdir(parents=True)
+        self.assertIsNone(saves.steam_install_root())
+
+    def test_no_steam_at_all_is_none(self) -> None:
+        self.assertIsNone(saves.steam_install_root())
+
+    def test_an_unreadable_home_is_none_and_does_not_raise(self) -> None:
+        with mock.patch.object(saves.paths, "find_steam_root", side_effect=PermissionError("denied")):
+            self.assertIsNone(saves.steam_install_root())
+        with mock.patch.object(saves.paths, "find_steam_root", side_effect=RuntimeError("no home")):
+            self.assertIsNone(saves.steam_install_root())
+
+
 class GuardedTests(unittest.TestCase):
     def test_the_guarded_files_are_steams_save_and_its_backup(self) -> None:
         # Spelled out: the gate protects what Steam Play loads, and a typo in

@@ -7,6 +7,8 @@ and its unit tests load it without a display.
 
 from __future__ import annotations
 
+import os
+
 
 class Busy:
     """A modal busy indicator for work that blocks the event loop.
@@ -135,3 +137,53 @@ def show_text(parent, title: str, text: str) -> None:
     buttons.accepted.connect(dialog.accept)
     layout.addWidget(buttons)
     dialog.exec()
+
+
+def _linux_path(stored: str) -> str:
+    """A stored executable path as a Linux path.
+
+    The core stores paths the way Wine sees them, `Z:\\home\\x\\me3`, which
+    QSettings reads back with single backslashes. A `Z:` drive is stripped and
+    the backslashes become slashes (what fromWinePath does); a posix path
+    passes through; any other drive has no Linux path and comes back as typed.
+    """
+    if len(stored) > 2 and stored[1] == ":" and stored[0].isalpha():
+        return stored[2:].replace("\\", "/") if stored[0] in "Zz" else stored
+    return stored
+
+
+def stored_wrapper_options(ini_path, binary_name: str = "me3", binary_real=None) -> list[tuple[str, str]]:
+    """(title, wrapper options) of every stored executable of that program with options set.
+
+    An executable is that program when its file name is `binary_name` or, given
+    `binary_real`, when it resolves to the same file (a differently named link
+    to the installed me3 is still me3, and the gate accepts such an entry).
+
+    Read through QSettings, the object the core stores them through, so a value
+    just typed in the Executables dialog is seen and the array syntax needs no
+    guessing. An executable stored before the field existed may carry the legacy
+    `environment` text, which the core turns into wrapper options when it loads.
+    """
+    from PyQt6.QtCore import QSettings
+
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    found = []
+    count = settings.beginReadArray("customExecutables")
+    try:
+        for index in range(count):
+            settings.setArrayIndex(index)
+            binary = _linux_path(str(settings.value("binary", "") or ""))
+            is_program = os.path.basename(binary) == binary_name or (
+                binary_real is not None and binary != "" and os.path.realpath(binary) == os.path.realpath(binary_real)
+            )
+            if not is_program:
+                continue
+            options = settings.value("wrapperOptions")
+            if options is None:
+                options = settings.value("environment", "")
+            options = str(options or "")
+            if options.strip():
+                found.append((str(settings.value("title", "") or binary_name), options))
+    finally:
+        settings.endArray()
+    return found

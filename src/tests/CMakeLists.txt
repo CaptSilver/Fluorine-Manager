@@ -1522,3 +1522,7 @@ add_test(
     NAME test_eldenring_inventory
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_inventory.py
 )
+add_test(
+    NAME test_eldenring_environment
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_environment.py
+)
