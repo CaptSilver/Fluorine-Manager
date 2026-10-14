@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import struct
 import sys
 import types
 from pathlib import Path
@@ -66,3 +67,29 @@ def load_support(package_name: str) -> types.ModuleType:
 
 def module(package: types.ModuleType, name: str) -> types.ModuleType:
     return importlib.import_module(f"{package.__name__}.{name}")
+
+
+IMAGE_FILE_EXECUTABLE_IMAGE = 0x0002
+IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x0020
+IMAGE_FILE_DLL = 0x2000
+
+
+def synthetic_pe(
+    *,
+    machine: int = 0x8664,
+    magic: int = 0x20B,
+    characteristics: int = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL,
+    e_lfanew: int = 0x80,
+    signature: bytes = b"PE\0\0",
+) -> bytes:
+    """The headers of a PE image and nothing after them.
+
+    The defaults describe a 64-bit DLL, which is what pe.pe_dll_ok accepts; each
+    keyword breaks one thing. Shared by the PE tests and the launch gate tests.
+    """
+    dos = bytearray(e_lfanew)
+    dos[:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, e_lfanew)
+    file_header = struct.pack("<HHIIIHH", machine, 0, 0, 0, 0, 240, characteristics)
+    optional = struct.pack("<H", magic) + bytes(240 - 2)
+    return bytes(dos) + signature + file_header + optional
