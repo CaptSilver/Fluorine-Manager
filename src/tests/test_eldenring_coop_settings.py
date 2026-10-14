@@ -47,6 +47,21 @@ class InjectTests(unittest.TestCase):
         self.assertEqual(coop.save_extension(TEMPLATE.replace("co2", "SL2")), "sl2")
         self.assertEqual(coop.save_extension("[SAVE]\n"), "")
 
+    def test_a_duplicate_save_extension_key_raises(self) -> None:
+        with self.assertRaises(coop.CoopSettingsError):
+            coop.save_extension("[SAVE]\nsave_file_extension = co2\nsave_file_extension = sl2\n")
+
+    def test_an_empty_value_does_not_read_the_next_line(self) -> None:
+        self.assertEqual(coop.save_extension("[SAVE]\nsave_file_extension =\nco2\n"), "")
+
+    def test_a_password_with_a_line_break_is_refused(self) -> None:
+        for password in ("pw\nsave_file_extension = co2", "pw\rx"):
+            with self.subTest(password=password):
+                with self.assertRaises(coop.CoopSettingsError):
+                    coop.inject_password(TEMPLATE, password)
+                with self.assertRaises(coop.CoopSettingsError):
+                    coop.inject_password("cooppassword = old\n", password)
+
 
 class SourceTests(unittest.TestCase):
     def setUp(self) -> None:

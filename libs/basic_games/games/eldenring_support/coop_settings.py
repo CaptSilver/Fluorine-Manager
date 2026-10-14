@@ -34,6 +34,11 @@ def inject_password(text: str, password: str) -> str:
     that is an ERSC release that renamed the key, and writing the file back
     unchanged would be a session anyone can join reported as a success.
     """
+    if "\n" in password or "\r" in password:
+        raise CoopSettingsError(
+            "the co-op password has a line break in it; it would add lines to "
+            f"{INI_NAME}, so use a password on one line"
+        )
     if PLACEHOLDER in text:
         return text.replace(PLACEHOLDER, password)
     changed, hits = re.subn(r"(?m)^cooppassword\s*=.*$", lambda _m: f"cooppassword = {password}", text)
@@ -46,9 +51,15 @@ def inject_password(text: str, password: str) -> str:
 
 
 def save_extension(text: str) -> str:
-    """The `save_file_extension` value, lowercased; "" when the key is absent."""
-    match = re.search(r"(?mi)^\s*save_file_extension\s*=\s*(\S*)\s*$", text)
-    return match.group(1).lower() if match else ""
+    """The `save_file_extension` value, lowercased; "" when the key is absent or empty.
+
+    More than one such line raises: the mod reads only one of them, and which one
+    is not something to guess when the answer decides which save file is written.
+    """
+    found = re.findall(r"(?mi)^[ \t]*save_file_extension[ \t]*=[ \t]*(\S*)[ \t]*$", text)
+    if len(found) > 1:
+        raise CoopSettingsError(f"{INI_NAME} sets save_file_extension more than once; keep one line")
+    return found[0].lower() if found else ""
 
 
 def ersc_dir(mod_dir) -> Path | None:
