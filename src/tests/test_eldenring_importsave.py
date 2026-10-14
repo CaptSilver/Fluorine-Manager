@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -12,6 +13,7 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_importsave_tests")
 errors = support.module(PACKAGE, "ermlib.errors")
 importer = support.module(PACKAGE, "importer")
+importoverrides = support.module(PACKAGE, "importoverrides")
 importsave = support.module(PACKAGE, "importsave")
 kinds = support.module(PACKAGE, "kinds")
 saves = support.module(PACKAGE, "saves")
@@ -293,6 +295,136 @@ class ModdedTests(SaveCase):
         self.assertFalse(self.review())
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
         self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+
+
+class AcceptTests(SaveCase):
+    """The route dialog: answer the questions, or accept ER0000.sl2 as it is after one confirmation."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.route = importsave.ROUTE_ACCEPT
+        self.confirm = True
+        self.routes: list[str] = []
+        self.confirmations: list[str] = []
+        self.backup = importer.backup_copy(self.paths, "ER0000.sl2", STAMP)
+        self.backup.parent.mkdir(parents=True)
+        self.backup.write_bytes(SL2)
+        self.log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
+
+    def ask_route(self, text: str):
+        self.routes.append(text)
+        return self.route
+
+    def confirm_accept(self, text: str) -> bool:
+        self.confirmations.append(text)
+        return self.confirm
+
+    def review_with_route(self) -> bool:
+        return importsave.review(
+            self.organizer, self.paths, self.save_dir, STAMP, self.report,
+            ask_answer=self.ask_answer, ask_action=self.ask_action, running=lambda: list(self.running),
+            steam_running=lambda: self.steam_up, install_root=lambda: self.steam,
+            ask_route=self.ask_route, confirm_accept=self.confirm_accept, backup=self.backup, overrides=self.log,
+        )
+
+    def test_accepting_settles_the_question_without_asking_anything_else_or_touching_the_file(self) -> None:
+        self.assertTrue(self.review_with_route())
+        self.assertEqual(importsave.unreviewed(self.organizer), "")
+        self.assertEqual(importsave.decision(self.organizer), "accepted:clean")
+        self.assertEqual((self.texts, self.preselected), ([], []))
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(self.files(), ["ER0000.co2", "ER0000.sl2"])
+
+    def test_the_one_confirmation_names_the_backup_taken_before_the_import(self) -> None:
+        self.review_with_route()
+        [text] = self.confirmations
+        self.assertIn(str(self.backup), text)
+        self.assertIn(f"ER0000.sl2.{STAMP}-pre-erm-import", text)
+
+    def test_the_route_dialog_shows_the_audit(self) -> None:
+        self.review_with_route()
+        self.assertIn("The audit found nothing.", self.routes[0])
+
+    def test_it_is_recorded_and_listed_in_the_report_with_the_audit_and_the_backup(self) -> None:
+        self.review_with_route()
+        [entry] = json.loads(self.paths.import_overrides.read_text())["imports"][0]["overrides"]
+        self.assertEqual((entry["kind"], entry["subject"], entry["choice"]), ("save", "ER0000.sl2", "accepted as my vanilla save"))
+        self.assertIn(str(self.backup), entry["detail"])
+        self.assertTrue(any(text.startswith("Override: ER0000.sl2: accepted as my vanilla save.") for _, text in self.report.lines))
+
+    def test_findings_in_the_audit_do_not_stop_the_user_accepting_and_are_recorded(self) -> None:
+        self.audited = saves.Audited(False, "ER0000.sl2\n\nFound a modded item.")
+        self.assertTrue(self.review_with_route())
+        self.assertEqual(importsave.decision(self.organizer), "accepted:findings")
+        self.assertIn("had findings", self.report.text())
+        self.assertIn("The audit had findings", self.confirmations[0])
+
+    def test_declining_the_confirmation_leaves_the_flag_up_and_records_nothing(self) -> None:
+        self.confirm = False
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertFalse(self.paths.import_overrides.exists())
+        self.assertIn("not confirmed", self.report.text())
+
+    def test_closing_the_route_dialog_leaves_the_flag_up(self) -> None:
+        self.route = None
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertEqual(self.confirmations, [])
+        self.assertIn("was not looked at", self.report.text())
+
+    def test_the_questions_route_runs_the_existing_flow(self) -> None:
+        self.route = importsave.ROUTE_QUESTIONS
+        self.assertTrue(self.review_with_route())
+        self.assertEqual(importsave.decision(self.organizer), "keep:no:clean")
+        self.assertEqual(self.confirmations, [])
+        self.assertFalse(self.paths.import_overrides.exists())
+
+    def test_a_missing_backup_refuses_before_asking(self) -> None:
+        self.backup.unlink()
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(self.confirmations, [])
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertIn("is not there", self.report.text())
+
+    def test_no_backup_path_at_all_refuses_before_asking(self) -> None:
+        self.backup = None
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(self.confirmations, [])
+
+    def test_a_save_that_changed_since_the_backup_refuses_before_asking(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b" synced from the cloud")
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(self.confirmations, [])
+        self.assertIn("has changed since the copy", self.report.text())
+        self.assertIn("takes a new copy first", self.report.text())
+
+    def test_a_save_that_changes_while_the_confirmation_is_open_is_refused(self) -> None:
+        def confirm(text: str) -> bool:
+            (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b" changed meanwhile")
+            return True
+
+        self.confirm_accept = confirm
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertFalse(self.paths.import_overrides.exists())
+
+    def test_a_record_that_cannot_be_written_stops_the_acceptance(self) -> None:
+        with mock.patch.object(importoverrides.state, "write_json", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.review_with_route()
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertEqual(importsave.decision(self.organizer), "")
+
+    def test_a_save_that_is_gone_is_settled_as_gone_without_a_route_dialog(self) -> None:
+        (self.save_dir / "ER0000.sl2").unlink()
+        self.assertTrue(self.review_with_route())
+        self.assertEqual(importsave.decision(self.organizer), importsave.GONE)
+        self.assertEqual(self.routes, [])
+
+    def test_without_the_route_callables_the_questions_are_asked_as_before(self) -> None:
+        self.assertTrue(self.review())
+        self.assertEqual(len(self.texts), 1)
 
 
 if __name__ == "__main__":

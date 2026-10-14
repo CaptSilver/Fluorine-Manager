@@ -23,13 +23,17 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from . import kinds, saves, state
+from . import importoverrides, kinds, saves, state
+from .ermlib import github
 from .ermlib.errors import ErmError
 
 KEY_UNREVIEWED = "save_unreviewed"
 KEY_DECISION = "erm_import_save"
 
 YES, NO, UNKNOWN = "yes", "no", "unknown"
+# How the user goes about an unreviewed ER0000.sl2: through the questions, or by accepting it as it is.
+ROUTE_QUESTIONS, ROUTE_ACCEPT = "questions", "accept"
+ACCEPTED = "accepted"
 QUARANTINE, MODDED, KEEP = "quarantine", "modded", "keep"
 # How a question ends when ER0000.sl2 has left the save folder.
 GONE = "gone"
@@ -46,6 +50,18 @@ ACTION = (
     "Move to modded: it becomes the modded save, so that character is played through me3. Steam must be closed.\n"
     "Keep as vanilla: leave it. Accepted only after the answer \"no\" and an audit that found nothing, and the "
     "report records that you vouched for it, since the audit cannot prove a save clean."
+)
+ROUTE = (
+    "{audit}\n\n"
+    "ER0000.sl2 has not been reviewed. Answer the questions about it, and the import offers to quarantine it, "
+    "move it to the modded save or keep it as vanilla. Or accept it as it is, without the questions."
+)
+ACCEPT = (
+    "Accept the current ER0000.sl2 as your vanilla save?\n\n"
+    "Nothing is moved or changed. The audit cannot prove a save clean, so this rests on your word that no profile "
+    "without Seamless Co-op ever wrote it. Once Steam's launch option is cleared, a Steam Play loads this save "
+    "under Easy Anti-Cheat.\n\n"
+    "The copy taken before this import is {backup}, byte for byte the file as it is now."
 )
 _PURGE = "purge Steam Cloud"
 _OPEN = (
@@ -141,6 +157,45 @@ def _act(action, vanilla, save_dir, paths, stamp, running, steam_running, instal
     return []
 
 
+def _backup_problem(vanilla: Path, backup: Path | None) -> str | None:
+    """Why the copy taken before the import cannot vouch for `vanilla`; None when it can."""
+    if backup is None or not os.path.isfile(backup):
+        return f"the copy taken before the import ({backup}) is not there"
+    try:
+        if github.sha256_file(backup) != github.sha256_file(vanilla):
+            return f"{vanilla.name} has changed since the copy {backup} was taken"
+    except OSError as exc:
+        return f"{vanilla.name} or its copy could not be read ({exc})"
+    return None
+
+
+def _accept(organizer, vanilla: Path, backup: Path | None, report, audited, confirm_accept, overrides) -> bool:
+    """Settle the question by accepting the file as it is, after one confirmation that names the backup.
+
+    Only while the copy taken at the start of this import is still identical to the file: that copy is
+    what makes accepting recoverable. The check runs again after the confirmation, which can stay open
+    for a while.
+    """
+    problem = _backup_problem(vanilla, backup)
+    if problem is None:
+        note = "" if audited.clean else "\n\nThe audit had findings (shown before)."
+        if not confirm_accept(ACCEPT.format(backup=backup) + note):
+            report.warn(f"{saves.VANILLA} was not accepted: it was not confirmed. {_OPEN}")
+            return False
+        problem = _backup_problem(vanilla, backup)
+    if problem is not None:
+        report.warn(f"{saves.VANILLA} was not accepted: {problem}. Run the import again; it takes a new copy first. {_OPEN}")
+        return False
+    findings = "found nothing" if audited.clean else "had findings"
+    overrides.add(
+        importoverrides.SAVE, saves.VANILLA, "accepted as my vanilla save",
+        f"the audit {findings}; the copy taken before the import is {backup}",
+    )
+    settle(organizer, f"{ACCEPTED}:{'clean' if audited.clean else 'findings'}")
+    report.ok(f"{saves.VANILLA} was accepted as your vanilla save, as you chose. It was not changed.")
+    return True
+
+
 def review(
     organizer,
     paths: state.InstancePaths,
@@ -153,8 +208,16 @@ def review(
     running: Callable[[], list] | None = None,
     steam_running: Callable[[], bool] | None = None,
     install_root: Callable[[], Path | None] | None = None,
+    ask_route: Callable[[str], str | None] | None = None,
+    confirm_accept: Callable[[str], bool] | None = None,
+    backup: Path | None = None,
+    overrides=None,
 ) -> bool:
     """Ask about ER0000.sl2 while the flag is up. True when nothing is waiting any more.
+
+    With `ask_route`, `confirm_accept`, `backup` (this import's copy of the file) and `overrides`
+    (the import's OverrideLog), the user first picks ROUTE_QUESTIONS or ROUTE_ACCEPT; closing that
+    dialog leaves the flag up.
 
     The audit's text and a yes/no/don't-know question come first; any finding,
     or an answer other than "no", pre-selects the quarantine. "Keep" is
@@ -176,6 +239,13 @@ def review(
         report.info(f"{saves.VANILLA} is no longer in {save_dir}, so there is nothing to review")
         return True
     audited = _audit(vanilla)
+    if ask_route is not None:
+        route = ask_route(ROUTE.format(audit=audited.text))
+        if route == ROUTE_ACCEPT:
+            return _accept(organizer, vanilla, backup, report, audited, confirm_accept, overrides)
+        if route != ROUTE_QUESTIONS:
+            report.warn(f"{saves.VANILLA} was not looked at. {_OPEN}")
+            return False
     answer = ask_answer(QUESTION.format(audit=audited.text))
     if answer not in (YES, NO, UNKNOWN):
         report.warn(f"{saves.VANILLA} was not looked at. {_OPEN}")
