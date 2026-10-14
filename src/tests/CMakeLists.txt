@@ -1505,3 +1505,7 @@ add_test(
     NAME test_eldenring_deploy
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_deploy.py
 )
+add_test(
+    NAME test_eldenring_hardening
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_hardening.py
+)
