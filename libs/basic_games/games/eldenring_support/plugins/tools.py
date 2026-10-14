@@ -299,8 +299,8 @@ class SaveToolsTool(EldenRingTool):
     def _menu(self, paths: state.InstancePaths, record: dict, damaged: bool) -> None:
         pending = record.get("pending_restore")
         actions = {
-            BACKUP: lambda: self._backup(paths, pending),
-            RESTORE_BACKUP: lambda: self._restore_backup(paths, pending),
+            BACKUP: lambda: self._backup(paths, pending, damaged),
+            RESTORE_BACKUP: lambda: self._restore_backup(paths, pending, damaged),
         }
         if not damaged:
             # These end by clearing a note kept in last-launch.json.
@@ -332,27 +332,32 @@ class SaveToolsTool(EldenRingTool):
             return f"\n\nFluorine could not clear the note that a modded session wrote the vanilla save: {exc}"
         return ""
 
-    def _backup(self, paths: state.InstancePaths, pending: dict | None) -> None:
+    def _backup(self, paths: state.InstancePaths, pending: dict | None, damaged: bool = False) -> None:
         folder, files = saves.save_files(self._organizer)
         if not files:
             self._info(f"There are no save files in {folder}.")
             return
         # While a restore is pending these two hold what the session wrote. A copy
         # named for the session cannot be restored into Steam's save; "manual" could.
-        wrote = set(pending.get("changed") or saves.GUARDED[:1]) & set(saves.GUARDED) if pending else set()
+        # An unreadable record may be hiding a pending restore, so it counts the same.
+        if pending:
+            wrote = set(pending.get("changed") or saves.GUARDED[:1]) & set(saves.GUARDED)
+        else:
+            wrote = set(saves.GUARDED) if damaged else set()
         made = saves.backup_all(
             files, paths.save_backups, "manual", session.now_stamp(), session_files=wrote
         )
         named = sorted(wrote & {path.name for path in files})
+        why = "A restore may be pending" if damaged and not pending else "A restore is pending"
         note = (
-            f"\n\nA restore is pending, so the copy of {', '.join(named)} is named {saves.SESSION_LABEL}: "
+            f"\n\n{why}, so the copy of {', '.join(named)} is named {saves.SESSION_LABEL}: "
             "it can be moved to the modded name but not restored into Steam's save."
             if named
             else ""
         )
         self._info(f"Backed up {len(made)} file(s):\n{self._listed(made)}{note}")
 
-    def _restore_backup(self, paths: state.InstancePaths, pending: dict | None) -> None:
+    def _restore_backup(self, paths: state.InstancePaths, pending: dict | None, damaged: bool = False) -> None:
         everything = saves.restorable_backups(paths.save_backups)
         # What a session wrote to Steam's save is modded progress and restore_backup
         # refuses it, so the picker does not offer it.
@@ -370,6 +375,11 @@ class SaveToolsTool(EldenRingTool):
         if picked is None:
             return
         backup = names[picked]
+        if damaged and backup.base in saves.GUARDED:
+            raise ErmError(
+                "The record of the last launch is damaged, so it is not known whether ER0000.sl2 and "
+                "ER0000.sl2.bak still hold what a modded session wrote. Nothing is put into Steam's save."
+            )
         if pending and backup.base in saves.GUARDED:
             raise ErmError(
                 "A restore of the pre-session snapshot is pending, so ER0000.sl2 and ER0000.sl2.bak still hold "

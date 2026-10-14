@@ -528,6 +528,20 @@ class BackupToolTests(SaveToolsMenuCase):
         with self.assertRaises(errors.ErmError):
             saves.restore_backup(by_base["ER0000.sl2"], self.save_dir, self.paths.save_backups, "20261013T120000000009Z")
 
+    def test_while_the_record_is_damaged_the_copies_of_both_steam_files_are_named_for_the_session(self) -> None:
+        self.pend()
+        self.paths.last_launch.write_text("{")
+        (self.save_dir / "ER0000.sl2.bak").write_bytes(SL2 + b"modded bak")
+        with self.menu(tools.BACKUP):
+            self.tool.display()
+        by_base = {b.base: b for b in saves.restorable_backups(self.paths.save_backups)}
+        self.assertTrue(by_base["ER0000.sl2"].modded_session)
+        self.assertTrue(by_base["ER0000.sl2.bak"].modded_session)
+        self.assertEqual(by_base["ER0000.co2"].label, "manual")
+        self.assertIn("modded-session", SHOWN[-1][2])
+        with self.assertRaises(errors.ErmError):
+            saves.restore_backup(by_base["ER0000.sl2"], self.save_dir, self.paths.save_backups, "20261013T120000000009Z")
+
     def test_a_running_game_is_refused_and_nothing_is_copied(self) -> None:
         with self.menu(tools.BACKUP), mock.patch.object(session.procs, "game_running", return_value=[(4, "me3")]):
             self.tool.display()
@@ -584,6 +598,17 @@ class RestoreBackupToolTests(SaveToolsMenuCase):
         self.assertIn("Settle the pending restore first", SHOWN[-1][2])
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
         self.assertIn("pending_restore", session.load_last_launch(self.paths))
+
+    def test_while_the_record_is_damaged_nothing_is_put_into_steams_save(self) -> None:
+        self.paths.last_launch.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.last_launch.write_text("{")
+        name = f"ER0000.sl2.{STAMP}-manual"
+        self.put_backup(name, b"an older vanilla save")
+        with self.menu([tools.RESTORE_BACKUP, self.label(name, "ER0000.sl2")]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("damaged", SHOWN[-1][2])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
 
     def test_while_a_restore_is_pending_the_other_saves_can_still_be_restored(self) -> None:
         self.pend()
