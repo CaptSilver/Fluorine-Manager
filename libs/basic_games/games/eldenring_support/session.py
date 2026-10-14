@@ -60,7 +60,7 @@ def load_last_launch(paths: state.InstancePaths) -> dict:
          "pending_restore": {"reason", "sentinel", "changed", ...},
          "sentinel_tripped": {"time", "restored", "quarantined"}}
 
-    An <entry> is {"size", "mtime_ns", "sha256"} for a file that existed
+    An <entry> is {"size", "mtime_ns", "ino", "dev", "ctime_ns", "sha256"} for a file that existed
     before the launch and null for one that did not. `pending_restore` is
     there only while a restore is owed.
 
@@ -87,10 +87,26 @@ def save_last_launch(paths: state.InstancePaths, data: dict) -> None:
     state.write_json(paths.last_launch, data)
 
 
+def _identity(info: os.stat_result) -> tuple:
+    """Size, mtime, inode, device and ctime: what must all hold for a file to count as untouched.
+
+    mtime alone can be put back (Wine's SetFileTime, cp -p, rsync -t); ctime
+    cannot be set from userspace, so a same-size rewrite still moves it.
+    """
+    return (info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev, info.st_ctime_ns)
+
+
+def _entry(info: os.stat_result, digest: str) -> dict:
+    size, mtime_ns, ino, dev, ctime_ns = _identity(info)
+    return {"size": size, "mtime_ns": mtime_ns, "ino": ino, "dev": dev,
+            "ctime_ns": ctime_ns, "sha256": digest}
+
+
 def check_file(recorded: dict | None, path: Path) -> tuple[bool, dict | None]:
     """Whether `path` differs from `recorded`, and the entry to keep.
 
-    Size and mtime unchanged means unchanged, with no read. A moved stat is
+    An unchanged identity (size, mtime, inode, device, ctime) means unchanged,
+    with no read. An entry that lacks those fields is hashed. A moved stat is
     followed by a hash: the game may open the save for writing without
     changing a byte, and Steam may rewrite one with the same bytes, and
     neither is a finding. The kept entry then has the new stat.
@@ -101,11 +117,13 @@ def check_file(recorded: dict | None, path: Path) -> tuple[bool, dict | None]:
         return recorded is not None, recorded
     if recorded is None:
         return True, None
-    if info.st_size == recorded["size"] and info.st_mtime_ns == recorded["mtime_ns"]:
+    keys = ("size", "mtime_ns", "ino", "dev", "ctime_ns")
+    if all(k in recorded for k in keys) and tuple(recorded[k] for k in keys) == _identity(info):
         return False, recorded
-    if github.sha256_file(path) != recorded["sha256"]:
+    digest = github.sha256_file(path)
+    if digest != recorded["sha256"]:
         return True, recorded
-    return False, {**recorded, "size": info.st_size, "mtime_ns": info.st_mtime_ns}
+    return False, _entry(info, digest)
 
 
 def compare_sentinel(sentinel: dict) -> tuple[list[str], dict]:
@@ -165,7 +183,7 @@ def _copy_verified(source: Path, destination: Path) -> dict | None:
     try:
         data = source.read_bytes()
         after = os.stat(source)
-        moved = (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+        moved = _identity(before) != _identity(after)
         if moved or len(data) != after.st_size:
             raise SnapshotError(
                 f"{source} changed while it was being copied. Is the game or Steam "
@@ -177,7 +195,7 @@ def _copy_verified(source: Path, destination: Path) -> dict | None:
             raise SnapshotError(f"the copy {destination} does not match {source}")
     except OSError as exc:
         raise SnapshotError(f"cannot copy {source} to {destination}: {exc}") from exc
-    return {"size": after.st_size, "mtime_ns": after.st_mtime_ns, "sha256": digest}
+    return _entry(after, digest)
 
 
 def prune_snapshots(

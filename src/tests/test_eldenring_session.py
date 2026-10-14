@@ -98,7 +98,10 @@ class StampTests(unittest.TestCase):
 class CheckFileTests(SessionCase):
     def entry(self, data: bytes, path: Path) -> dict:
         info = path.stat()
-        return {"size": len(data), "mtime_ns": info.st_mtime_ns, "sha256": sha(data)}
+        return {
+            "size": len(data), "mtime_ns": info.st_mtime_ns, "ino": info.st_ino,
+            "dev": info.st_dev, "ctime_ns": info.st_ctime_ns, "sha256": sha(data),
+        }
 
     def test_unchanged_stat_means_unchanged_without_reading(self) -> None:
         self.write_saves()
@@ -114,7 +117,8 @@ class CheckFileTests(SessionCase):
         os.utime(path, ns=(5_000_000_000, 5_000_000_000))
         changed, kept = session.check_file(recorded, path)
         self.assertFalse(changed)
-        self.assertEqual(kept, {**recorded, "mtime_ns": 5_000_000_000})
+        self.assertEqual(kept, self.entry(SL2, path))
+        self.assertEqual(kept["mtime_ns"], 5_000_000_000)
 
     def test_different_bytes_are_a_change_even_at_the_same_size(self) -> None:
         self.write_saves()
@@ -125,6 +129,27 @@ class CheckFileTests(SessionCase):
         path.write_bytes(bytes(edited))
         os.utime(path, ns=(recorded["mtime_ns"] + 1, recorded["mtime_ns"] + 1))
         self.assertEqual(session.check_file(recorded, path), (True, recorded))
+
+    def test_a_same_size_rewrite_with_the_old_mtime_put_back_is_a_change(self) -> None:
+        self.write_saves()
+        path = self.save_dir / "ER0000.sl2"
+        recorded = self.entry(SL2, path)
+        edited = bytearray(SL2)
+        edited[10] ^= 1
+        path.write_bytes(bytes(edited))
+        os.utime(path, ns=(recorded["mtime_ns"], recorded["mtime_ns"]))
+        self.assertEqual(path.stat().st_mtime_ns, recorded["mtime_ns"])
+        self.assertEqual(session.check_file(recorded, path), (True, recorded))
+
+    def test_an_entry_without_inode_and_ctime_is_hashed_not_trusted(self) -> None:
+        self.write_saves()
+        path = self.save_dir / "ER0000.sl2"
+        old = {k: v for k, v in self.entry(SL2, path).items() if k in ("size", "mtime_ns", "sha256")}
+        with mock.patch.object(session.github, "sha256_file", wraps=session.github.sha256_file) as spy:
+            changed, kept = session.check_file(old, path)
+        spy.assert_called_once()
+        self.assertFalse(changed)
+        self.assertEqual(kept, self.entry(SL2, path))
 
     def test_a_file_that_appeared_against_none_is_a_change(self) -> None:
         self.write_saves()
@@ -226,6 +251,29 @@ class TakeSnapshotTests(SessionCase):
             with self.assertRaises(session.SnapshotError) as caught:
                 session.take_snapshot(self.paths, self.save_dir, STAMP)
         self.assertIn("changed while it was being copied", str(caught.exception))
+
+    def test_a_save_rewritten_in_place_with_its_mtime_restored_during_the_copy_is_refused(self) -> None:
+        self.write_saves()
+        real = Path.read_bytes
+
+        def racing(path):
+            data = real(path)
+            if path.name == "ER0000.sl2":
+                before = path.stat().st_mtime_ns
+                path.write_bytes(b"y" * len(data))
+                os.utime(path, ns=(before, before))
+            return data
+
+        with mock.patch.object(Path, "read_bytes", racing):
+            with self.assertRaises(session.SnapshotError):
+                session.take_snapshot(self.paths, self.save_dir, STAMP)
+
+    def test_snapshot_entries_carry_the_identity_check_check_file_uses(self) -> None:
+        self.write_saves()
+        _, files = session.take_snapshot(self.paths, self.save_dir, STAMP)
+        path = self.save_dir / "ER0000.sl2"
+        with mock.patch.object(session.github, "sha256_file", side_effect=AssertionError("read")):
+            self.assertEqual(session.check_file(files["ER0000.sl2"], path), (False, files["ER0000.sl2"]))
 
     def test_a_copy_whose_hash_differs_from_its_source_is_refused(self) -> None:
         self.write_saves()
