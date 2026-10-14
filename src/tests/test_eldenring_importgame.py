@@ -296,6 +296,26 @@ class ExecuteTests(SurveyCase):
         self.assertEqual((self.where() / "mods/AdjustTheFov/config.ini").read_bytes(), EDITED)
         self.assertFalse(os.path.lexists(self.game / "mods"))
 
+    def test_a_repeat_run_with_the_same_stamp_keeps_the_first_original_aside(self) -> None:
+        mod = self.native()
+        self.put("mods/AdjustTheFov/config.ini", EDITED)
+        installed = {"adjust-the-fov": {"install": "game", "files": ["mods/AdjustTheFov/config.ini"]}}
+
+        def refuse(paths, game_dir, rel, stamp):
+            raise quarantine.QuarantineError("denied")
+
+        with mock.patch.object(importgame.quarantine, "move_out", refuse):
+            first = importgame.execute(self.survey(installed), self.paths, self.game, STAMP)
+        self.assertEqual(first.failed, ["denied"])
+        aside = self.where() / "mod-defaults/adjust-the-fov/mods/AdjustTheFov/config.ini"
+        self.assertEqual(aside.read_bytes(), DEFAULT)
+        # the live file is edited again after the failed move, then the import runs again
+        self.put("mods/AdjustTheFov/config.ini", b"[fov]\nvalue=3\n")
+        second = importgame.execute(self.survey(installed), self.paths, self.game, STAMP)
+        self.assertEqual(second.failed, [])
+        self.assertEqual(aside.read_bytes(), DEFAULT)
+        self.assertEqual((Path(mod.absolutePath()) / "mods/AdjustTheFov/config.ini").read_bytes(), b"[fov]\nvalue=3\n")
+
     def test_a_mod_folder_without_a_copy_gets_the_edit_and_has_nothing_to_set_aside(self) -> None:
         mod = self.native()
         copy = Path(mod.absolutePath()) / "mods/AdjustTheFov/config.ini"

@@ -232,7 +232,10 @@ def _carry(carry: Carry, paths: state.InstancePaths, game_dir: Path, folder: str
     aside = None
     if carry.has_default:
         aside = paths.quarantine_game / folder / "mod-defaults" / carry.mod / carry.cfg
-        atomic.write_bytes_atomic(aside, carry.source.read_bytes())
+        # A repeat run with the same stamp must not replace the first aside: by then the mod
+        # folder holds the user's earlier edit, and the true original would be gone.
+        if not os.path.lexists(aside):
+            atomic.write_bytes_atomic(aside, carry.source.read_bytes())
     atomic.write_bytes_atomic(carry.source, data)
     return aside
 
