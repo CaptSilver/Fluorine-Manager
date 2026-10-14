@@ -193,6 +193,25 @@ class HashCacheTests(ArchivesCase):
                 state.cached_sha256(cache, one)
             self.assertEqual(write.call_count, 1)
 
+    def test_a_cache_that_cannot_be_saved_is_logged_and_does_not_fail_the_work_that_used_it(self) -> None:
+        one = self.downloads / "one.zip"
+        one.write_bytes(b"1")
+        with mock.patch.object(state, "write_json", side_effect=OSError("disk full")):
+            with self.assertLogs(archives.log, "WARNING") as logged:
+                with archives.hash_cache(self.paths) as cache:
+                    digest = state.cached_sha256(cache, one)
+        self.assertEqual(digest, hashlib.sha256(b"1").hexdigest())
+        self.assertIn("disk full", logged.output[0])
+
+    def test_what_was_hashed_before_the_work_failed_is_still_saved(self) -> None:
+        one = self.downloads / "one.zip"
+        one.write_bytes(b"1")
+        with self.assertRaises(RuntimeError):
+            with archives.hash_cache(self.paths) as cache:
+                state.cached_sha256(cache, one)
+                raise RuntimeError("the work failed")
+        self.assertIn(str(one), state.read_cache(self.paths.archive_hashes))
+
     def test_a_damaged_cache_file_is_replaced_not_fatal(self) -> None:
         self.paths.archive_hashes.parent.mkdir(parents=True)
         self.paths.archive_hashes.write_text("{nope")

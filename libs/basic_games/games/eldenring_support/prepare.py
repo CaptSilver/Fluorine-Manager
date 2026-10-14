@@ -145,7 +145,7 @@ def _blocklisted_first(game_dir: Path, rels: list[str]) -> list[str]:
     return sorted(rels, key=lambda rel: (rel not in known, rel))
 
 
-def _stray_veto(
+def stray_veto(
     game_dir: Path, strays: list[str], symlinks: list[tuple[str, str]], unreadable: list[str]
 ) -> Veto | None:
     """The veto for what is in Game/ and should not be: strays, links, folders that cannot be read."""
@@ -164,7 +164,7 @@ def _stray_veto(
     )
 
 
-def _changed_veto(found) -> Veto | None:
+def changed_veto(found) -> Veto | None:
     lines = [f"  {rel}  (changed)" for rel in found.changed] + [f"  {rel}  (gone)" for rel in found.removed]
     if not lines:
         return None
@@ -197,9 +197,9 @@ def _game_folder(
     with archives.hash_cache(paths) as cache:
         if inventory.build_changed(vanilla, live.steam_buildid):
             found = inventory.diff(game_dir, manifest, vanilla, desired=desired, cache=cache)
-            refusal = _stray_veto(game_dir, [], found.symlinks, found.unreadable)
+            refusal = stray_veto(game_dir, [], found.symlinks, found.unreadable)
             if refusal is None and (found.appeared_suspect or found.changed_suspect or found.removed_suspect):
-                refusal = _update_veto(found)
+                refusal = update_veto(found)
             if refusal is not None:
                 raise refusal
             try:
@@ -213,7 +213,7 @@ def _game_folder(
                 "data file(s) were recorded as vanilla."
             ]
         found = inventory.check(game_dir, manifest, vanilla, live.steam_buildid, desired=desired, cache=cache)
-        refusal = _stray_veto(game_dir, found.strays, found.symlinks, found.unreadable) or _changed_veto(found)
+        refusal = stray_veto(game_dir, found.strays, found.symlinks, found.unreadable) or changed_veto(found)
         if refusal is not None:
             raise refusal
         if found.refreshed:
@@ -224,7 +224,7 @@ def _game_folder(
     return _reshade_lines(found.reshade)
 
 
-def _update_veto(found) -> Veto:
+def update_veto(found) -> Veto:
     lines = [f"  {rel}  (new)" for rel in found.appeared_suspect]
     lines += [f"  {rel}  (changed)" for rel in found.changed_suspect]
     lines += [f"  {rel}  (gone)" for rel in found.removed_suspect]

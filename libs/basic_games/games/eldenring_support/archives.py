@@ -5,11 +5,14 @@ from __future__ import annotations
 import configparser
 import contextlib
 import json
+import logging
 import os
 import re
 from pathlib import Path
 
 from . import atomic, state
+
+log = logging.getLogger(__name__)
 
 
 def archive_path(organizer, mod) -> Path | None:
@@ -159,9 +162,16 @@ def hash_cache(paths: state.InstancePaths):
     """
     cache = state.read_cache(paths.archive_hashes)
     before = json.dumps(cache, sort_keys=True)
-    yield cache
-    if json.dumps(cache, sort_keys=True) != before:
-        state.write_json(paths.archive_hashes, cache)
+    try:
+        yield cache
+    finally:
+        # A cache that cannot be saved costs a re-hash next time and never makes
+        # an answer wrong, so it must not turn the work that used it into a failure.
+        if json.dumps(cache, sort_keys=True) != before:
+            try:
+                state.write_json(paths.archive_hashes, cache)
+            except OSError as exc:
+                log.warning("cannot save %s: %s", paths.archive_hashes, exc)
 
 
 def archive_sha256(paths: state.InstancePaths, archive) -> str:
