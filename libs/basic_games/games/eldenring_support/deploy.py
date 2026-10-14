@@ -437,6 +437,14 @@ class Applied:
         return out + self.attention()
 
 
+def _record(paths: state.InstancePaths, manifest: Manifest) -> None:
+    """write_manifest for the apply steps: a failed write is a DeployError, not a raw OSError."""
+    try:
+        write_manifest(paths, manifest)
+    except OSError as exc:
+        raise DeployError(f"cannot write {paths.deploy_manifest}: {exc}") from exc
+
+
 def _folder_of(rel: str) -> str:
     return "/".join(rel.split("/")[:2])
 
@@ -459,7 +467,7 @@ def _make_folders(rel: str, manifest: Manifest, paths: state.InstancePaths, game
     if found is None:
         if name_rel not in manifest.dirs:
             manifest.dirs.append(name_rel)
-            write_manifest(paths, manifest)
+            _record(paths, manifest)
         os.mkdir(folder)
     elif found != fsprobe.DIR:
         raise DeployError(f"{folder} is not a folder")
@@ -492,7 +500,7 @@ def _copy_one(
     if written != digest:
         raise DeployError(f"{game_dir / rel} does not read back as the file that was written")
     manifest.files[rel] = Entry(digest, len(data), want.mod)
-    write_manifest(paths, manifest)
+    _record(paths, manifest)
     done.copied.append(rel)
 
 
@@ -507,7 +515,7 @@ def apply_copies(
     done, stamp, game_dir = Applied(), stamp or session.now_stamp(), Path(game_dir)
     for rel, want in plan.adopts:
         manifest.files[rel] = Entry(want.sha256, want.size, want.mod)
-        write_manifest(paths, manifest)
+        _record(paths, manifest)
         done.adopted.append(rel)
     for item in plan.copies:
         _copy_one(item, manifest, paths, game_dir, stamp, done)
@@ -554,7 +562,7 @@ def _clean_folders(
                 raise DeployError(f"cannot remove the folder {folder}: {exc}") from exc
             done.folders_removed.append(name_rel)
         manifest.dirs.remove(name_rel)
-        write_manifest(paths, manifest)
+        _record(paths, manifest)
 
 
 def apply_removes(
@@ -585,7 +593,7 @@ def apply_removes(
         except (OSError, quarantine.QuarantineError) as exc:
             raise DeployError(f"cannot remove {game_dir / rel}: {exc}") from exc
         del manifest.files[rel]
-        write_manifest(paths, manifest)
+        _record(paths, manifest)
         done.removed.append(rel)
     # A folder the same sync is about to copy into stays, with the DLL's log in it.
     needed = {_folder_of(item.rel) for item in plan.copies} | {_folder_of(rel) for rel, _ in plan.adopts}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -439,6 +440,18 @@ class ApplyCase(PlanCase):
         return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()} if root.exists() else {}
 
 
+    def full_disk_once(self, fails_when):
+        """write_json that raises ENOSPC for the deploy manifest once fails_when() holds."""
+        real = deploy.state.write_json
+
+        def write_json(path, data, *args, **kwargs):
+            if Path(path) == Path(self.paths.deploy_manifest) and fails_when():
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real(path, data, *args, **kwargs)
+
+        return mock.patch.object(deploy.state, "write_json", write_json)
+
+
 class ApplyCopiesTests(ApplyCase):
     def test_a_copy_creates_the_folder_records_it_and_lands_with_the_wanted_bytes(self) -> None:
         manifest, applied = self.run_plan(self.want())
@@ -543,12 +556,53 @@ class ApplyCopiesTests(ApplyCase):
             )
         self.assertEqual(list(elsewhere.iterdir()), [])
 
+    def test_a_manifest_write_that_fails_after_the_file_landed_is_a_deploy_error_and_the_file_is_adopted_later(self) -> None:
+        wanted = self.want()
+        manifest = deploy.read_manifest(self.paths)
+        result = deploy.plan(wanted, manifest, self.game)
+        target = self.game / "mods/Thing/config.ini"
+        with self.full_disk_once(target.exists):
+            with self.assertRaises(deploy.DeployError) as caught:
+                deploy.apply_copies(result, manifest, self.paths, self.game, STAMP)
+        self.assertIn(str(self.paths.deploy_manifest), str(caught.exception))
+        self.assertEqual(target.read_text(), "a=1\n")
+        later = deploy.plan(wanted, deploy.read_manifest(self.paths), self.game)
+        self.assertEqual([rel for rel, _ in later.adopts], ["mods/Thing/config.ini"])
+        self.assertEqual(later.copies, [])
+
+    def test_a_manifest_write_that_fails_while_adopting_is_a_deploy_error(self) -> None:
+        wanted = self.want()
+        self.put("mods/Thing/config.ini")
+        manifest = deploy.read_manifest(self.paths)
+        result = deploy.plan(wanted, manifest, self.game)
+        self.assertEqual(len(result.adopts), 1)
+        with self.full_disk_once(lambda: True):
+            with self.assertRaises(deploy.DeployError):
+                deploy.apply_copies(result, manifest, self.paths, self.game, STAMP)
+
 
 class ApplyRemovesTests(ApplyCase):
     def deployed(self, text="a=1\n"):
         wanted = self.want(text=text)
         self.run_plan(wanted)
         return wanted
+
+    def test_a_manifest_write_that_fails_after_the_file_went_is_a_deploy_error_and_the_record_is_forgotten_later(self) -> None:
+        self.deployed()
+        manifest = deploy.read_manifest(self.paths)
+        result = deploy.plan(deploy.Desired(), manifest, self.game)
+        target = self.game / "mods/Thing/config.ini"
+        with self.full_disk_once(lambda: not target.exists()):
+            with self.assertRaises(deploy.DeployError) as caught:
+                deploy.apply_removes(result, manifest, self.paths, self.game, STAMP)
+        self.assertIn(str(self.paths.deploy_manifest), str(caught.exception))
+        self.assertFalse(target.exists())
+        again = deploy.read_manifest(self.paths)
+        self.assertIn("mods/Thing/config.ini", again.files)
+        later = deploy.plan(deploy.Desired(), again, self.game)
+        self.assertEqual(later.removes, ["mods/Thing/config.ini"])
+        deploy.apply_removes(later, again, self.paths, self.game, STAMP)
+        self.assertEqual(deploy.read_manifest(self.paths).files, {})
 
     def test_a_file_that_still_matches_the_record_is_deleted_and_so_is_its_folder(self) -> None:
         self.deployed()
