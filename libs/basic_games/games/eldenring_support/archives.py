@@ -56,11 +56,47 @@ def meta_sidecar(archive) -> dict | None:
     except (OSError, UnicodeDecodeError, configparser.Error, KeyError):
         return None
     version = general.get("version")
+    if version:
+        version = _read_ini_value(version.strip())
     return {
         "mod_id": _positive_int(general.get("modid")),
         "file_id": _positive_int(general.get("fileid")),
         "version": version.strip() if version else None,
     }
+
+
+_NEEDS_QUOTES = re.compile(r'[,;"\\\x00-\x1f\x7f]|^\s|\s$')
+_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+_UNESCAPES = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _ini_value(text: str) -> str:
+    """`text` spelled so QSettings reads it back unchanged.
+
+    Fluorine reads the sidecar through QSettings, which splits unquoted commas
+    into a list, cuts at a semicolon and eats backslashes and quotes. A value
+    with any of those, a control character, edge whitespace or a leading `@`
+    is double-quoted with backslash escapes, as QSettings itself writes it.
+    """
+    if text.startswith("@"):
+        text = "@" + text  # a lone leading @ marks a QVariant; @@ is a literal one
+    if not _NEEDS_QUOTES.search(text):
+        return text
+    # Other control characters have no business in a name; \x escapes would
+    # swallow a following hex digit, so they are dropped.
+    body = "".join(_ESCAPES.get(ch) or ("" if ord(ch) < 0x20 or ord(ch) == 0x7F else ch) for ch in text)
+    return f'"{body}"'
+
+
+def _read_ini_value(text: str) -> str:
+    """Inverse of `_ini_value` for a value this module wrote."""
+    if len(text) < 2 or not (text.startswith('"') and text.endswith('"')):
+        return text[1:] if text.startswith("@@") else text
+    out, chars = [], iter(text[1:-1])
+    for ch in chars:
+        out.append(_UNESCAPES.get(next(chars, ""), "") if ch == "\\" else ch)
+    joined = "".join(out)
+    return joined[1:] if joined.startswith("@@") else joined
 
 
 def write_sidecar(
@@ -78,9 +114,9 @@ def write_sidecar(
     if file_id:
         lines.append(f"fileID={file_id}")
     lines += [
-        f"modName={mod_name}",
-        f"version={version}",
-        f"newestVersion={version}",
+        f"modName={_ini_value(mod_name)}",
+        f"version={_ini_value(version)}",
+        f"newestVersion={_ini_value(version)}",
         f"repository={repository}",
         "installed=false",
         "uninstalled=false",
