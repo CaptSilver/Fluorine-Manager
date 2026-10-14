@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -488,7 +489,7 @@ class RestoreChangedTests(SessionCase):
 
     def test_a_quarantine_folder_that_cannot_be_made_is_an_error_with_the_file_untouched(self) -> None:
         (self.save_dir / "ER0000.sl2").write_bytes(b"first")
-        with mock.patch.object(session.shutil, "move", side_effect=PermissionError("denied")):
+        with mock.patch.object(session.os, "rename", side_effect=PermissionError("denied")):
             with self.assertRaises(session.SnapshotError) as caught:
                 session.restore_changed(self.paths, self.record)
         self.assertIn("ER0000.sl2", str(caught.exception))
@@ -579,6 +580,43 @@ class KeepSessionSaveTests(SessionCase):
             with self.assertRaises(session.SnapshotError):
                 session.keep_session_save(self.paths)
         self.assertIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
+
+
+class QuarantineAcrossFilesystemsTests(SessionCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_saves()
+        self.record = self.sentinel()
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b"modded")
+        self.cross_device = mock.patch.object(
+            session.os, "rename", side_effect=OSError(errno.EXDEV, "cross-device link"))
+
+    def test_a_cross_device_quarantine_copies_with_fsync_then_removes_the_source(self) -> None:
+        with self.cross_device, mock.patch.object(
+            session.atomic, "write_bytes_atomic", wraps=session.atomic.write_bytes_atomic
+        ) as write:
+            result = session.restore_changed(self.paths, self.record)
+        [kept] = result.quarantined
+        self.assertEqual(kept.read_bytes(), SL2 + b"modded")
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertIn(kept, [call.args[0] for call in write.call_args_list])
+
+    def test_a_copy_that_does_not_match_keeps_the_source(self) -> None:
+        real = session.atomic.write_bytes_atomic
+
+        def torn(path, data, *args, **kwargs):
+            real(path, data[:10] if "quarantine" in str(path) else data, *args, **kwargs)
+
+        with self.cross_device, mock.patch.object(session.atomic, "write_bytes_atomic", side_effect=torn):
+            with self.assertRaises(session.SnapshotError):
+                session.restore_changed(self.paths, self.record)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+
+    def test_another_rename_failure_is_not_retried_as_a_copy(self) -> None:
+        with mock.patch.object(session.os, "rename", side_effect=PermissionError("denied")):
+            with self.assertRaises(session.SnapshotError):
+                session.restore_changed(self.paths, self.record)
+        self.assertEqual(self.quarantined(), [])
 
 
 if __name__ == "__main__":
