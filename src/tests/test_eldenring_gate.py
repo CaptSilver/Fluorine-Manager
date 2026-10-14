@@ -864,6 +864,12 @@ class EnvironmentTests(GateCase):
                 self.assert_vetoed(gate.ME3_CONFIG_STEAM_DIR, str(path), "steam_dir", "Remove")
                 path.unlink()
 
+    def test_a_steam_dir_in_the_home_config_vetoes_when_xdg_config_home_is_relative(self) -> None:
+        self.write(self.personal, 'steam_dir = "/other/steam"\n')
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "relative/cfg"}):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ME3_CONFIG_STEAM_DIR, str(self.personal), "steam_dir", "Remove")
+
     def test_the_other_keys_only_warn_and_the_launch_report_names_file_and_key(self) -> None:
         self.write(self.personal, 'windows_binaries_dir = "/x"\n[game.eldenring]\nskip_logos = true\n')
         self.assertTrue(self.launch(), self.vetoes)

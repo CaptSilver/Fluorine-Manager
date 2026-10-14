@@ -50,14 +50,21 @@ def me3_config_files() -> list[Path]:
     """The me3.toml files me3 reads besides the one in its working directory.
 
     Its per-user folder follows XDG_CONFIG_HOME, which is also how a wrapper
-    could move it, so the variable is honoured here as me3 honours it.
+    could move it. A relative value is ignored by the XDG rules, but which
+    directories library me3 uses is not known, so ~/.config is always scanned
+    as well and a relative value is never scanned: an extra file can only add
+    findings.
     """
     found = [SYSTEM_DIR / ME3_TOML]
     try:
-        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+        home_base: Path | None = Path.home() / ".config"
     except (RuntimeError, OSError):
-        return found
-    found.append(Path(base) / "me3" / ME3_TOML)
+        home_base = None
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg and os.path.isabs(xdg) and Path(xdg) != home_base:
+        found.append(Path(xdg) / "me3" / ME3_TOML)
+    if home_base is not None:
+        found.append(home_base / "me3" / ME3_TOML)
     return found
 
 

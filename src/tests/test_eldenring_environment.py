@@ -42,6 +42,19 @@ class Me3ConfigFilesTests(EnvironmentCase):
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.tmp / "cfg")}):
             self.assertEqual(environment.me3_config_files()[1], self.tmp / "cfg/me3/me3.toml")
 
+    def test_a_relative_xdg_config_home_is_ignored_and_the_home_config_is_still_read(self) -> None:
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "relative/cfg"}):
+            self.assertEqual(
+                environment.me3_config_files(), [self.etc / "me3.toml", self.home / ".config/me3/me3.toml"]
+            )
+
+    def test_an_absolute_xdg_config_home_adds_to_the_home_config_rather_than_replacing_it(self) -> None:
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.tmp / "cfg")}):
+            self.assertEqual(
+                environment.me3_config_files(),
+                [self.etc / "me3.toml", self.tmp / "cfg/me3/me3.toml", self.home / ".config/me3/me3.toml"],
+            )
+
     def test_no_home_at_all_leaves_the_system_file_and_does_not_raise(self) -> None:
         with mock.patch.object(environment.Path, "home", side_effect=RuntimeError("no home")):
             self.assertEqual(environment.me3_config_files(), [self.etc / "me3.toml"])
