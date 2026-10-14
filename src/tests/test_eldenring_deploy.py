@@ -28,6 +28,8 @@ class DeployCase(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.paths = state.InstancePaths(organizer(self.tmp / "instance"))
+        self.game = self.tmp / "Game"
+        self.game.mkdir()
 
 
 class ModListCase(DeployCase):
@@ -258,6 +260,165 @@ class DesiredTests(ModListCase):
         [finding] = deploy.desired(self.organizer).findings
         self.assertEqual(finding.key, deploy.DEPLOY_CONFIG_INVALID)
         self.assertIn("denied", finding.text)
+
+
+def tree(root: Path) -> dict:
+    """Every path under `root`: a file's bytes, a link's target, None for a folder."""
+    seen = {}
+    for path in sorted(root.rglob("*")):
+        key = str(path.relative_to(root))
+        if path.is_symlink():
+            seen[key] = ("link", os.readlink(path))
+        elif path.is_file():
+            seen[key] = path.read_bytes()
+        else:
+            seen[key] = None
+    return seen
+
+
+class PlanCase(DeployCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.sources = self.tmp / "sources"
+        self.sources.mkdir()
+
+    def want(self, rel="mods/Thing/config.ini", text="a=1\n", mod="Thing mod") -> deploy.Desired:
+        source = self.sources / mod / Path(rel).name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(text)
+        return deploy.Desired({rel: deploy.Wanted(mod, source, sha(text), len(text))})
+
+    def put(self, rel, data="a=1\n") -> Path:
+        path = self.game / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data if isinstance(data, bytes) else data.encode())
+        return path
+
+    def manifest(self, rel="mods/Thing/config.ini", text="a=1\n", mod="Thing mod", dirs=()) -> deploy.Manifest:
+        return deploy.Manifest({rel: deploy.Entry(sha(text), len(text), mod)}, list(dirs))
+
+
+class PlanTests(PlanCase):
+    def test_a_wanted_file_that_is_not_there_is_copied(self) -> None:
+        wanted = self.want()
+        result = deploy.plan(wanted, deploy.Manifest(), self.game)
+        self.assertEqual(result.copies, [deploy.Copy("mods/Thing/config.ini", wanted.files["mods/Thing/config.ini"])])
+        self.assertEqual((result.removes, result.adopts, result.strays), ([], [], []))
+
+    def test_a_file_that_is_in_place_and_recorded_needs_nothing(self) -> None:
+        self.put("mods/Thing/config.ini")
+        result = deploy.plan(self.want(), self.manifest(), self.game)
+        self.assertTrue(result.empty())
+
+    def test_an_edit_in_the_mod_folder_is_copied_over_the_recorded_file_without_a_quarantine(self) -> None:
+        self.put("mods/Thing/config.ini", "a=1\n")
+        result = deploy.plan(self.want(text="a=2\n"), self.manifest(text="a=1\n"), self.game)
+        [copy] = result.copies
+        self.assertFalse(copy.keep_existing)
+
+    def test_a_recorded_file_the_dll_rewrote_is_copied_again_and_what_it_wrote_is_kept(self) -> None:
+        self.put("mods/Thing/config.ini", "written by the DLL\n")
+        result = deploy.plan(self.want(), self.manifest(), self.game)
+        [copy] = result.copies
+        self.assertTrue(copy.keep_existing)
+
+    def test_a_recorded_file_that_already_holds_the_new_wanted_bytes_is_recorded_not_kept_or_copied(self) -> None:
+        self.put("mods/Thing/config.ini", "a=2\n")
+        result = deploy.plan(self.want(text="a=2\n"), self.manifest(text="a=1\n"), self.game)
+        self.assertEqual([rel for rel, _ in result.adopts], ["mods/Thing/config.ini"])
+        self.assertEqual(result.copies, [])
+
+    def test_a_recorded_file_that_vanished_is_copied_again(self) -> None:
+        result = deploy.plan(self.want(), self.manifest(), self.game)
+        [copy] = result.copies
+        self.assertFalse(copy.keep_existing)
+
+    def test_a_recorded_file_nobody_wants_any_more_is_removed(self) -> None:
+        self.put("mods/Thing/config.ini")
+        result = deploy.plan(deploy.Desired(), self.manifest(), self.game)
+        self.assertEqual(result.removes, ["mods/Thing/config.ini"])
+        self.assertEqual((result.copies, result.strays), ([], []))
+
+    def test_an_unrecorded_file_with_the_wanted_bytes_is_adopted(self) -> None:
+        self.put("mods/Thing/config.ini")
+        result = deploy.plan(self.want(), deploy.Manifest(), self.game)
+        self.assertEqual([rel for rel, _ in result.adopts], ["mods/Thing/config.ini"])
+        self.assertEqual((result.copies, result.strays), ([], []))
+
+    def test_an_unrecorded_file_with_other_bytes_is_a_stray_and_is_not_copied_over(self) -> None:
+        self.put("mods/Thing/config.ini", "someone else's\n")
+        result = deploy.plan(self.want(), deploy.Manifest(), self.game)
+        self.assertEqual(result.strays, ["mods/Thing/config.ini"])
+        self.assertEqual((result.copies, result.adopts), ([], []))
+
+    def test_a_file_moving_to_another_mod_is_recorded_again_not_copied(self) -> None:
+        self.put("mods/Thing/config.ini")
+        result = deploy.plan(self.want(mod="Other mod"), self.manifest(mod="Thing mod"), self.game)
+        self.assertEqual([want.mod for _, want in result.adopts], ["Other mod"])
+        self.assertEqual(result.copies, [])
+
+    def test_a_link_or_a_folder_in_the_way_is_a_stray_and_never_followed(self) -> None:
+        outside = self.tmp / "outside.ini"
+        outside.write_text("a=1\n")
+        (self.game / "mods/Thing").mkdir(parents=True)
+        (self.game / "mods/Thing/config.ini").symlink_to(outside)
+        (self.game / "mods/Dir/config.ini").mkdir(parents=True)
+        for rel in ("mods/Thing/config.ini", "mods/Dir/config.ini"):
+            with self.subTest(rel):
+                for manifest in (deploy.Manifest(), self.manifest(rel=rel)):
+                    result = deploy.plan(self.want(rel=rel), manifest, self.game)
+                    self.assertEqual((result.strays, result.copies, result.adopts), ([rel], [], []))
+        self.assertEqual(outside.read_text(), "a=1\n")
+
+    def test_a_symlinked_mods_folder_makes_everything_under_it_a_stray(self) -> None:
+        elsewhere = self.tmp / "elsewhere"
+        (elsewhere / "Thing").mkdir(parents=True)
+        (elsewhere / "Thing/config.ini").write_text("a=1\n")
+        (self.game / "mods").symlink_to(elsewhere)
+        result = deploy.plan(self.want(), self.manifest(), self.game)
+        self.assertEqual(result.strays, ["mods/Thing/config.ini"])
+        result = deploy.plan(deploy.Desired(), self.manifest(), self.game)
+        self.assertEqual((result.strays, result.removes), (["mods/Thing/config.ini"], []))
+
+    def test_a_recorded_file_nobody_wants_that_became_a_link_is_a_stray_not_a_removal(self) -> None:
+        (self.game / "mods/Thing").mkdir(parents=True)
+        (self.game / "mods/Thing/config.ini").symlink_to(self.tmp)
+        result = deploy.plan(deploy.Desired(), self.manifest(), self.game)
+        self.assertEqual((result.strays, result.removes), (["mods/Thing/config.ini"], []))
+
+    def test_planning_writes_nothing(self) -> None:
+        self.put("mods/Thing/config.ini", "written by the DLL\n")
+        wanted = self.want()
+        before = tree(self.tmp)
+        deploy.plan(wanted, self.manifest(), self.game)
+        deploy.plan(deploy.Desired(), self.manifest(), self.game)
+        self.assertEqual(tree(self.tmp), before)
+
+
+class VerifyTests(PlanCase):
+    def test_an_intact_manifest_has_no_drift(self) -> None:
+        self.put("mods/Thing/config.ini")
+        self.assertEqual(deploy.verify(self.manifest(), self.game), [])
+        self.assertEqual(deploy.verify(deploy.Manifest(), self.game), [])
+
+    def test_a_missing_a_changed_and_a_replaced_file_are_each_drift(self) -> None:
+        manifest = deploy.Manifest({
+            "mods/A/gone.ini": deploy.Entry(sha("x"), 1, "m"),
+            "mods/A/changed.ini": deploy.Entry(sha("x"), 1, "m"),
+            "mods/A/link.ini": deploy.Entry(sha("x"), 1, "m"),
+        })
+        self.put("mods/A/changed.ini", "y")
+        (self.game / "mods/A/link.ini").symlink_to(self.tmp)
+        found = {drift.rel: drift.why for drift in deploy.verify(manifest, self.game)}
+        self.assertEqual(
+            found,
+            {
+                "mods/A/changed.ini": "its bytes changed",
+                "mods/A/gone.ini": "it is gone",
+                "mods/A/link.ini": "it is not a plain file any more",
+            },
+        )
+
 
 
 if __name__ == "__main__":

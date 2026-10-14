@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from . import kinds, mods, state
+from . import fsprobe, kinds, mods, state
 from .ermlib import github
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
@@ -275,3 +275,110 @@ def desired(organizer) -> Desired:
             )
         )
     return result
+
+
+# -- what is there, and what to do about it -----------------------------------
+
+
+@dataclass(frozen=True)
+class Copy:
+    """Put `wanted` at `rel`. With `keep_existing`, what is there now (the
+    manifest's file, rewritten by the DLL) goes to the quarantine first."""
+
+    rel: str
+    wanted: Wanted
+    keep_existing: bool = False
+
+
+@dataclass
+class Plan:
+    copies: list[Copy] = field(default_factory=list)
+    removes: list[str] = field(default_factory=list)
+    # Already in Game/ with the wanted bytes and not recorded: a crash between
+    # the copy and the record. Recording is all that is left to do.
+    adopts: list[tuple[str, Wanted]] = field(default_factory=list)
+    # Not ours and not the wanted bytes, or not a plain file: never touched.
+    strays: list[str] = field(default_factory=list)
+
+    def empty(self) -> bool:
+        return not (self.copies or self.removes or self.adopts or self.strays)
+
+
+@dataclass(frozen=True)
+class Drift:
+    rel: str
+    why: str
+
+
+def on_disk(game_dir, rel: str) -> tuple[str | None, str | None]:
+    """(kind, sha256) of what is at Game/`rel`; the hash only for a plain file.
+
+    A link or a folder anywhere on the way down (a symlinked mods/) makes the
+    path "other": the plugin never reads or writes through one.
+    """
+    game_dir = Path(game_dir)
+    parts = rel.split("/")
+    for depth in range(1, len(parts)):
+        if fsprobe.kind(game_dir.joinpath(*parts[:depth])) not in (None, fsprobe.DIR):
+            return fsprobe.OTHER, None
+    path = game_dir / rel
+    found = fsprobe.kind(path)
+    if found != fsprobe.FILE:
+        return found, None
+    try:
+        return found, github.sha256_file(path)
+    except OSError:
+        return fsprobe.OTHER, None
+
+
+def plan(wanted: Desired, manifest: Manifest, game_dir) -> Plan:
+    """What it takes to make Game/ hold exactly the wanted files. Reads, never writes.
+
+    A file the manifest owns whose bytes moved (the DLL wrote into its own
+    config.ini) is copied again from the mod folder, which is the source of
+    truth, and what the DLL wrote is kept in the quarantine.
+    """
+    result = Plan()
+    for rel, want in sorted(wanted.files.items()):
+        found, digest = on_disk(game_dir, rel)
+        entry = manifest.files.get(rel)
+        if found not in (None, fsprobe.FILE):
+            result.strays.append(rel)
+        elif entry is None:
+            if found is None:
+                result.copies.append(Copy(rel, want))
+            elif digest == want.sha256:
+                result.adopts.append((rel, want))
+            else:
+                result.strays.append(rel)
+        elif found is None:
+            result.copies.append(Copy(rel, want))
+        elif digest != entry.sha256:
+            if digest == want.sha256:
+                result.adopts.append((rel, want))
+            else:
+                result.copies.append(Copy(rel, want, keep_existing=True))
+        elif entry.sha256 != want.sha256:
+            result.copies.append(Copy(rel, want))
+        elif entry.mod != want.mod:
+            result.adopts.append((rel, want))
+    for rel in sorted(set(manifest.files) - set(wanted.files)):
+        if on_disk(game_dir, rel)[0] not in (None, fsprobe.FILE):
+            result.strays.append(rel)
+        else:
+            result.removes.append(rel)
+    return result
+
+
+def verify(manifest: Manifest, game_dir) -> list[Drift]:
+    """Every manifest file that is missing or whose bytes differ from the record."""
+    found = []
+    for rel, entry in sorted(manifest.files.items()):
+        kind, digest = on_disk(game_dir, rel)
+        if kind is None:
+            found.append(Drift(rel, "it is gone"))
+        elif kind != fsprobe.FILE:
+            found.append(Drift(rel, "it is not a plain file any more"))
+        elif digest != entry.sha256:
+            found.append(Drift(rel, "its bytes changed"))
+    return found
