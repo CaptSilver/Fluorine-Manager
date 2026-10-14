@@ -488,8 +488,33 @@ class SessionRowTests(DiagnosisCase):
             {"sentinel_tripped": {"time": "t", "restored": ["ER0000.sl2"], "quarantined": ["/q/ER0000.sl2.x-modded-session"]}},
         )
         problem = self.one("SAVE_SENTINEL_TRIPPED")
-        self.assertEqual((problem.informational, problem.fix), (True, None))
+        self.assertEqual((problem.informational, problem.fix), (True, "tool:saves"))
         self.assertIn("  /q/ER0000.sl2.x-modded-session", problem.text)
+        self.assertIn("The pre-session save was put back", problem.text)
+        self.assertIn("Move a save to the modded name", problem.text)
+        self.assertIn("Mark the session's save as reviewed", problem.text)
+
+    def test_a_restore_that_never_finished_does_not_claim_the_save_was_put_back(self) -> None:
+        session.save_last_launch(
+            self.paths,
+            {"sentinel_tripped": {"time": "t", "restored": [], "quarantined": ["/q/ER0000.sl2.x-modded-session"]}},
+        )
+        text = self.one("SAVE_SENTINEL_TRIPPED").text
+        self.assertNotIn("was put back", text)
+        self.assertIn("left unfinished", text)
+        self.assertIn("  /q/ER0000.sl2.x-modded-session", text)
+
+    def test_a_restore_that_finished_but_was_not_recorded_says_so(self) -> None:
+        session.save_last_launch(
+            self.paths,
+            {"sentinel_tripped": {
+                "time": "t", "restored": [], "unrecorded": True,
+                "quarantined": ["/q/ER0000.sl2.x-modded-session"]}},
+        )
+        text = self.one("SAVE_SENTINEL_TRIPPED").text
+        self.assertIn("put the pre-session save back", text)
+        self.assertNotIn("left unfinished", text)
+        self.assertIn("  /q/ER0000.sl2.x-modded-session", text)
 
     def test_a_tripped_record_of_the_wrong_shape_is_not_a_row_and_does_not_raise(self) -> None:
         for odd in ("x", None, ["a"]):

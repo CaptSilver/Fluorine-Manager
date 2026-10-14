@@ -458,12 +458,24 @@ class Diagnosis:
         if isinstance(tripped, dict):
             kept = tripped.get("quarantined")
             where = "\n".join(f"  {path}" for path in kept) if isinstance(kept, list) else "  (not recorded)"
+            if tripped.get("restored"):
+                outcome = "The pre-session save was put back, and what the session wrote is kept at:"
+            elif tripped.get("unrecorded"):
+                # The sweep restored the save but could not write that down.
+                outcome = (
+                    "A restore put the pre-session save back, but Fluorine could not write down which files, "
+                    "and what the session wrote is kept at:"
+                )
+            else:
+                outcome = "The restore was left unfinished, and what the session wrote is kept at:"
             rows.append(
                 Problem(
                     "SAVE_SENTINEL_TRIPPED",
                     "A modded session wrote to your vanilla save, usually because a mod failed to load and took the "
-                    "save redirect with it. The pre-session save was put back, and what the session wrote is kept "
-                    f"at:\n{where}\nNothing was deleted.",
+                    f"save redirect with it. {outcome}\n{where}\nNothing was deleted.\n\n"
+                    'In Tools > "Elden Ring: Save tools…", "Move a save to the modded name…" plays that '
+                    'character through me3, and "Mark the session\'s save as reviewed" clears this note.',
+                    TOOL_SAVES,
                     informational=True,
                 )
             )
