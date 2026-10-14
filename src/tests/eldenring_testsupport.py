@@ -186,6 +186,7 @@ class FakeModList:
         self.installed_callbacks: list = []
         self.state_callbacks: list = []
         self.removed_callbacks: list = []
+        self.moved_callbacks: list = []
         self.queued_installs: list[FakeMod] = []
         self.refuse_changes = False
 
@@ -266,6 +267,10 @@ class FakeModList:
         self.removed_callbacks.append(callback)
         return True
 
+    def onModMoved(self, callback) -> bool:  # noqa: N802
+        self.moved_callbacks.append(callback)
+        return True
+
     def flush_installed(self) -> None:
         """Deliver the onModInstalled callbacks the way the core does: late."""
         queued, self.queued_installs = self.queued_installs, []
@@ -299,6 +304,7 @@ class FakeOrganizer:
         self.install_calls: list[dict] = []
         self.install_hook = None  # (filename, name) -> FakeMod | None
         self.refuse_create = False
+        self.profile_callbacks: list = []
 
     # -- paths
     def basePath(self) -> str:  # noqa: N802
@@ -318,6 +324,10 @@ class FakeOrganizer:
 
     def modList(self) -> FakeModList:  # noqa: N802
         return self.mod_list
+
+    def onProfileChanged(self, callback) -> bool:  # noqa: N802
+        self.profile_callbacks.append(callback)
+        return True
 
     # -- settings
     def pluginSetting(self, plugin, key):  # noqa: N802

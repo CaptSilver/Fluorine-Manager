@@ -429,6 +429,52 @@ class FakeTimer:
             callback()
 
 
+class ProblemsWiringTests(GameCase):
+    """What changes the problems list's answers calls problems.invalidate()."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+        self.heard = []
+        self.addCleanup(GAME.problems.subscribe(lambda: self.heard.append(1)))
+
+    def test_a_mod_that_moved_in_the_load_order_tells_the_listeners(self) -> None:
+        self.assertEqual(len(self.organizer.mod_list.moved_callbacks), 1)
+        self.organizer.mod_list.moved_callbacks[0]("Some Mod", 3, 7)
+        self.assertEqual(self.heard, [1])
+
+    def test_a_profile_switch_tells_the_listeners(self) -> None:
+        self.assertEqual(len(self.organizer.profile_callbacks), 1)
+        self.organizer.profile_callbacks[0](None, None)
+        self.assertEqual(self.heard, [1])
+
+    def test_an_installed_mod_tells_the_listeners_once_and_even_when_recording_it_failed(self) -> None:
+        mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
+        self.organizer.mod_list.installed_callbacks[0](mod)
+        self.assertEqual(self.heard, [1])
+        with mock.patch.object(GAME, "qWarning"), \
+                mock.patch.object(GAME.kinds, "record_on_install", side_effect=OSError("unreadable")):
+            self.organizer.mod_list.installed_callbacks[0](mod)
+        self.assertEqual(self.heard, [1, 1])
+
+    def test_another_game_being_managed_hears_nothing(self) -> None:
+        self.game.active = False
+        mod = self.organizer.mod_list.add("Some Mod", files={"regulation.bin": b"x"})
+        self.organizer.mod_list.installed_callbacks[0](mod)
+        self.organizer.mod_list.moved_callbacks[0]("Some Mod", 1, 2)
+        self.organizer.profile_callbacks[0](None, None)
+        self.assertEqual(self.heard, [])
+
+    def test_a_refused_registration_fails_init(self) -> None:
+        for name, owner in (("onModMoved", lambda o: o.mod_list), ("onProfileChanged", lambda o: o)):
+            with self.subTest(name):
+                refusing = FakeOrganizer(self.base)
+                setattr(owner(refusing), name, lambda callback: False)
+                with mock.patch.object(GAME, "qWarning"):
+                    self.assertIs(self.game.init(refusing), False)
+
+
 class DeployedFilesWiringTests(GameCase):
     def setUp(self) -> None:
         super().setUp()

@@ -96,6 +96,12 @@ class OrganizerTests(FakeCase):
         self.assertTrue(self.modlist.onModRemoved("removed"))
         self.assertEqual((self.modlist.state_callbacks, self.modlist.removed_callbacks), (["state"], ["removed"]))
 
+    def test_move_and_profile_callbacks_are_recorded_and_accepted(self) -> None:
+        self.assertTrue(self.modlist.onModMoved("moved"))
+        self.assertEqual(self.modlist.moved_callbacks, ["moved"])
+        self.assertTrue(self.organizer.onProfileChanged("profile"))
+        self.assertEqual(self.organizer.profile_callbacks, ["profile"])
+
     def test_the_profiles_folder_can_be_put_anywhere(self) -> None:
         elsewhere = support.FakeOrganizer(self.tmp / "other", profiles_dir=self.tmp / "away/profiles")
         self.assertEqual(Path(elsewhere.profilePath()), self.tmp / "away/profiles/Default")

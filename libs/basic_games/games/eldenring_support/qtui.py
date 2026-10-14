@@ -210,3 +210,36 @@ def stored_wrapper_options(ini_path, binary_name: str = "me3", binary_real=None)
     finally:
         settings.endArray()
     return found
+
+
+def review(parent, title: str, text: str, accept: str) -> bool:
+    """A scrollable, read-only text with a button that accepts it and one that cancels.
+
+    For lists too long for a message box that the user has to read before saying yes.
+    """
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.resize(760, 520)
+    layout = QVBoxLayout(dialog)
+    view = QPlainTextEdit()
+    view.setReadOnly(True)
+    view.setPlainText(text)
+    layout.addWidget(view)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.button(QDialogButtonBox.StandardButton.Ok).setText(accept)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+def inform(parent, title: str, text: str) -> None:
+    """A message box for a short text, the scrollable window for a long one."""
+    if len(text) <= 600 and text.count("\n") < 12:
+        from PyQt6.QtWidgets import QMessageBox
+
+        QMessageBox.information(parent, title, text)
+    else:
+        show_text(parent, title, text)

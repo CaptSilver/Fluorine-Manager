@@ -101,6 +101,43 @@ class PickProfilesTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class ReviewTests(unittest.TestCase):
+    def shown(self, outcome):
+        seen = {}
+
+        def fake_exec(dialog):
+            from PyQt6.QtWidgets import QDialogButtonBox, QPlainTextEdit
+
+            seen["text"] = dialog.findChild(QPlainTextEdit).toPlainText()
+            seen["read_only"] = dialog.findChild(QPlainTextEdit).isReadOnly()
+            box = dialog.findChild(QDialogButtonBox)
+            seen["accept"] = box.button(QDialogButtonBox.StandardButton.Ok).text()
+            return outcome
+
+        with mock.patch.object(QDialog, "exec", fake_exec):
+            return qtui.review(None, "title", "line one\nline two", "Record it"), seen
+
+    def test_accepting_is_true_and_the_text_is_read_only_with_the_accept_label(self) -> None:
+        result, seen = self.shown(ACCEPT)
+        self.assertIs(result, True)
+        self.assertEqual(seen, {"text": "line one\nline two", "read_only": True, "accept": "Record it"})
+
+    def test_cancelling_is_false(self) -> None:
+        self.assertIs(self.shown(REJECT)[0], False)
+
+
+class InformTests(unittest.TestCase):
+    def test_a_short_text_is_a_message_box_and_a_long_one_is_the_scrollable_window(self) -> None:
+        with mock.patch("PyQt6.QtWidgets.QMessageBox.information") as box, mock.patch.object(qtui, "show_text") as window:
+            qtui.inform(None, "t", "Recorded 3 paths.")
+            box.assert_called_once_with(None, "t", "Recorded 3 paths.")
+            window.assert_not_called()
+            qtui.inform(None, "t", "\n".join(f"line {n}" for n in range(30)))
+            qtui.inform(None, "t", "x" * 601)
+        self.assertEqual(window.call_count, 2)
+        self.assertEqual(box.call_count, 1)
+
+
 class StoredWrapperOptionsTests(unittest.TestCase):
     """Written the way the core stores executables, read back the way the gate reads them."""
 

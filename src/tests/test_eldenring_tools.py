@@ -91,6 +91,7 @@ def _install_stubs() -> None:
     mobase = types.ModuleType("mobase")
     mobase.IPlugin = type("IPlugin", (_Base,), {})
     mobase.IPluginTool = type("IPluginTool", (_Base,), {})
+    mobase.IPluginDiagnose = type("IPluginDiagnose", (_Base,), {})
     mobase.VersionInfo = lambda *parts: parts
     mobase.PluginRequirementFactory = SimpleNamespace(
         gameDependency=lambda names: ("gameDependency", names)
@@ -141,7 +142,7 @@ class CreatePluginsTests(ToolCase):
             [type(plugin).__name__ for plugin in plugins],
             [
                 "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
-                "HardenTool", "SyncDeployedTool",
+                "HardenTool", "SyncDeployedTool", "EldenRingDiagnose",
             ],
         )
 

@@ -79,6 +79,8 @@ class EldenRingGame(BasicGame):
             organizer.modList().onModInstalled(self._on_mod_installed),
             organizer.modList().onModStateChanged(self._on_mod_list_changed),
             organizer.modList().onModRemoved(self._on_mod_list_changed),
+            organizer.modList().onModMoved(self._on_problems_may_have_changed),
+            organizer.onProfileChanged(self._on_problems_may_have_changed),
             organizer.onAboutToRun(self._on_about_to_run),
             organizer.onFinishedRun(self._on_finished_run),
             organizer.onUserInterfaceInitialized(self._on_user_interface_initialized),
@@ -110,6 +112,15 @@ class EldenRingGame(BasicGame):
             kinds.record_on_install(mod)
         except Exception as exc:
             qWarning(f"Elden Ring: could not record the kind of {mod.name()}: {exc!r}")
+        finally:
+            problems.invalidate()
+
+    def _on_problems_may_have_changed(self, *_changed) -> None:
+        # A mod moved in the load order (order is a merge input) or the profile
+        # was switched, so the problems list is out of date. Connected for every
+        # game plugin, active or not, and a Qt slot underneath.
+        if self.isActive():
+            problems.invalidate()
 
     def _on_mod_list_changed(self, *_changed) -> None:
         # A mod was enabled, disabled, or removed. Connected for every game
