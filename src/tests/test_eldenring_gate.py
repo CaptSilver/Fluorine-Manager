@@ -755,5 +755,344 @@ class SnapshotTests(GateCase):
         self.assert_vetoed(None, "cannot write", "could not be restored")
 
 
+class StaleSessionTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def test_a_session_nobody_saw_end_with_an_unchanged_save_is_marked_and_passes(self) -> None:
+        self.assertTrue(self.launch())
+        first = self.last_launch()["sentinel"]
+        self.assertIsNone(first["swept"])
+        # No finished() call: the session ended without the sweep.
+        self.assertTrue(self.new_gate().run(str(self.binary), str(self.paths.root), self.args))
+        self.assertEqual(self.vetoes, [])
+        second = self.last_launch()["sentinel"]
+        self.assertNotEqual(second["stamp"], first["stamp"])
+
+    def test_a_session_nobody_saw_end_with_a_changed_save_is_asked_about_not_restored(self) -> None:
+        self.launch()
+        before = self.last_launch()["sentinel"]
+        self.append("ER0000.sl2")
+        changed = (self.save_dir / "ER0000.sl2").read_bytes()
+        self.assertFalse(self.new_gate().run(str(self.binary), str(self.paths.root), self.args))
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING, "Steam Play in between", "Save tools")
+        data = self.last_launch()
+        self.assertEqual(data["pending_restore"]["reason"], "unseen-session")
+        self.assertEqual(data["pending_restore"]["changed"], ["ER0000.sl2"])
+        self.assertEqual(data["sentinel"]["swept"], {"outcome": "pending"})
+        self.assertEqual(data["sentinel"]["stamp"], before["stamp"])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), changed)
+        self.assertFalse((self.paths.save_backups / "quarantine").exists())
+        self.assertEqual(len(self.snapshots()), 1)
+
+    def test_a_sentinel_that_was_already_swept_is_ignored(self) -> None:
+        self.launch()
+        self.gate.finished(str(self.binary), 0)
+        self.append("ER0000.sl2")  # a later Steam session, say: not this gate's business
+        self.vetoes.clear()
+        self.ensure.reset_mock()
+        # restore would have run in finished(); here the save is simply different
+        # from the sentinel and the sentinel is settled.
+        self.assertTrue(self.new_gate().run(str(self.binary), str(self.paths.root), self.args))
+
+
+class SweepTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.assertTrue(self.launch())
+        self.stamp = self.last_launch()["sentinel"]["stamp"]
+
+    def finish(self, exit_code: int = 0, binary=None) -> None:
+        self.gate.finished(str(binary or self.binary), exit_code)
+
+    def quarantined(self) -> list[Path]:
+        folder = self.paths.save_backups / "quarantine"
+        return sorted(folder.iterdir()) if folder.exists() else []
+
+    def test_an_untouched_save_is_swept_clean_with_the_exit_code(self) -> None:
+        self.finish(3)
+        self.assertEqual(self.last_launch()["sentinel"]["swept"], {"outcome": "clean", "exit_code": 3})
+        self.assertEqual(self.modals, [])
+        self.assertEqual(self.quarantined(), [])
+
+    def test_a_second_call_does_nothing(self) -> None:
+        self.finish()
+        before = self.paths.last_launch.read_bytes()
+        self.finish()
+        self.assertEqual(self.paths.last_launch.read_bytes(), before)
+
+    def test_touching_either_file_without_changing_a_byte_raises_nothing_and_refreshes_the_stat(self) -> None:
+        stamp_ns = 1_700_000_000_000_000_000
+        for name in ("ER0000.sl2", "ER0000.sl2.bak"):
+            os.utime(self.save_dir / name, ns=(stamp_ns, stamp_ns))
+        self.finish()
+        self.assertEqual(self.modals, [])
+        self.assertEqual(self.quarantined(), [])
+        sentinel = self.last_launch()["sentinel"]
+        self.assertEqual(sentinel["swept"]["outcome"], "clean")
+        for name in ("ER0000.sl2", "ER0000.sl2.bak"):
+            self.assertEqual(sentinel["files"][name]["mtime_ns"], stamp_ns)
+
+    def test_a_byte_appended_to_the_save_is_quarantined_and_the_original_comes_back(self) -> None:
+        self.append("ER0000.sl2")
+        written = (self.save_dir / "ER0000.sl2").read_bytes()
+        self.finish()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), BAK)
+        [kept] = self.quarantined()
+        self.assertRegex(kept.name, r"^ER0000\.sl2\.\d{8}T\d{12}Z-modded-session$")
+        self.assertEqual(kept.read_bytes(), written)
+        self.assertEqual(len(self.modals), 1)
+        text = self.modals[0][1]
+        self.assertIn(str(kept), text)
+        self.assertIn("Do not press Play in Steam", text)
+        self.assertIn("cloud conflict", text)
+        data = self.last_launch()
+        self.assertEqual(data["sentinel"]["swept"], {"outcome": "restored", "exit_code": 0})
+        self.assertEqual(data["sentinel_tripped"]["restored"], ["ER0000.sl2"])
+        self.assertEqual(data["sentinel_tripped"]["quarantined"], [str(kept)])
+
+    def test_the_backup_file_alone_changing_is_restored_alone(self) -> None:
+        self.append("ER0000.sl2.bak")
+        self.finish()
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), BAK)
+        [kept] = self.quarantined()
+        self.assertIn("ER0000.sl2.bak", kept.name)
+
+    def test_both_files_changing_are_both_restored(self) -> None:
+        self.append("ER0000.sl2")
+        self.append("ER0000.sl2.bak")
+        self.finish()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), BAK)
+        self.assertEqual(len(self.quarantined()), 2)
+
+    def test_a_file_the_session_deleted_is_put_back_with_nothing_to_quarantine(self) -> None:
+        (self.save_dir / "ER0000.sl2").unlink()
+        self.finish()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(self.quarantined(), [])
+        self.assertEqual(len(self.modals), 1)
+
+    def test_a_same_size_edit_with_the_mtime_put_back_is_caught_when_the_stat_moves_at_all(self) -> None:
+        path = self.save_dir / "ER0000.sl2"
+        edited = bytearray(SL2)
+        edited[0] ^= 0xFF
+        path.write_bytes(bytes(edited))
+        os.utime(path, ns=(1, 1))
+        self.finish()
+        self.assertEqual(path.read_bytes(), SL2)
+
+    def test_the_exit_code_never_decides(self) -> None:
+        self.append("ER0000.sl2")
+        self.finish(exit_code=0)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+
+    def test_the_original_files_keep_their_bytes_exactly(self) -> None:
+        self.append("ER0000.sl2")
+        self.finish()
+        self.assertEqual(hashlib.sha256((self.save_dir / "ER0000.sl2").read_bytes()).hexdigest(),
+                         hashlib.sha256(SL2).hexdigest())
+
+    def test_a_game_still_running_restores_nothing_and_blocks_the_next_launch(self) -> None:
+        self.append("ER0000.sl2")
+        written = (self.save_dir / "ER0000.sl2").read_bytes()
+        self.up = [(99, "eldenring.exe")]
+        self.finish(exit_code=0)  # Completed, with the game still up
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), written)
+        self.assertEqual(self.quarantined(), [])
+        data = self.last_launch()
+        self.assertEqual(data["pending_restore"]["reason"], "game-running")
+        self.assertEqual(data["pending_restore"]["changed"], ["ER0000.sl2"])
+        self.assertEqual(data["sentinel"]["swept"]["outcome"], "pending")
+        self.assertIn("still running", self.modals[0][1])
+        self.up = []
+        self.vetoes.clear()
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING, "still running")
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), written)
+
+    def test_a_game_still_running_with_an_unchanged_save_leaves_the_session_open(self) -> None:
+        # A force-unlock: the game is up and may write the save after this.
+        self.up = [(99, "eldenring.exe")]
+        self.finish(exit_code=1)
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+        self.assertEqual(self.modals, [])
+        # The game exits having written the save. The next launch asks.
+        self.up = []
+        self.append("ER0000.sl2")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING, "Steam Play in between")
+
+    def test_a_snapshot_that_no_longer_matches_restores_nothing_and_moves_nothing(self) -> None:
+        self.append("ER0000.sl2")
+        written = (self.save_dir / "ER0000.sl2").read_bytes()
+        snapshot = Path(self.last_launch()["sentinel"]["snapshot_dir"]) / "ER0000.sl2"
+        snapshot.write_bytes(b"damaged")
+        self.finish()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), written)
+        self.assertEqual(self.quarantined(), [])
+        data = self.last_launch()
+        self.assertEqual(data["pending_restore"]["reason"], "restore-failed")
+        self.assertIn("does not match", data["pending_restore"]["error"])
+        self.assertIn("Do not press Play", self.modals[0][1])
+
+    def test_a_missing_snapshot_is_the_same_failure(self) -> None:
+        self.append("ER0000.sl2")
+        (Path(self.last_launch()["sentinel"]["snapshot_dir"]) / "ER0000.sl2").unlink()
+        self.finish()
+        self.assertEqual(self.last_launch()["pending_restore"]["reason"], "restore-failed")
+
+    def test_a_binary_that_is_not_me3_is_ignored(self) -> None:
+        self.append("ER0000.sl2")
+        self.finish(binary=self.tmp / "tools/Explorer++.exe")
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+        self.assertEqual(self.modals, [])
+
+    def test_a_session_this_process_did_not_start_is_not_its_business(self) -> None:
+        self.append("ER0000.sl2")
+        stranger = self.new_gate()
+        stranger.finished(str(self.binary), 0)
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+        self.assertEqual(self.modals, [])
+
+    def test_a_game_that_is_not_active_is_ignored(self) -> None:
+        self.append("ER0000.sl2")
+        self.game.active = False
+        self.finish()
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+
+    def test_a_failure_in_the_sweep_is_shown_and_never_raised(self) -> None:
+        with mock.patch.object(session, "compare_sentinel", side_effect=RuntimeError("boom")):
+            self.finish()
+        self.assertEqual(len(self.modals), 1)
+        self.assertIn("could not check your vanilla save", self.modals[0][1].replace("\n", " "))
+        self.assertIn("boom", self.modals[0][1])
+        self.assertTrue(any("boom" in w for w in self.warnings))
+
+    def test_nothing_under_game_is_written_by_a_restore(self) -> None:
+        self.append("ER0000.sl2")
+        self.finish()
+        self.assertEqual(tree(self.install), self.game_tree)
+
+
+class FirstLaunchSweepTests(GateCase):
+    def test_a_save_the_session_creates_in_a_folder_that_did_not_exist_is_quarantined(self) -> None:
+        # No save folder at all before the launch, as on a machine that never
+        # ran the game. A native that failed to load makes the game write
+        # ER0000.sl2 into the <steamid>/ folder it creates.
+        self.assertTrue(self.launch())
+        self.make_saves(sl2=b"modded progress", bak=None)
+        self.gate.finished(str(self.binary), 0)
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+        [kept] = list((self.paths.save_backups / "quarantine").iterdir())
+        self.assertEqual(kept.read_bytes(), b"modded progress")
+        self.assertEqual(len(self.modals), 1)
+        self.assertEqual(self.last_launch()["sentinel"]["swept"]["outcome"], "restored")
+
+    def test_a_modded_only_save_folder_does_not_hide_a_new_vanilla_save(self) -> None:
+        self.save_dir.mkdir(parents=True)
+        (self.save_dir / "ER0000_modded").write_bytes(b"modded")
+        self.assertTrue(self.launch())
+        (self.save_dir / "ER0000.sl2").write_bytes(b"written by the session")
+        self.gate.finished(str(self.binary), 0)
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+        self.assertEqual((self.save_dir / "ER0000_modded").read_bytes(), b"modded")
+
+    def test_a_real_save_is_still_what_is_protected_when_another_folder_appears(self) -> None:
+        self.make_saves()
+        self.assertTrue(self.launch())
+        other = self.save_dir.parent / "1111"
+        other.mkdir()
+        (other / "ER0000.sl2").write_bytes(b"someone else's")
+        self.gate.finished(str(self.binary), 0)
+        self.assertEqual((other / "ER0000.sl2").read_bytes(), b"someone else's")
+        self.assertEqual(self.last_launch()["sentinel"]["swept"]["outcome"], "clean")
+
+
+class StartupSweepTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.assertTrue(self.launch())
+
+    def test_an_unchanged_save_marks_the_session_stale_clean_without_a_word(self) -> None:
+        self.assertEqual(self.new_gate().sweep_stale(), "stale-clean")
+        self.assertEqual(self.last_launch()["sentinel"]["swept"], {"outcome": "stale-clean"})
+        self.assertEqual((self.modals, self.vetoes), ([], []))
+
+    def test_a_changed_save_writes_the_pending_restore_and_moves_nothing(self) -> None:
+        self.append("ER0000.sl2")
+        written = (self.save_dir / "ER0000.sl2").read_bytes()
+        self.assertEqual(self.new_gate().sweep_stale(), "pending")
+        data = self.last_launch()
+        self.assertEqual(data["pending_restore"]["reason"], "unseen-session")
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), written)
+        self.assertEqual((self.modals, self.vetoes), ([], []))
+        self.assertFalse((self.paths.save_backups / "quarantine").exists())
+
+    def test_the_next_run_is_then_refused(self) -> None:
+        self.append("ER0000.sl2")
+        self.new_gate().sweep_stale()
+        self.assertFalse(self.new_gate().run(str(self.binary), str(self.paths.root), self.args))
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING)
+
+    def test_a_running_game_defers_the_comparison(self) -> None:
+        self.up = [(5, "eldenring.exe")]
+        self.assertIsNone(self.new_gate().sweep_stale())
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+
+    def test_a_game_that_is_not_active_does_nothing(self) -> None:
+        self.game.active = False
+        self.assertIsNone(self.new_gate().sweep_stale())
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
+
+    def test_a_settled_session_does_nothing(self) -> None:
+        self.gate.finished(str(self.binary), 0)
+        self.assertIsNone(self.new_gate().sweep_stale())
+
+    def test_a_damaged_record_is_logged_not_raised(self) -> None:
+        self.paths.last_launch.write_text("{")
+        probe = self.new_gate()
+        self.assertIsNone(probe.sweep_stale())
+        self.assertTrue(self.warnings)
+
+    def test_no_record_at_all_is_nothing_to_do(self) -> None:
+        self.paths.last_launch.unlink()
+        self.assertIsNone(self.new_gate().sweep_stale())
+
+
+class AfterTheSaveToolsTests(GateCase):
+    """The Save tools clear a pending restore; the gate then has to let go."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.assertTrue(self.launch())
+        self.append("ER0000.sl2")
+        self.written = (self.save_dir / "ER0000.sl2").read_bytes()
+        self.up = [(1, "eldenring.exe")]
+        self.gate.finished(str(self.binary), 0)
+        self.up = []
+        self.vetoes.clear()
+
+    def test_run_is_refused_until_the_restore_has_run_and_allowed_after(self) -> None:
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.SAVE_RESTORE_PENDING)
+        session.restore_pending(self.paths, running=lambda: [])
+        self.vetoes.clear()
+        self.assertTrue(self.launch())
+        folder = Path(self.last_launch()["sentinel"]["snapshot_dir"])
+        self.assertEqual((folder / "ER0000.sl2").read_bytes(), SL2)
+
+    def test_after_keeping_the_session_save_the_next_launch_snapshots_it(self) -> None:
+        session.keep_session_save(self.paths)
+        self.assertTrue(self.launch())
+        folder = Path(self.last_launch()["sentinel"]["snapshot_dir"])
+        self.assertEqual((folder / "ER0000.sl2").read_bytes(), self.written)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,7 @@ from . import me3, me3_host, pe, procs, saves, session, state
 from .ermlib.errors import ErmError
 
 TITLE = "Elden Ring launch blocked"
+SESSION_TITLE = "Elden Ring: save file"
 
 # Problem keys. The diagnose plugin gives each a stable integer; the names are
 # what last-launch.json records.
@@ -203,6 +204,8 @@ class LaunchGate:
         pending = data.get("pending_restore")
         if pending:
             raise self._pending_veto(pending)
+        if self._sweep_unseen(paths, data) == "pending":
+            raise self._pending_veto(data["pending_restore"])
 
     @staticmethod
     def _pending_veto(pending: dict) -> _Veto:
@@ -408,3 +411,144 @@ class LaunchGate:
                 )
         with contextlib.suppress(Exception):
             self._show_veto(TITLE, veto.text())
+
+    def _current_save_dir(self) -> Path:
+        return saves.save_dir(self._library())
+
+    def _sweep_unseen(self, paths: state.InstancePaths, data: dict) -> str | None:
+        """Settle a sentinel whose session ended without the sweep running.
+
+        Fluorine closed or crashed while the game ran, or the process tracker
+        gave up. The writer is unknowable: a Steam Play in between is harmless,
+        a modded session is not. So an unchanged save is recorded as
+        stale-clean and a changed one is not restored, only asked about.
+        Returns the outcome, or None when there was nothing to settle.
+        """
+        sentinel = data.get("sentinel")
+        if not isinstance(sentinel, dict) or sentinel.get("swept") is not None:
+            return None
+        effective = session.effective_baseline(sentinel, self._current_save_dir())
+        changed, kept = session.compare_sentinel(effective)
+        if changed:
+            data["pending_restore"] = {
+                "reason": "unseen-session",
+                "sentinel": effective,
+                "changed": changed,
+            }
+            sentinel["swept"] = {"outcome": "pending"}
+            outcome = "pending"
+        else:
+            if effective is sentinel:
+                sentinel["files"] = kept
+            sentinel["swept"] = {"outcome": "stale-clean"}
+            outcome = "stale-clean"
+        session.save_last_launch(paths, data)
+        return outcome
+
+    def sweep_stale(self) -> str | None:
+        """The same comparison at startup, so a refused Run is not the first sign."""
+        if not self._game.isActive():
+            return None
+        try:
+            if self._running():
+                return None
+            paths = state.InstancePaths(self._organizer)
+            return self._sweep_unseen(paths, session.load_last_launch(paths))
+        except Exception:
+            self._warn(f"Elden Ring: startup save check failed\n{traceback.format_exc()}")
+            return None
+
+    def finished(self, binary: str, exit_code: int) -> None:
+        if not self._game.isActive():
+            return
+        try:
+            self._sweep(binary, exit_code)
+        except Exception:
+            detail = traceback.format_exc()
+            self._warn(f"Elden Ring: the post-session save check failed\n{detail}")
+            with contextlib.suppress(Exception):
+                self._show_modal(
+                    SESSION_TITLE,
+                    "Fluorine could not check your vanilla save after the session. Do "
+                    "not press Play in Steam until you have compared ER0000.sl2 with "
+                    "your backup.\n\n" + detail,
+                )
+
+    def _sweep(self, binary: str, exit_code: int) -> None:
+        if self._session_stamp is None or self._mode(binary) != ME3:
+            return
+        paths = state.InstancePaths(self._organizer)
+        data = session.load_last_launch(paths)
+        sentinel = data.get("sentinel")
+        stamp, self._session_stamp = self._session_stamp, None
+        if not isinstance(sentinel, dict) or sentinel.get("stamp") != stamp:
+            return
+        if sentinel.get("swept") is not None:
+            return
+        # Not the exit code and not the lock result: a force-unlocked session
+        # and a crash both end with a non-zero code, and the lock can release
+        # while the game is still up.
+        game_up = self._running()
+        effective = session.effective_baseline(sentinel, self._current_save_dir())
+        changed, kept = session.compare_sentinel(effective)
+        if not changed:
+            if effective is sentinel:
+                sentinel["files"] = kept
+            # With the game still up the save may yet be written. Leave the
+            # sentinel unswept: the next launch and the next startup compare
+            # it again, and by then the game has exited.
+            if not game_up:
+                sentinel["swept"] = {"outcome": "clean", "exit_code": exit_code}
+            session.save_last_launch(paths, data)
+            return
+        if game_up:
+            data["pending_restore"] = {
+                "reason": "game-running",
+                "sentinel": effective,
+                "changed": changed,
+                "exit_code": exit_code,
+            }
+            sentinel["swept"] = {"outcome": "pending", "exit_code": exit_code}
+            session.save_last_launch(paths, data)
+            self._show_modal(
+                SESSION_TITLE,
+                f"The modded session changed {', '.join(changed)}, and the game is still "
+                "running, so the save was not put back.\n\nQuit the game, then open "
+                'Tools > "Elden Ring: Save tools…" and restore the pre-session '
+                "snapshot. Until then Run is blocked.",
+            )
+            return
+        try:
+            result = session.restore_changed(paths, effective)
+        except ErmError as exc:
+            data["pending_restore"] = {
+                "reason": "restore-failed",
+                "sentinel": effective,
+                "changed": changed,
+                "exit_code": exit_code,
+                "error": str(exc),
+            }
+            sentinel["swept"] = {"outcome": "pending", "exit_code": exit_code}
+            session.save_last_launch(paths, data)
+            self._show_modal(
+                SESSION_TITLE,
+                f"The modded session changed {', '.join(changed)} and putting the "
+                f"pre-session save back failed: {exc}\n\nDo not press Play in Steam. "
+                'Open Tools > "Elden Ring: Save tools…" to try again.',
+            )
+            return
+        sentinel["swept"] = {"outcome": "restored", "exit_code": exit_code}
+        data["sentinel_tripped"] = session.tripped(result)
+        session.save_last_launch(paths, data)
+        where = "\n".join(f"  {path}" for path in result.quarantined) or "  (there was nothing to keep)"
+        self._show_modal(
+            SESSION_TITLE,
+            f"The modded session wrote to your vanilla save ({', '.join(changed)}). "
+            "Normally it writes ER0000_modded; this happens when a mod fails to load "
+            "and takes the save redirect with it.\n\n"
+            "The pre-session save is back. What the session wrote is kept at:\n"
+            f"{where}\n\n"
+            "Do not press Play in Steam until you have read this. Steam Cloud syncs "
+            "around Steam's own launches; if Steam shows a cloud conflict for this "
+            "save, keep the local copy.",
+        )
