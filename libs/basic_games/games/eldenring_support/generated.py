@@ -122,6 +122,14 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def _read_meta(mod_dir: Path, old: Path) -> bytes | None:
+    for folder in (mod_dir, old):
+        meta = folder / treewalk.META_INI
+        if os.path.isfile(meta):
+            return meta.read_bytes()
+    return None
+
+
 def build(mod_dir, state_file, files: list[tuple[str, bytes]], fp: str) -> None:
     """Write `files` as the generated mod and record what was written.
 
@@ -133,6 +141,9 @@ def build(mod_dir, state_file, files: list[tuple[str, bytes]], fp: str) -> None:
     temp = mod_dir.with_name(mod_dir.name + ".tmp")
     old = mod_dir.with_name(mod_dir.name + ".old")
     Path(state_file).unlink(missing_ok=True)
+    # A crash between the two renames leaves the live mod in <mod>.old, so its
+    # meta.ini is read from there when mod_dir is gone, before old is cleared.
+    meta_bytes = _read_meta(mod_dir, old)
     _remove(temp)
     _remove(old)
     outputs = {}
@@ -140,9 +151,8 @@ def build(mod_dir, state_file, files: list[tuple[str, bytes]], fp: str) -> None:
     for rel, data in files:
         atomic.write_bytes_atomic(temp / rel, data)
         outputs[rel] = _sha256(data)
-    meta = mod_dir / treewalk.META_INI
-    if os.path.isfile(meta):
-        shutil.copy2(meta, temp / treewalk.META_INI)
+    if meta_bytes is not None:
+        atomic.write_bytes_atomic(temp / treewalk.META_INI, meta_bytes)
     if os.path.lexists(mod_dir):
         os.rename(mod_dir, old)
     os.rename(temp, mod_dir)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import types
@@ -201,6 +202,14 @@ class BuildVerifyTests(GeneratedCase):
         (self.mod_dir / "SeamlessCoop/crashpad/x.dmp").parent.mkdir(parents=True)
         (self.mod_dir / "SeamlessCoop/crashpad/x.dmp").write_bytes(b"dump")
         self.assertEqual(self.verify(), generated.FRESH)
+
+    def test_meta_ini_survives_a_rebuild_after_a_crash_between_the_two_renames(self) -> None:
+        self.build()
+        (self.mod_dir / "meta.ini").write_text("[Plugins]\nkind=generated\n")
+        os.rename(self.mod_dir, self.mod_dir.with_name(self.mod_dir.name + ".old"))
+        self.build()
+        self.assertEqual((self.mod_dir / "meta.ini").read_text(), "[Plugins]\nkind=generated\n")
+        self.assertFalse(self.mod_dir.with_name(self.mod_dir.name + ".old").exists())
 
     def test_meta_ini_is_carried_across_a_rebuild_and_not_counted(self) -> None:
         self.mod_dir.mkdir(parents=True)
