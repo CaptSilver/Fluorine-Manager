@@ -141,12 +141,8 @@ def _recorded_vanilla(paths: state.InstancePaths) -> inventory.Inventory:
 
 def _blocklisted_first(game_dir: Path, rels: list[str]) -> list[str]:
     """`rels` with the paths doctor.scan_game_dir names ahead of the rest."""
-    hits = {Path(hit).relative_to(game_dir).as_posix().lower() for hit in doctor.scan_game_dir(game_dir)}
-
-    def known(rel: str) -> bool:
-        return any(rel.lower() == hit or rel.lower().startswith(hit + "/") for hit in hits)
-
-    return sorted(rels, key=lambda rel: (not known(rel), rel))
+    known = set(inventory.blocked(game_dir, rels))
+    return sorted(rels, key=lambda rel: (rel not in known, rel))
 
 
 def _stray_veto(

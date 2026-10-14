@@ -183,6 +183,19 @@ class WalkTests(InventoryCase):
         self.assertEqual(tree.unreadable, ["locked"])
 
 
+class BlockedTests(InventoryCase):
+    def test_a_known_artifact_and_anything_under_one_is_blocked_by_any_case(self) -> None:
+        self.put("Dinput8.dll")
+        self.put("Mod/regulation.bin")
+        self.vanilla()
+        rels = ["eldenring.exe", "dinput8.DLL", "mod/REGULATION.bin", "sd/sd.bdt"]
+        self.assertEqual(inventory.blocked(self.game, rels), ["dinput8.DLL", "mod/REGULATION.bin"])
+
+    def test_nothing_is_blocked_in_a_vanilla_folder(self) -> None:
+        rels = self.vanilla()
+        self.assertEqual(inventory.blocked(self.game, rels), [])
+
+
 class ExclusionTests(InventoryCase):
     def ctx(self, **kwargs):
         manifest = kwargs.pop("manifest", self.manifest)

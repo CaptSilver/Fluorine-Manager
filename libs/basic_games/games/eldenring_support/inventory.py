@@ -360,8 +360,12 @@ def _candidates_in(game_dir, manifest: deploy.Manifest, tree: Tree) -> Candidate
     return found
 
 
-def _blocked(game_dir, rels: Iterable[str]) -> list[str]:
-    """The `rels` that are, or lie under, a path doctor.scan_game_dir names."""
+def blocked(game_dir, rels: Iterable[str]) -> list[str]:
+    """The `rels` that are, or lie under, a path doctor.scan_game_dir names.
+
+    The one matcher for known mod artifacts: adoption refuses what it returns
+    and the prepare veto lists it first.
+    """
     hits = [Path(hit).relative_to(game_dir).as_posix().lower() for hit in doctor.scan_game_dir(game_dir)]
     return sorted(
         rel for rel in rels if any(rel.lower() == hit or rel.lower().startswith(hit + "/") for hit in hits)
@@ -410,10 +414,10 @@ def adopt(
     unknown = sorted(set(accepted) - allowed)
     if unknown:
         raise InventoryError("These are not files Game/ can have as vanilla: " + ", ".join(unknown))
-    blocked = _blocked(game_dir, accepted)
-    if blocked:
+    refused = blocked(game_dir, accepted)
+    if refused:
         raise InventoryError(
-            "These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked)
+            "These are known mod artifacts and are never recorded as vanilla: " + ", ".join(refused)
         )
     notify = notify or (lambda message: None)
     inventory = Inventory(
@@ -722,9 +726,9 @@ def apply_diff(
         rel for rel in found.changed_plain + found.appeared_plain + found.changed_suspect + found.appeared_suspect
         if rel not in leave
     ]
-    blocked = _blocked(game_dir, taken)
-    if blocked:
-        raise InventoryError("These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked))
+    refused = blocked(game_dir, taken)
+    if refused:
+        raise InventoryError("These are known mod artifacts and are never recorded as vanilla: " + ", ".join(refused))
     ctx = context(game_dir, manifest)
     files, links = _record_paths(game_dir, inventory, walk(game_dir), taken, ctx, cache)
     for rel in found.removed_plain + [r for r in found.removed_suspect if r not in leave]:
@@ -742,9 +746,9 @@ def re_adopt(
     removed: a present file or ReShade link is recorded as it is now, a gone
     one is dropped. A known mod artifact is refused.
     """
-    blocked = _blocked(game_dir, rels)
-    if blocked:
-        raise InventoryError("These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked))
+    refused = blocked(game_dir, rels)
+    if refused:
+        raise InventoryError("These are known mod artifacts and are never recorded as vanilla: " + ", ".join(refused))
     ctx = context(game_dir, manifest)
     files, links = _record_paths(game_dir, inventory, walk(game_dir), rels, ctx, cache)
     return Inventory(
