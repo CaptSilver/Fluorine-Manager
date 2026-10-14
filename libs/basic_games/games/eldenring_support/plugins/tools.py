@@ -58,11 +58,15 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
         raise NotImplementedError
 
     def display(self) -> None:
+        self._shielded(self.run)
+
+    def _shielded(self, action) -> None:
+        """Run `action`, turning any failure into a dialog; a tool must not take the UI down."""
         try:
-            self.run()
+            action()
         except ErmError as exc:
             QMessageBox.critical(self._parent, self.displayName(), str(exc))
-        except Exception as exc:  # a tool must not take the UI down with it
+        except Exception as exc:
             qWarning(
                 f"{self.displayName()}: unexpected failure: {exc!r}\n{traceback.format_exc()}"
             )
@@ -257,7 +261,11 @@ class RebuildTool(EldenRingTool):
     def _rebuild(self, error=None) -> None:
         # Also the continuation of ensure_mod, which on a fresh instance runs
         # from the directory refresh and not from display(); a placement that
-        # failed there arrives as `error`.
+        # failed there arrives as `error`. Nothing above display() catches
+        # there, so the whole body is shielded.
+        self._shielded(lambda: self._rebuild_unshielded(error))
+
+    def _rebuild_unshielded(self, error) -> None:
         if error is not None:
             qWarning(f"{self.displayName()}: could not place the {generated.NAME} mod: {error!r}")
             QMessageBox.critical(
@@ -271,13 +279,8 @@ class RebuildTool(EldenRingTool):
             prepared = self._the_gate().rebuild()
         except gate.Veto as veto:
             QMessageBox.critical(self._parent, self.displayName(), veto.text())
-        except ErmError as exc:
-            QMessageBox.critical(self._parent, self.displayName(), str(exc))
-        except Exception as exc:
-            qWarning(f"{self.displayName()}: unexpected failure: {exc!r}\n{traceback.format_exc()}")
-            QMessageBox.critical(self._parent, self.displayName(), f"Unexpected failure: {exc}")
-        else:
-            QMessageBox.information(self._parent, self.displayName(), describe_rebuild(prepared))
+            return
+        QMessageBox.information(self._parent, self.displayName(), describe_rebuild(prepared))
 
     def run(self) -> None:
         generated.ensure_mod(self._organizer, then=self._rebuild)

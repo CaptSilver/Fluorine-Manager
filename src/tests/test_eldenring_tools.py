@@ -435,6 +435,34 @@ class RebuildToolTests(ModToolCase):
         self.assertEqual(SHOWN[-1][0], "critical")
         self.assertIn("gone", SHOWN[-1][2])
 
+    def test_a_failure_showing_the_result_never_escapes_the_refresh(self) -> None:
+        def broken_information(parent, title, text) -> None:
+            raise RuntimeError("dialog broke")
+
+        with mock.patch.object(gate.LaunchGate, "rebuild", return_value=self.prepared), \
+                mock.patch.object(tools.QMessageBox, "information", broken_information):
+            self.tool.display()
+            self.organizer.simulate_refresh()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("dialog broke", SHOWN[-1][2])
+        self.assertTrue(any("dialog broke" in message for message in WARNINGS))
+
+    def test_a_failure_showing_the_placement_error_never_escapes_the_refresh(self) -> None:
+        calls = []
+
+        def broken_critical(parent, title, text) -> None:
+            calls.append(text)
+            if len(calls) == 1:
+                raise RuntimeError("dialog broke")
+            SHOWN.append(("critical", title, text))
+
+        with mock.patch.object(tools.generated, "_place", side_effect=RuntimeError("cannot place")), \
+                mock.patch.object(tools.QMessageBox, "critical", broken_critical):
+            self.tool.display()
+            with self.assertLogs(level="WARNING"):
+                self.organizer.simulate_refresh()
+        self.assertTrue(any("dialog broke" in message for message in WARNINGS))
+
     def test_a_placement_that_failed_in_the_refresh_is_shown_and_nothing_is_rebuilt(self) -> None:
         with mock.patch.object(gate.LaunchGate, "rebuild") as rebuild, \
                 mock.patch.object(tools.generated, "_place", side_effect=RuntimeError("cannot place")):
