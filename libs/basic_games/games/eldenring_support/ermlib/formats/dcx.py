@@ -263,6 +263,30 @@ def _zstd():
         f"needs this; only a regulation merge is blocked.")
 
 
+def zstd_version():
+    """ZSTD_versionNumber() of the libzstd a merge would compress with, or None.
+
+    major * 10000 + minor * 100 + patch, so 1.5.7 is 10507. Compressed bytes
+    differ between libzstd versions, which makes this one of the inputs that
+    says whether a built regulation.bin is still the one co-op partners expect.
+    None when no backend loads; the merge itself reports that.
+    """
+    for name, _adapt in _backends():
+        try:
+            if name is None:
+                return int(_open_libzstd().ZSTD_versionNumber())
+            module = importlib.import_module(name)
+        except ImportError:
+            continue
+        except DcxError:
+            return None
+        info = getattr(module, "zstd_version_info", None) or getattr(module, "ZSTD_VERSION", None)
+        if info:
+            major, minor, patch = info[:3]
+            return major * 10000 + minor * 100 + patch
+    return None
+
+
 def read(data):
     """Decompress a DCX container and return its payload."""
     if data[:4] != MAGIC:

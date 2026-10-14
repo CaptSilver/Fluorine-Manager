@@ -487,3 +487,29 @@ def test_read_does_not_inflate_a_dflt_body_past_the_claimed_size():
 def test_the_bundle_uses_only_the_bundled_libzstd(tmp_path, launcher_env):
     launcher_env(tmp_path)
     assert dcx._backends() == ((None, dcx._ctypes_libzstd),)
+
+
+def test_zstd_version_is_the_number_of_the_libzstd_in_use(monkeypatch):
+    version = dcx.zstd_version()
+    assert isinstance(version, int)
+    assert 10400 <= version < 20000
+
+
+def test_the_bundled_libzstd_reports_its_own_version(bundled_libs, launcher_env):
+    launcher_env(bundled_libs)
+    import ctypes
+    lib = ctypes.CDLL(os.path.join(bundled_libs, dcx.BUNDLED_LIBZSTD))
+    assert dcx.zstd_version() == lib.ZSTD_versionNumber()
+
+
+def test_a_bundle_without_its_libzstd_has_no_version_to_report(tmp_path, launcher_env):
+    launcher_env(tmp_path)
+    assert dcx.zstd_version() is None
+
+
+def test_a_backend_that_names_its_libzstd_version_as_a_tuple_is_converted(monkeypatch):
+    fake = type("Fake", (), {"zstd_version_info": (1, 5, 7)})
+    monkeypatch.delenv("MO2_BASE_DIR", raising=False)
+    monkeypatch.setattr(dcx, "_BACKENDS", (("fakezstd", None),))
+    monkeypatch.setattr(dcx, "importlib", type("Importer", (), {"import_module": staticmethod(lambda name: fake)}))
+    assert dcx.zstd_version() == 10507

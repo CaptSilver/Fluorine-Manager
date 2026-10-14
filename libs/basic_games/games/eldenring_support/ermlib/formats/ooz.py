@@ -6,6 +6,7 @@ Kraken *encoder*, but we never need one: the game also reads plain zlib DCX
 """
 import ctypes
 import os
+from pathlib import Path
 
 from ..errors import ErmError
 
@@ -31,6 +32,28 @@ def library_path():
     which finds lib/libooz.so through the LD_LIBRARY_PATH the launcher exports.
     """
     return os.environ.get("FLUORINE_OOZ_LIB") or "libooz.so"
+
+
+def library_file():
+    """The file library_path() resolves to, as an absolute path, or None.
+
+    A bare soname is looked up the way the loader will: in the directories of
+    LD_LIBRARY_PATH, which is where the launcher puts the bundle's lib/. Used
+    to hash the decompressor into the merge fingerprint.
+    """
+    name = library_path()
+    if os.sep in name:
+        candidates = [Path(name)]
+    else:
+        folders = [f for f in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep) if f]
+        candidates = [Path(folder) / name for folder in folders]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
 
 
 def _load():

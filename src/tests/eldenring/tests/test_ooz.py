@@ -122,3 +122,22 @@ def test_lzna_and_bitknit_streams_are_refused(built_library, decoder_type):
     assert ooz.decompress(fill_block(0x41), 100) == b"A" * 100
     with pytest.raises(ooz.OozError, match="decode failed"):
         ooz.decompress(memset_stream(decoder_type), 100)
+
+
+def test_the_library_file_is_the_environment_path_when_it_is_set(built_library):
+    assert str(ooz.library_file()) == os.path.realpath(built_library)
+
+
+def test_a_bare_soname_is_looked_for_on_the_loader_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("FLUORINE_OOZ_LIB", raising=False)
+    (tmp_path / "libooz.so").write_bytes(b"x")
+    monkeypatch.setenv("LD_LIBRARY_PATH", f"/nonexistent:{tmp_path}")
+    assert ooz.library_file() == (tmp_path / "libooz.so").resolve()
+
+
+def test_no_library_file_is_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("FLUORINE_OOZ_LIB", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", str(tmp_path))
+    assert ooz.library_file() is None
+    monkeypatch.setenv("FLUORINE_OOZ_LIB", str(tmp_path / "missing.so"))
+    assert ooz.library_file() is None
