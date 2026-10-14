@@ -321,5 +321,112 @@ class AdoptionTests(GameCase):
         self.assertIn("deployed", self.report.text())
 
 
+class LaunchOptionTests(GameCase):
+    VALUE = "me3 launch -p /home/x/erm/tools/me3/erm-coop.me3 # %command%"
+
+    def cleared(self) -> bool:
+        return importfinish.launch_option_cleared(self.host, self.script.ui(), self.report)
+
+    def test_an_empty_option_passes_without_a_dialog(self) -> None:
+        self.assertTrue(self.cleared())
+        self.assertEqual(self.script.shown, [])
+        self.assertEqual(self.report.lines[-1][0], "ok")
+
+    def test_a_set_option_is_shown_and_the_user_clears_it_and_asks_to_check_again(self) -> None:
+        self.options = [(Path("/steam/userdata/111/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: self.options.clear() or True
+        self.assertTrue(self.cleared())
+        [(kind, text)] = self.script.shown
+        self.assertEqual(kind, "launch-option")
+        self.assertIn(self.VALUE, text)
+        self.assertIn("/steam/userdata/111/config/localconfig.vdf", text)
+        self.assertIn("never edits", text)
+
+    def test_an_option_that_is_still_there_after_check_again_is_asked_about_again(self) -> None:
+        self.options = [(Path("/steam/userdata/111/config/localconfig.vdf"), self.VALUE)]
+        answers = iter([lambda: True, lambda: self.options.clear() or True])
+        self.script.recheck = lambda: next(answers)()
+        self.assertTrue(self.cleared())
+        self.assertEqual(self.script.kinds_shown(), ["launch-option", "launch-option"])
+
+    def test_the_user_giving_up_leaves_it_open_and_names_the_value(self) -> None:
+        self.options = [(Path("/steam/userdata/111/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: False
+        self.assertFalse(self.cleared())
+        self.assertEqual(self.report.lines[-1][0], "warn")
+        self.assertIn(self.VALUE, self.report.text())
+
+    def test_two_accounts_are_both_shown(self) -> None:
+        self.options = [
+            (Path("/steam/userdata/111/config/localconfig.vdf"), "-novid %command%"),
+            (Path("/steam/userdata/222/config/localconfig.vdf"), self.VALUE),
+        ]
+        self.script.recheck = lambda: False
+        self.cleared()
+        text = self.script.shown[0][1]
+        self.assertIn("111", text)
+        self.assertIn("222", text)
+        self.assertIn("-novid %command%", text)
+        self.assertIn(self.VALUE, text)
+
+    def test_a_steam_root_that_cannot_be_found_is_not_an_empty_option(self) -> None:
+        self.host.read_options = None
+        self.host.steam_root = lambda: None
+        self.assertFalse(self.cleared())
+        self.assertEqual(self.script.shown, [])
+        self.assertIn("userdata", self.report.text())
+
+    def test_the_real_reader_finds_the_value_under_each_account_and_sees_it_cleared(self) -> None:
+        self.host.read_options = None
+        for account, value in (("111", ""), ("222", self.VALUE)):
+            config = self.steam / "userdata" / account / "config/localconfig.vdf"
+            config.parent.mkdir(parents=True)
+            config.write_text(LOCALCONFIG % value)
+
+        def clear() -> bool:
+            (self.steam / "userdata/222/config/localconfig.vdf").write_text(LOCALCONFIG % "")
+            return True
+
+        self.script.recheck = clear
+        self.assertTrue(self.cleared())
+        text = self.script.shown[0][1]
+        self.assertIn("222", text)
+        self.assertIn(self.VALUE, text)
+        self.assertNotIn("/111/", text)
+
+
+class MarkDoneTests(GameCase):
+    def mark(self, blockers, stamp: str = STAMP) -> bool:
+        return importfinish.mark_done(self.organizer, stamp, self.report, blockers)
+
+    def done(self):
+        return self.organizer.persistent(kinds.PLUGIN, "erm_import_done")
+
+    def test_without_blockers_the_stamp_is_written_and_the_report_says_what_changed(self) -> None:
+        self.assertTrue(self.mark([]))
+        self.assertEqual(self.done(), STAMP)
+        self.assertIn("The import is done", self.report.text())
+        self.assertIn("Steam's own Play", self.report.text())
+
+    def test_a_blocker_writes_nothing_and_names_each_reason(self) -> None:
+        self.assertFalse(self.mark(["ER0000.sl2 is still unreviewed", "Steam still has a launch option set"]))
+        self.assertIsNone(self.done())
+        text = self.report.text()
+        self.assertIn("not marked done", text)
+        self.assertIn("ER0000.sl2 is still unreviewed", text)
+        self.assertIn("Steam still has a launch option set", text)
+
+    def test_a_second_pass_keeps_the_first_stamp(self) -> None:
+        self.mark([])
+        self.assertTrue(self.mark([], stamp="20261014T130000000001Z"))
+        self.assertEqual(self.done(), STAMP)
+        self.assertIn("already marked done", self.report.text())
+
+    def test_a_blocker_after_it_was_done_does_not_take_the_mark_back(self) -> None:
+        self.mark([])
+        self.assertFalse(self.mark(["Steam still has a launch option set"], stamp="20261014T130000000001Z"))
+        self.assertEqual(self.done(), STAMP)
+
+
 if __name__ == "__main__":
     unittest.main()

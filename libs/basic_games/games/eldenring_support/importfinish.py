@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import archives, deploy, environment, fixes, hardening, importer, inventory, procs, saves, state
+from . import archives, deploy, environment, fixes, hardening, importer, inventory, kinds, procs, saves, state
 from .ermlib import gamebuild, steam
 from .ermlib.errors import ErmError
 
@@ -225,4 +225,66 @@ def adopt_inventory(
             "ReShade is outside Fluorine's management. Whether it loads under Steam's own launch with an empty "
             "launch option, or needs erm's WINEDLLOVERRIDES prefix, is for the first Steam Play to show."
         )
+    return True
+
+
+# -- Steam's launch option ----------------------------------------------------
+
+LAUNCH_TEXT = (
+    "Steam still starts Elden Ring with a launch option:\n\n{shown}\n\n"
+    "erm put it there. With erm's files out of Game/ it points at things that are gone, or runs the game outside "
+    "Fluorine's checks. Clear it in the game's Properties in Steam (General > Launch Options) while Steam is "
+    "running: Steam rewrites that file, so Fluorine never edits it. Then press the button to check again."
+)
+
+
+def launch_option_cleared(host: Host, ui: Ui, report: importer.Report) -> bool:
+    """Read Steam's launch option for Elden Ring until it is empty. False when the user stops or it cannot be read.
+
+    An empty option is not a setting. A root that cannot be found means the
+    option cannot be told, which is not the same as empty.
+    """
+    while True:
+        readable, found = host.launch_options()
+        if not readable:
+            report.warn(
+                "Steam's userdata folder was not found, so Fluorine cannot tell whether a launch option is set for "
+                "Elden Ring. The import is not marked done."
+            )
+            return False
+        if not found:
+            report.ok("Steam carries no launch option for Elden Ring")
+            return True
+        shown = "\n".join(f"  {path}: {value}" for path, value in found)
+        if not ui.launch_option(LAUNCH_TEXT.format(shown=shown)):
+            report.warn(
+                f"Steam still carries a launch option for Elden Ring:\n{shown}\nClear it in the game's Properties "
+                "in Steam while Steam is running, then run the import again."
+            )
+            return False
+
+
+# -- done ---------------------------------------------------------------------
+
+
+def mark_done(organizer, stamp: str, report: importer.Report, blockers: list[str]) -> bool:
+    """Write erm_import_done unless something is still open. True when the import is done.
+
+    A mark that is already there stays, and a blocker found later does not
+    take it back: the mark says the import got that far once.
+    """
+    if blockers:
+        report.warn("The import is not marked done: " + "; ".join(blockers) + ". Run it again to continue.")
+        return False
+    if organizer.persistent(kinds.PLUGIN, KEY_DONE):
+        report.info("The import was already marked done")
+    else:
+        organizer.setPersistent(kinds.PLUGIN, KEY_DONE, stamp)
+        report.ok("The import is done")
+    report.info(
+        "Steam's own Play is now the vanilla route: with an empty launch option it starts the game as Valve "
+        "ships it, and the first launch through Fluorine adopts a baseline for the game build if none is "
+        "recorded, builds the generated mod and copies the config files of natives that have them into "
+        "Game/mods/ under the hardened launcher."
+    )
     return True
