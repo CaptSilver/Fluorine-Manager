@@ -5,12 +5,14 @@ import json
 import os
 import shutil
 import tempfile
+import tomllib
 import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import eldenring_testsupport as support
+from eldenring_testsupport import synthetic_pe
 
 PACKAGE = support.load_support("_eldenring_gate_tests")
 gate = support.module(PACKAGE, "gate")
@@ -19,6 +21,7 @@ me3_host = support.module(PACKAGE, "me3_host")
 saves = support.module(PACKAGE, "saves")
 session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
+errors = support.module(PACKAGE, "ermlib.errors")
 
 STEAM_ID = "76561198000000000"
 SL2 = b"vanilla save " * 5000
@@ -346,6 +349,257 @@ class WholeBodyTests(GateCase):
             self.assertFalse(self.launch())
         self.assertIn("me3", self.last_veto())
         self.assertTrue(any("deep" in w for w in self.warnings))
+
+
+class PassingLaunchTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def test_a_clean_launch_returns_true_and_shows_nothing(self) -> None:
+        self.assertTrue(self.launch())
+        self.assertEqual((self.vetoes, self.modals, self.warnings), ([], [], []))
+
+    def test_the_host_is_ensured_silently_under_a_busy_dialog_on_every_launch(self) -> None:
+        self.launch()
+        self.launch()
+        self.assertEqual(self.ensure.call_count, 2)
+        self.assertEqual(self.ensure.call_args.args, (self.organizer,))
+        progress = self.ensure.call_args.kwargs["progress"]
+        progress("Downloading")
+        self.assertEqual(self.progress, ["Downloading"])
+        self.assertEqual(len(self.busy_titles), 2)
+
+    def test_the_working_folder_and_profile_are_created_when_neither_exists(self) -> None:
+        self.assertFalse(self.paths.root.exists())
+        self.assertTrue(self.launch())
+        self.assertTrue(self.paths.root.is_dir())
+        self.assertTrue(self.paths.current_me3.is_file())
+
+    def test_the_profile_has_no_packages_or_natives_and_the_modded_savefile(self) -> None:
+        self.launch()
+        parsed = tomllib.loads(self.paths.current_me3.read_text())
+        self.assertEqual(parsed["savefile"], "ER0000_modded")
+        self.assertNotIn("natives", parsed)
+        self.assertNotIn("packages", parsed)
+
+    def test_the_profile_is_rewritten_on_every_launch(self) -> None:
+        self.launch()
+        self.paths.current_me3.write_text("hand written")
+        self.launch()
+        self.assertIn("ER0000_modded", self.paths.current_me3.read_text())
+
+    def test_a_native_that_passes_the_pe_check_is_declared(self) -> None:
+        dll = self.tmp / "mods/Good Mod/good.dll"
+        dll.parent.mkdir(parents=True)
+        dll.write_bytes(synthetic_pe())
+        self.natives = [("Good Mod", dll)]
+        self.assertTrue(self.launch())
+        self.assertEqual(
+            [entry["path"] for entry in tomllib.loads(self.paths.current_me3.read_text())["natives"]],
+            [str(dll)],
+        )
+
+    def test_a_stale_stored_path_through_a_symlinked_home_is_the_same_entry(self) -> None:
+        # /home is a symlink to /var/home on this machine: both spellings name one entry.
+        alias = self.tmp / "alias"
+        alias.symlink_to(self.tmp)
+        spelled = alias / self.binary.relative_to(self.tmp)
+        root = alias / self.paths.root.relative_to(self.tmp)
+        args = self.args.replace(str(self.tmp), str(alias))
+        self.assertTrue(self.launch(binary=spelled, cwd=root, args=args))
+        self.assertEqual(self.vetoes, [])
+
+    def test_a_symlink_to_the_managed_me3_is_the_same_binary(self) -> None:
+        link = self.tmp / "bin/me3"
+        link.parent.mkdir()
+        link.symlink_to(self.binary)
+        self.assertTrue(self.launch(binary=link))
+
+    def test_nothing_under_game_is_touched_by_a_whole_launch(self) -> None:
+        self.launch()
+        # assert_game_dir_untouched runs as a cleanup; this makes the intent a test name.
+        self.assertEqual(tree(self.install), self.game_tree)
+
+
+class HostTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def test_a_failed_install_vetoes_and_names_the_tool(self) -> None:
+        self.ensure.side_effect = me3_host.Me3HostError("could not reach GitHub: offline")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ME3_INSTALL_FAILED, "could not reach GitHub: offline", "Install me3")
+        self.assertFalse(self.paths.current_me3.exists())
+        self.assertFalse(self.paths.save_snapshots.exists())
+
+    def test_a_hash_mismatch_vetoes_the_same_way(self) -> None:
+        self.ensure.side_effect = errors.IntegrityError("sha256 differs")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ME3_INSTALL_FAILED, "sha256 differs")
+
+    def test_an_error_the_installer_does_not_wrap_is_a_readable_veto_too(self) -> None:
+        # A KeyError from an odd release JSON, a RuntimeError from Path.home(),
+        # an OSError nobody caught: none may reach the user as a bare traceback.
+        for exc in (
+            KeyError("name"),
+            RuntimeError("Could not determine home directory."),
+            OSError(28, "No space left on device"),
+            ValueError("bad json"),
+        ):
+            with self.subTest(type(exc).__name__):
+                self.vetoes.clear()
+                self.ensure.side_effect = exc
+                self.assertFalse(self.launch())
+                self.assert_vetoed(
+                    gate.ME3_INSTALL_FAILED, f"{type(exc).__name__}: {exc}", "Install me3"
+                )
+                self.assertNotIn("unexpectedly", self.last_veto())
+
+
+class ProfileTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def native(self, data: bytes, name: str = "ersc.dll") -> tuple[str, Path]:
+        path = self.tmp / "generated" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return ("Elden Ring Generated", path)
+
+    def test_a_native_that_is_not_a_pe_dll_vetoes_before_anything_is_written(self) -> None:
+        cases = {
+            "zero bytes": b"",
+            "text": b"not a dll" * 20,
+            "32-bit": synthetic_pe(machine=0x14C),
+            "an exe": synthetic_pe(characteristics=0x22),
+            "truncated": synthetic_pe()[:0x70],
+        }
+        for label, data in cases.items():
+            with self.subTest(label):
+                self.vetoes.clear()
+                self.natives = [self.native(data)]
+                self.assertFalse(self.launch())
+                self.assert_vetoed(
+                    gate.NATIVE_DLL_INVALID, "Elden Ring Generated", str(self.natives[0][1])
+                )
+                self.assertFalse(self.paths.current_me3.exists())
+                self.assertFalse(self.paths.save_snapshots.exists())
+
+    def test_a_missing_native_vetoes(self) -> None:
+        self.natives = [("Gone Mod", self.tmp / "nowhere/x.dll")]
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.NATIVE_DLL_INVALID, "Gone Mod")
+
+    def test_the_first_bad_native_among_good_ones_is_the_one_named(self) -> None:
+        self.natives = [
+            self.native(synthetic_pe(), "good.dll"),
+            ("Bad Mod", self.native(b"", "bad.dll")[1]),
+        ]
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.NATIVE_DLL_INVALID, "Bad Mod", "bad.dll")
+
+    def test_a_working_folder_that_cannot_be_created_vetoes_with_the_path(self) -> None:
+        # The folder is left absent so the launch reaches the mkdir. A file
+        # standing in its place would fail earlier, reading last-launch.json.
+        # Only the first mkdir of the folder is refused, so the veto's own
+        # record (written through the same folder) still lands.
+        real = Path.mkdir
+        refused: list[Path] = []
+
+        def mkdir(path, *args, **kwargs):
+            if path == self.paths.root and not refused:
+                refused.append(path)
+                raise PermissionError(13, "denied")
+            return real(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "mkdir", mkdir):
+            self.assertFalse(self.launch())
+        self.assertEqual(refused, [self.paths.root])
+        self.assert_vetoed(None, "cannot create the working folder", str(self.paths.root), "denied")
+        self.assertEqual(self.last_launch()["report"]["step"], "me3 profile")
+
+    def test_a_profile_that_is_not_there_after_writing_vetoes(self) -> None:
+        with mock.patch.object(gate.me3, "write_profile"):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, str(self.paths.current_me3), "not there")
+
+    def test_a_profile_that_cannot_be_written_vetoes_with_the_os_error(self) -> None:
+        with mock.patch.object(gate.me3, "write_profile", side_effect=PermissionError("denied")):
+            self.assertFalse(self.launch())
+        self.assert_vetoed(None, str(self.paths.current_me3), "denied")
+
+
+class EntryTests(GateCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+
+    def refused(self, args: str | None = None, **kwargs) -> None:
+        self.assertFalse(self.launch(args=args, **kwargs))
+        self.assert_vetoed(None, "Elden Ring (me3) entry")
+        self.assertFalse(self.paths.save_snapshots.exists())
+
+    def test_the_canonical_line_is_accepted(self) -> None:
+        self.assertTrue(self.launch())
+
+    def test_each_option_that_loads_code_or_overrides_the_redirect_is_refused(self) -> None:
+        extras = (
+            "--native /tmp/x.dll", "-n /tmp/x.dll", "--package /tmp/p", "--savefile y",
+            "--config-file /tmp/c.toml", "--profile-dir /tmp/p", "--steam-dir /tmp/s",
+            "--disable-arxan",
+        )
+        for extra in extras:
+            with self.subTest(extra):
+                self.vetoes.clear()
+                self.refused(f"{self.args} {extra}")
+
+    def test_a_missing_online_false_is_refused(self) -> None:
+        self.refused(self.args.replace(" --online false", ""))
+
+    def test_online_true_is_refused(self) -> None:
+        self.refused(self.args.replace("--online false", "--online true"))
+
+    def test_the_windows_binaries_dir_must_come_first(self) -> None:
+        tokens = me3.entry_args(self.paths, self.install / "Game")
+        moved = tokens[2:] + tokens[:2]
+        self.refused(" ".join(moved))
+        self.vetoes.clear()
+        self.refused(self.args.replace("--windows-binaries-dir ", "", 1).replace(
+            f'"{me3_host.windows_bin_dir()}" ', "", 1))
+
+    def test_another_profile_or_exe_is_refused(self) -> None:
+        self.refused(self.args.replace("current.me3", "other.me3"))
+        self.vetoes.clear()
+        self.refused(self.args.replace("eldenring.exe", "start_protected_game.exe"))
+
+    def test_a_path_that_is_the_same_file_spelled_differently_is_accepted(self) -> None:
+        alias = self.tmp / "alias"
+        alias.symlink_to(self.tmp)
+        self.assertTrue(self.launch(args=self.args.replace(str(self.tmp), str(alias))))
+
+    def test_a_working_folder_other_than_the_instance_one_is_refused(self) -> None:
+        self.refused(cwd=self.tmp)
+
+    def test_a_me3_toml_in_the_working_folder_is_refused(self) -> None:
+        self.paths.root.mkdir(parents=True)
+        (self.paths.root / "me3.toml").write_text("[options]\n")
+        self.refused()
+        self.assertIn("me3.toml", self.last_veto())
+
+    def test_a_me3_that_is_not_the_managed_one_is_refused_even_under_the_right_name(self) -> None:
+        other = self.tmp / "elsewhere/me3"
+        other.parent.mkdir()
+        other.write_bytes(b"#!/bin/sh\n")
+        self.refused(binary=other)
+        self.assertIn("not the me3 the plugin manages", self.last_veto())
+
+    def test_unreadable_arguments_are_refused_not_raised(self) -> None:
+        self.refused("")
+        self.vetoes.clear()
+        self.refused('"')
 
 
 if __name__ == "__main__":

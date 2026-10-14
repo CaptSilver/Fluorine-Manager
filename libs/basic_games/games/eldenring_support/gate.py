@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import stat
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import me3_host, procs, saves, session, state
+from . import me3, me3_host, pe, procs, saves, session, state
 from .ermlib.errors import ErmError
 
 TITLE = "Elden Ring launch blocked"
@@ -26,10 +27,21 @@ TITLE = "Elden Ring launch blocked"
 # what last-launch.json records.
 GAME_RUNNING = "GAME_RUNNING"
 SAVE_RESTORE_PENDING = "SAVE_RESTORE_PENDING"
+NATIVE_DLL_INVALID = "NATIVE_DLL_INVALID"
+ME3_INSTALL_FAILED = "ME3_INSTALL_FAILED"
 
 ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
 
 _SAVE_TOOLS = 'Tools > "Elden Ring: Save tools…"'
+
+# The entry's options whose value is a path. Compared by realpath, because
+# /home is a symlink to /var/home on this machine and an entry stored with
+# either spelling is the same entry.
+_PATH_OPTIONS = ("--windows-binaries-dir", "-p", "-e")
+
+# What me3_host.ensure can raise. ErmError covers the installer's own errors;
+# the others are what slips past its wrapping.
+_ENSURE_ERRORS = (ErmError, OSError, ValueError, KeyError, RuntimeError)
 
 
 class _Veto(Exception):
@@ -53,6 +65,21 @@ class _NoBusy:
 
     def update(self, message: str) -> None:
         return None
+
+
+def _is_file(path) -> bool:
+    # Path.is_file re-raises EACCES on the bundled Python.
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        return False
+
+
+def _is_dir(path) -> bool:
+    try:
+        return stat.S_ISDIR(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        return False
 
 
 def _inside(path: str, folder: str) -> bool:
@@ -145,6 +172,8 @@ class LaunchGate:
         paths = state.InstancePaths(self._organizer)
         data = self._load(paths)
         self._session_checks(paths, data)
+        self._ensure_host()
+        self._write_profile(paths, binary, cwd, args)
 
     def _load(self, paths: state.InstancePaths) -> dict:
         try:
@@ -207,6 +236,110 @@ class LaunchGate:
                 "snapshot, or keep the session's save."
             )
         return _Veto("Session check", why, fix, SAVE_RESTORE_PENDING)
+
+    # Make sure the pinned me3 is installed. Silent: it adopts a matching
+    # install and downloads the pinned release when there is none.
+    def _ensure_host(self) -> None:
+        with self._busy("Elden Ring: checking me3") as busy:
+            try:
+                me3_host.ensure(self._organizer, progress=busy.update)
+            except _ENSURE_ERRORS as exc:
+                # ErmError is the installer's own wording. The rest escape its
+                # wrapping (a KeyError out of an odd release JSON, a RuntimeError
+                # from Path.home()), so the type is named to keep them findable.
+                reason = str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
+                if not isinstance(exc, ErmError):
+                    self._warn(f"Elden Ring launch gate: me3 install failed\n{traceback.format_exc()}")
+                raise _Veto(
+                    "me3 host",
+                    reason,
+                    'Run Tools > "Elden Ring: Install me3…" to retry by hand.',
+                    ME3_INSTALL_FAILED,
+                ) from exc
+
+    # What a launch cannot do without: the working folder, natives that will
+    # load, the profile, and an entry that is the one the plugin made.
+    def _write_profile(self, paths: state.InstancePaths, binary: str, cwd: str, args: str) -> None:
+        try:
+            paths.root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise _Veto(
+                "me3 profile",
+                f"cannot create the working folder {paths.root}: {exc}",
+                "me3 cannot start without it.",
+            ) from exc
+        natives = list(self._natives())
+        for label, path in natives:
+            verdict = pe.pe_dll_ok(path)
+            if not verdict:
+                raise _Veto(
+                    "me3 profile",
+                    f"{label}: {path} {verdict.reason}.",
+                    "me3 gives up on every mod, the save redirect included, when one "
+                    "native will not load. Reinstall that mod.",
+                    NATIVE_DLL_INVALID,
+                )
+        try:
+            text = me3.render(
+                [], [path for _, path in natives], savefile=me3.savefile(self._organizer)
+            )
+            me3.write_profile(paths.current_me3, text)
+        except (OSError, ValueError) as exc:
+            raise _Veto("me3 profile", f"cannot write {paths.current_me3}: {exc}") from exc
+        for path, check, what in (
+            (paths.root, _is_dir, "working folder"),
+            (paths.current_me3, _is_file, "profile"),
+        ):
+            if not check(path):
+                raise _Veto("me3 profile", f"the {what} {path} is not there after writing it.")
+        self._check_entry(paths, binary, cwd, args)
+
+    def _check_entry(self, paths: state.InstancePaths, binary: str, cwd: str, args: str) -> None:
+        step = "Elden Ring (me3) entry"
+        fix = (
+            "Reset the entry to the plugin's defaults in Fluorine's Executables "
+            "dialog, or delete it and restart Fluorine."
+        )
+        installed = os.path.realpath(me3_host.binary_path())
+        if os.path.realpath(binary) != installed:
+            raise _Veto(
+                step,
+                f"The entry starts {binary}, not the me3 the plugin manages ({installed}).",
+                fix,
+            )
+        game_dir = Path(self._game.dataDirectory().absolutePath())
+        wanted = me3.split_command(" ".join(me3.entry_args(paths, game_dir)))
+        given = me3.split_command(args)
+        if not self._same_arguments(given, wanted):
+            raise _Veto(
+                step,
+                "Its arguments are not the ones the plugin gives it. me3 takes options "
+                "that load extra code or override the save redirect, so the line is "
+                "compared token for token.\n"
+                f"  expected: {' '.join(wanted)}\n  found:    {' '.join(given)}",
+                fix,
+            )
+        if os.path.realpath(cwd) != os.path.realpath(paths.root):
+            raise _Veto(step, f"Its working folder is {cwd}, not {paths.root}.", fix)
+        if os.path.lexists(paths.root / "me3.toml"):
+            raise _Veto(
+                step,
+                f"{paths.root / 'me3.toml'} exists. me3 reads a me3.toml from its working "
+                "folder and it could change what gets loaded.",
+                "Move the file away.",
+            )
+
+    @staticmethod
+    def _same_arguments(given: list[str], wanted: list[str]) -> bool:
+        if len(given) != len(wanted):
+            return False
+        for index, (have, want) in enumerate(zip(given, wanted)):
+            if index and wanted[index - 1] in _PATH_OPTIONS:
+                if os.path.realpath(have) != os.path.realpath(want):
+                    return False
+            elif have != want:
+                return False
+        return True
 
     def _report_veto(self, veto: _Veto) -> None:
         # The record is for the diagnose pass; failing to write it must not stop
