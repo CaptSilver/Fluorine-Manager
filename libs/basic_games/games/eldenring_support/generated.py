@@ -130,8 +130,13 @@ def _read_meta(mod_dir: Path, old: Path) -> bytes | None:
     return None
 
 
-def build(mod_dir, state_file, files: list[tuple[str, bytes]], fp: str) -> None:
+def build(mod_dir, state_file, files: list[tuple[str, "bytes | Path"]], fp: str, decisions=None, notes=None) -> None:
     """Write `files` as the generated mod and record what was written.
+
+    A file's content is its bytes, or the Path of a file to copy when one mod's
+    file wins whole; one is read at a time so a large file is never held beside
+    another. `decisions` (JSON-ready dicts) and `notes` (text) are what the merge
+    reported, kept so a launch that finds the state fresh still has them.
 
     Built in <mod>.tmp, swapped in by two renames, and the state file goes
     last, so a crash at any point leaves a state that no longer matches. The
@@ -149,6 +154,8 @@ def build(mod_dir, state_file, files: list[tuple[str, bytes]], fp: str) -> None:
     outputs = {}
     temp.mkdir(parents=True)
     for rel, data in files:
+        if isinstance(data, Path):
+            data = data.read_bytes()
         atomic.write_bytes_atomic(temp / rel, data)
         outputs[rel] = _sha256(data)
     if meta_bytes is not None:
@@ -159,8 +166,20 @@ def build(mod_dir, state_file, files: list[tuple[str, bytes]], fp: str) -> None:
     _remove(old)
     state.write_json(
         state_file,
-        {"fingerprint": fp, "outputs": outputs, "built_at": datetime.now(timezone.utc).isoformat()},
+        {
+            "fingerprint": fp,
+            "outputs": outputs,
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "decisions": list(decisions or []),
+            "notes": list(notes or []),
+        },
     )
+
+
+def recorded_notes(state_file) -> list[str]:
+    """The notes the last build recorded; whatever is not text is dropped."""
+    raw = state.read_cache(state_file).get("notes")
+    return [note for note in raw if isinstance(note, str)] if isinstance(raw, list) else []
 
 
 def _exempt(rel: str) -> bool:

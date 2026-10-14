@@ -161,6 +161,40 @@ class BuildVerifyTests(GeneratedCase):
     def build(self, files=None, fp="fp1") -> None:
         generated.build(self.mod_dir, self.paths.generated_state, self.FILES if files is None else files, fp)
 
+    def test_a_file_source_is_copied_and_hashed_like_bytes(self) -> None:
+        source = self.tmp / "winner.dcx"
+        source.write_bytes(b"WHOLE FILE")
+        self.build([("msg/engus/x.dcx", source), ("regulation.bin", b"REG")])
+        self.assertEqual((self.mod_dir / "msg/engus/x.dcx").read_bytes(), b"WHOLE FILE")
+        recorded = json.loads(self.paths.generated_state.read_text())
+        self.assertEqual(recorded["outputs"]["msg/engus/x.dcx"], hashlib.sha256(b"WHOLE FILE").hexdigest())
+        self.assertEqual(self.verify(), generated.FRESH)
+
+    def test_the_decisions_and_notes_are_recorded_beside_the_outputs(self) -> None:
+        decisions = [{"path": "msg/x.dcx", "outcome": "winner", "providers": ["a", "b"], "winner": "b",
+                      "strategy": None, "declared": False, "detail": "no way"}]
+        generated.build(
+            self.mod_dir, self.paths.generated_state, self.FILES, "fp1", decisions=decisions, notes=["msg/x.dcx: a note"]
+        )
+        recorded = json.loads(self.paths.generated_state.read_text())
+        self.assertEqual(recorded["decisions"], decisions)
+        self.assertEqual(generated.recorded_notes(self.paths.generated_state), ["msg/x.dcx: a note"])
+        self.assertEqual(self.verify(), generated.FRESH)
+
+    def test_a_build_without_them_records_empty_lists(self) -> None:
+        self.build()
+        recorded = json.loads(self.paths.generated_state.read_text())
+        self.assertEqual((recorded["decisions"], recorded["notes"]), ([], []))
+
+    def test_notes_that_are_not_a_list_of_text_read_back_as_what_is_text(self) -> None:
+        for raw, wanted in (("oops", []), (None, []), (["a", 3, None, "b"], ["a", "b"])):
+            with self.subTest(raw=raw):
+                state.write_json(self.paths.generated_state, {"fingerprint": "f", "outputs": {}, "notes": raw})
+                self.assertEqual(generated.recorded_notes(self.paths.generated_state), wanted)
+
+    def test_no_state_file_has_no_notes(self) -> None:
+        self.assertEqual(generated.recorded_notes(self.paths.generated_state), [])
+
     def verify(self, fp="fp1") -> str:
         return generated.verify(self.mod_dir, self.paths.generated_state, fp)
 
