@@ -407,5 +407,88 @@ class ContentDigestTests(unittest.TestCase):
         self.assertNotEqual(self.native(), with_empty)
 
 
+class LayoutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def zip(self, files, name: str = "a.zip") -> Path:
+        return support.write_zip(self.tmp / name, {rel: b"x" for rel in files})
+
+    def tar(self, files, name: str = "a.tar.gz") -> Path:
+        import io
+        import tarfile
+
+        path = self.tmp / name
+        with tarfile.open(path, "w:gz") as archive:
+            for rel in files:
+                info = tarfile.TarInfo(rel)
+                info.size = 1
+                archive.addfile(info, io.BytesIO(b"x"))
+        return path
+
+    def test_a_zip_and_a_tarball_are_listed_without_their_folders(self) -> None:
+        path = self.zip(["regulation.bin", "msg/a.dcx", "empty/"])
+        self.assertEqual(sorted(listfile.archive_members(path)), ["msg/a.dcx", "regulation.bin"])
+        self.assertEqual(sorted(listfile.archive_members(self.tar(["regulation.bin", "msg/a.dcx"]))), ["msg/a.dcx", "regulation.bin"])
+
+    def test_a_7z_a_rar_a_damaged_zip_and_a_missing_file_cannot_be_listed(self) -> None:
+        for name in ("a.7z", "a.rar"):
+            path = self.tmp / name
+            path.write_bytes(b"7z\xbc\xaf\x27\x1c")
+            self.assertIsNone(listfile.archive_members(path))
+        broken = self.tmp / "broken.zip"
+        broken.write_bytes(b"PK\x03\x04 nope")
+        self.assertIsNone(listfile.archive_members(broken))
+        self.assertIsNone(listfile.archive_members(self.tmp / "none.zip"))
+
+    def test_a_package_with_a_wrapper_folder_is_unwrapped_and_keeps_its_readme(self) -> None:
+        layout = listfile.archive_layout(self.zip(["readme.txt", "Wrapper/regulation.bin", "Wrapper/msg/a.dcx"]), None)
+        self.assertEqual(layout.files, ["msg/a.dcx", "readme.txt", "regulation.bin"])
+        self.assertFalse(layout.fomod)
+
+    def test_a_mods_only_archive_and_a_wrapped_single_dll_are_left_as_packed(self) -> None:
+        packed = ["mods/AdjustTheFov.dll", "mods/AdjustTheFov/config.ini"]
+        self.assertEqual(listfile.archive_layout(self.zip(packed), None).files, sorted(packed))
+        self.assertEqual(listfile.archive_layout(self.zip(["Wrapper/x.dll"]), None).files, ["Wrapper/x.dll"])
+
+    def test_a_subdir_makes_that_folder_the_root_and_drops_its_siblings(self) -> None:
+        archive = self.zip(["Files/mod/regulation.bin", "Files/mod/dead.bin", "Files/CSV 4 Merge/a.csv"])
+        self.assertEqual(listfile.archive_layout(archive, "Files/mod").files, ["dead.bin", "regulation.bin"])
+
+    def test_a_subdir_the_archive_does_not_have_or_that_escapes_is_not_reproducible(self) -> None:
+        archive = self.zip(["Files/mod/regulation.bin"])
+        self.assertIsNone(listfile.archive_layout(archive, "Files/other").files)
+        self.assertIsNone(listfile.archive_layout(archive, "../x").files)
+
+    def test_member_names_that_would_leave_the_folder_make_it_unreproducible(self) -> None:
+        for bad in ("../evil.bin", "/abs.bin", "a\\b.bin", "a/../../b.bin"):
+            with self.subTest(member=bad):
+                self.assertIsNone(listfile.archive_layout(self.zip(["ok.bin", bad]), None).files)
+
+    def test_a_file_and_a_folder_of_one_name_are_not_reproducible(self) -> None:
+        self.assertIsNone(listfile.archive_layout(self.zip(["a", "a/b"]), None).files)
+
+    def test_a_fomod_folder_is_reported_wherever_it_is(self) -> None:
+        self.assertTrue(listfile.archive_layout(self.zip(["fomod/ModuleConfig.xml", "Opt/regulation.bin"]), None).fomod)
+        self.assertTrue(listfile.archive_layout(self.zip(["Wrapper/FOMOD/info.xml", "Wrapper/a.bin"]), None).fomod)
+        self.assertFalse(listfile.archive_layout(self.zip(["Wrapper/fomod.txt"]), None).fomod)
+
+    def test_an_archive_that_cannot_be_listed_has_no_layout_and_no_fomod_verdict(self) -> None:
+        layout = listfile.archive_layout(self.tmp / "none.7z", None)
+        self.assertEqual((layout.files, layout.fomod), (None, False))
+
+    def test_an_empty_archive_lays_out_to_nothing(self) -> None:
+        self.assertEqual(listfile.archive_layout(self.zip([]), None).files, [])
+
+    def test_differences_name_what_the_archive_would_not_have_put_there(self) -> None:
+        archive = self.zip(["Wrapper/regulation.bin", "Wrapper/a.bin"])
+        extra, missing = listfile.layout_differences(archive, None, ["regulation.bin", "mine.bin"])
+        self.assertEqual((extra, missing), (["mine.bin"], ["a.bin"]))
+
+    def test_differences_are_none_when_the_archive_cannot_be_laid_out(self) -> None:
+        self.assertIsNone(listfile.layout_differences(self.tmp / "none.rar", None, ["a"]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,9 @@ import hashlib
 import json
 import os
 import re
+import tarfile
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import NamedTuple
 
@@ -357,3 +360,87 @@ def content_sha256(mod_dir, kind: str, *, install_files: list[str] | None, view:
     else:
         files = [(rel, path) for rel, path in treewalk.package_files(base, strict=True)]
     return _digest([(rel, _file_sha(cache, path)) for rel, path in files])
+
+
+# -- the layout an import would give an archive --------------------------------
+
+
+class Layout(NamedTuple):
+    """What the import-mode install leaves of an archive.
+
+    `files` is None when that cannot be told: the archive cannot be listed, or a
+    member would land outside the folder, or `subdir` is not in it.
+    """
+
+    files: list[str] | None
+    fomod: bool
+
+
+def archive_members(archive) -> list[str] | None:
+    """The files in a zip or tar archive, or None for anything else.
+
+    The bundled Python opens only those two. A .7z or .rar, a damaged archive
+    and a missing file all answer None, which callers read as "cannot say".
+    """
+    path = str(archive)
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as opened:
+                return [info.filename for info in opened.infolist() if not info.is_dir()]
+        if tarfile.is_tarfile(path):
+            with tarfile.open(path) as opened:
+                return [member.name for member in opened.getmembers() if member.isfile()]
+    except (OSError, EOFError, zipfile.BadZipFile, tarfile.TarError, ValueError, NotImplementedError):
+        return None
+    return None
+
+
+def _has_fomod(members: list[str]) -> bool:
+    return any(part.lower() == "fomod" for member in members for part in member.split("/")[:-1])
+
+
+def _lay_out(members: list[str], subdir: str | None) -> list[str] | None:
+    """Apply the import's layout rules to the member names and return the files left.
+
+    The rules are kinds.reroot and kinds.strip_wrapper themselves, run on a
+    scratch folder of empty files with the archive's names, so the dry run
+    cannot drift from what an import does to a real folder. They look at names
+    only.
+    """
+    with tempfile.TemporaryDirectory(prefix="erlist-layout-") as scratch:
+        root = Path(scratch)
+        for member in members:
+            if not member or "\\" in member or "\x00" in member or not is_safe_relpath(member):
+                return None
+            target = root / member
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.touch()
+            except (OSError, ValueError):
+                return None
+        if subdir:
+            if not kinds.reroot(root, subdir):
+                return None
+        else:
+            kinds.strip_wrapper(root)
+        return kinds.install_files(root)
+
+
+def archive_layout(archive, subdir: str | None) -> Layout:
+    """The files an import of `archive` leaves in a mod folder, and whether it holds a fomod/ folder."""
+    members = archive_members(archive)
+    if members is None:
+        return Layout(None, False)
+    return Layout(_lay_out(members, subdir), _has_fomod(members))
+
+
+def layout_differences(archive, subdir: str | None, installed: list[str]) -> tuple[list[str], list[str]] | None:
+    """(files in the folder the archive would not put there, files it would put there that are missing).
+
+    None when the archive's layout cannot be told.
+    """
+    files = archive_layout(archive, subdir).files
+    if files is None:
+        return None
+    have, would = set(installed), set(files)
+    return sorted(have - would), sorted(would - have)
