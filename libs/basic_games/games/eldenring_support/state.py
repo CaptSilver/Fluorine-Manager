@@ -37,6 +37,8 @@ class InstancePaths:
         self.stale_downloads = root / "stale-downloads"
         self.archive_hashes = root / "archive-hashes.json"
         self.last_launch = root / "last-launch.json"
+        self.import_overrides = root / "import-overrides.json"
+        self.profile_backups = root / "profile-backups"
 
     def view_dir(self, mod: str) -> Path:
         return self.views / mod

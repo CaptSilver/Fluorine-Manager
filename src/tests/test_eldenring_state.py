@@ -366,6 +366,8 @@ class InstancePathsTests(TempDirCase):
             "stale_downloads": "stale-downloads",
             "archive_hashes": "archive-hashes.json",
             "last_launch": "last-launch.json",
+            "import_overrides": "import-overrides.json",
+            "profile_backups": "profile-backups",
         }
         for attribute, name in expected.items():
             self.assertEqual(getattr(paths, attribute), root / name, attribute)

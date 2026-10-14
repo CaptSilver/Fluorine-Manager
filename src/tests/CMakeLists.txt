@@ -1519,6 +1519,10 @@ add_test(
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importsave.py
 )
 add_test(
+    NAME test_eldenring_importoverrides
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importoverrides.py
+)
+add_test(
     NAME test_eldenring_deploy
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_deploy.py
 )
