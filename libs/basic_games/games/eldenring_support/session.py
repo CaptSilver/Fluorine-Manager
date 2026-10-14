@@ -32,7 +32,7 @@ SNAPSHOT_KEEP = 5
 # Microseconds, so two launches in the same second cannot share a snapshot.
 # Digits only, so a name like ER0000.sl2.<stamp>-modded-session splits cleanly.
 STAMP_FORMAT = "%Y%m%dT%H%M%S%fZ"
-_STAMP = re.compile(r"^\d{8}T\d{12}Z$")
+_STAMP = saves.STAMP
 
 
 def now_stamp() -> str:
@@ -289,7 +289,7 @@ def prune_snapshots(
         stamps = sorted(
             entry.name
             for entry in os.scandir(paths.save_snapshots)
-            if _STAMP.match(entry.name) and entry.is_dir(follow_symlinks=False)
+            if _STAMP.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False)
         )
     except OSError:
         return
