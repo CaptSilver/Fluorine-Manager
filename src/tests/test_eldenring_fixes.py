@@ -155,6 +155,15 @@ class AdoptTests(FixCase):
         self.assertEqual(listed[start + 1 : start + 3], ["eldenring.exe", "steam_api64.dll"])
         self.assertEqual(listed[start + 3], "sd/sd.bdt")
 
+    def test_the_refusal_is_a_function_the_import_shares(self) -> None:
+        manifest = deploy.Manifest()
+        found = inventory.candidates(self.game_dir, manifest)
+        self.assertIsNone(fixes.adoption_refusal(self.game_dir, manifest, found))
+        self.put("dinput8.dll", b"MZ")
+        found = inventory.candidates(self.game_dir, manifest)
+        self.assertIn("dinput8.dll", fixes.adoption_refusal(self.game_dir, manifest, found))
+        self.assertTrue(fixes.VERIFY_FIRST.startswith("Verify the game files in Steam first"))
+
     def test_declining_records_nothing(self) -> None:
         self.accept = False
         self.fixes.run("adopt")

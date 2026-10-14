@@ -24,7 +24,7 @@ from .veto import Veto
 log = logging.getLogger(__name__)
 
 TITLE = "Elden Ring: game folder"
-_VERIFY_FIRST = (
+VERIFY_FIRST = (
     "Verify the game files in Steam first, if you have not just done so: nothing here can prove that these "
     "bytes are Valve's."
 )
@@ -45,6 +45,28 @@ class Ui:
     choose: Callable[[str, str, list[str], list[str]], list[str] | None]
     inform: Callable[[str, str], None]
     busy: Callable[[str], object]
+
+
+def adoption_refusal(game_dir: Path, manifest: deploy.Manifest, found: inventory.Candidates) -> str | None:
+    """Why nothing can be recorded as vanilla now, None when it can.
+
+    The adopt fix and the erm import ask the same question of the same Game/.
+    """
+    hits = [Path(hit).relative_to(game_dir).as_posix() for hit in doctor.scan_game_dir(game_dir)]
+    if hits:
+        return (
+            "These in Game/ are known mod files, and a known mod file is never recorded as vanilla. Move them "
+            "out first (the strays fix does):\n" + "\n".join(f"  {rel}" for rel in hits)
+        )
+    if found.symlinks:
+        return "These links are in Game/, and Wine follows a link:\n" + "\n".join(
+            f"  {rel} -> {target}" for rel, target in found.symlinks
+        )
+    if found.unreadable:
+        return "These folders in Game/ cannot be read:\n" + "\n".join(f"  {rel}" for rel in found.unreadable)
+    if manifest.files:
+        return "Config files are deployed into Game/mods/, and a deployed file is never vanilla. Undeploy them first."
+    return None
 
 
 class Fixes:
@@ -126,7 +148,7 @@ class Fixes:
             return
         listing = found.listing()
         text = (
-            f"{_VERIFY_FIRST}\n\nThis records the {len(listing)} paths below as what a vanilla Game/ holds, and "
+            f"{VERIFY_FIRST}\n\nThis records the {len(listing)} paths below as what a vanilla Game/ holds, and "
             "from then on every launch holds Game/ to them. Programs and new folders come first.\n\n"
             f"regulation.bin  (version {live.regulation}, sha256 {live.regulation_sha})\n" + "\n".join(listing)
         )
@@ -138,21 +160,7 @@ class Fixes:
 
     def _refusal(self, game_dir: Path, manifest: deploy.Manifest, found: inventory.Candidates) -> str | None:
         """Why nothing can be recorded now, None when it can."""
-        hits = [Path(hit).relative_to(game_dir).as_posix() for hit in doctor.scan_game_dir(game_dir)]
-        if hits:
-            return (
-                "These in Game/ are known mod files, and a known mod file is never recorded as vanilla. Move them "
-                "out first (the strays fix does):\n" + "\n".join(f"  {rel}" for rel in hits)
-            )
-        if found.symlinks:
-            return "These links are in Game/, and Wine follows a link:\n" + "\n".join(
-                f"  {rel} -> {target}" for rel, target in found.symlinks
-            )
-        if found.unreadable:
-            return "These folders in Game/ cannot be read:\n" + "\n".join(f"  {rel}" for rel in found.unreadable)
-        if manifest.files:
-            return "Config files are deployed into Game/mods/, and a deployed file is never vanilla. Undeploy them first."
-        return None
+        return adoption_refusal(game_dir, manifest, found)
 
     def quarantine_strays(self) -> None:
         """Move what is in Game/ and should not be into quarantine-game (GAME_DIR_STRAYS). Nothing is deleted."""
@@ -226,7 +234,7 @@ class Fixes:
                 self._ui.inform(TITLE, "Nothing differs from what was recorded.")
                 return
             text = (
-                f"{_VERIFY_FIRST}\n\nTick the paths to record as they are now (a path that is gone is dropped from "
+                f"{VERIFY_FIRST}\n\nTick the paths to record as they are now (a path that is gone is dropped from "
                 "the record). Unticked ones stay findings. Programs (.dll, .exe), names that load code and ReShade "
                 "links start unticked: a swapped program looks exactly like a changed one."
             )
@@ -268,7 +276,7 @@ class Fixes:
                 self._ui.inform(TITLE, "Nothing needs an answer.")
                 return
             text = (
-                f"{_VERIFY_FIRST}\n\nSteam updated the game, and these could carry code. Tick the ones that belong "
+                f"{VERIFY_FIRST}\n\nSteam updated the game, and these could carry code. Tick the ones that belong "
                 "to the update. A new file left unticked is moved to quarantine-game; a changed or gone one left "
                 "unticked stays a finding."
             )
@@ -308,7 +316,7 @@ class Fixes:
         vanilla = self._recorded(paths)
         live = self._live(paths, game_dir, library)
         text = (
-            f"{_VERIFY_FIRST}\n\nThe installed regulation.bin is version {live.regulation}, sha256 "
+            f"{VERIFY_FIRST}\n\nThe installed regulation.bin is version {live.regulation}, sha256 "
             f"{live.regulation_sha}.\nThe one recorded when Game/ was adopted is version {vanilla.regulation}, sha256 "
             f"{vanilla.regulation_sha}.\n\nHold the installed one as vanilla from now on? It is the file mods "
             "overwrite in place, and merges are built on it."
