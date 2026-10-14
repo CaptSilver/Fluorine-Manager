@@ -13,6 +13,7 @@ existence alone.
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 import struct
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ from pathlib import Path
 from . import fsprobe
 from . import state as instance_state
 from .ermlib import github
+
+log = logging.getLogger(__name__)
 
 VANILLA = "vanilla"
 HARDENED = "hardened"
@@ -99,8 +102,10 @@ def state(game_dir, cache: dict | None = None) -> str:
             return HARDENED if is_immutable(launcher) else SWAPPED_UNLOCKED
         if current == _sha(backup, cache):
             return RESTORED
-    except OSError:
-        pass
+    except OSError as exc:
+        # Unreadable files cannot be shown to be hardened, so they read as stale
+        # (not hardened) and the log carries the real cause.
+        log.warning("cannot read the launcher files in %s to decide their state: %r", game_dir, exc)
     return STALE
 
 

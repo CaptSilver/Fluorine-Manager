@@ -94,7 +94,11 @@ class StateTests(HardeningCase):
     def test_an_unreadable_executable_is_stale_not_an_exception(self) -> None:
         self.harden_by_hand()
         with mock.patch.object(hardening.github, "sha256_file", side_effect=PermissionError("denied")):
-            self.assertEqual(hardening.state(self.game), hardening.STALE)
+            with self.assertLogs(level="WARNING") as logged:
+                self.assertEqual(hardening.state(self.game), hardening.STALE)
+        text = "\n".join(logged.output)
+        self.assertIn("denied", text)
+        self.assertIn(str(self.game), text)
 
     def test_the_hashes_come_from_the_cache_and_are_not_taken_again(self) -> None:
         self.harden_by_hand()
