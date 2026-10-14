@@ -266,5 +266,134 @@ class BuildOfTests(unittest.TestCase):
         self.assertEqual(build.steam_buildid, "")
 
 
+class ContentDigestTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.mod = self.tmp / "mod"
+        self.mod.mkdir()
+
+    def put(self, rel: str, data: bytes = b"x") -> Path:
+        path = self.mod / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def digest(self, kind: str = "package", install_files=None, view=None, cache=None) -> str:
+        return listfile.content_sha256(
+            self.mod, kind, install_files=install_files, view=view, cache={} if cache is None else cache
+        )
+
+    def test_the_digest_is_the_same_for_the_same_files_and_moves_with_a_byte_or_a_name(self) -> None:
+        self.put("regulation.bin", b"one")
+        self.put("msg/engus/item.msgbnd.dcx", b"two")
+        first = self.digest()
+        self.assertRegex(first, r"^[0-9a-f]{64}$")
+        self.assertEqual(self.digest(), first)
+        self.put("regulation.bin", b"ONE")
+        self.assertNotEqual(self.digest(), first)
+        self.put("regulation.bin", b"one")
+        (self.mod / "msg/engus/item.msgbnd.dcx").rename(self.mod / "msg/engus/item2.msgbnd.dcx")
+        self.assertNotEqual(self.digest(), first)
+
+    def test_the_digest_does_not_depend_on_the_order_files_were_made_in(self) -> None:
+        self.put("a.bin", b"1")
+        self.put("b.bin", b"2")
+        first = self.digest()
+        other = self.tmp / "other"
+        other.mkdir()
+        for name, data in (("b.bin", b"2"), ("a.bin", b"1")):
+            (other / name).write_bytes(data)
+        self.assertEqual(listfile.content_sha256(other, "package", install_files=None, view=None, cache={}), first)
+
+    def test_mod_organizers_own_files_and_hidden_files_are_not_content(self) -> None:
+        self.put("regulation.bin", b"one")
+        first = self.digest()
+        self.put("meta.ini", b"[General]\n")
+        self.put("extra.txt.mohidden", b"hidden")
+        self.assertEqual(self.digest(), first)
+
+    def test_hiding_a_file_changes_the_digest_because_the_game_no_longer_sees_it(self) -> None:
+        self.put("a.bin", b"1")
+        visible = self.put("b.bin", b"2")
+        first = self.digest()
+        visible.rename(visible.with_name("b.bin.mohidden"))
+        self.assertNotEqual(self.digest(), first)
+
+    def test_a_view_is_digested_instead_of_the_folder(self) -> None:
+        kept = self.put("regulation.bin", b"one")
+        self.put("pruned.bin", b"two")
+        view = {"regulation.bin": kept, "renamed/place.bin": self.mod / "pruned.bin"}
+        digest = self.digest(view=view)
+        self.assertNotEqual(digest, self.digest())
+        self.assertEqual(self.digest(view=dict(reversed(list(view.items())))), digest)
+        self.assertNotEqual(self.digest(view={"regulation.bin": kept}), digest)
+
+    def test_the_hash_cache_is_used_and_filled(self) -> None:
+        self.put("a.bin", b"1")
+        cache: dict = {}
+        first = self.digest(cache=cache)
+        self.assertEqual(len(cache), 1)
+        with mock.patch.object(listfile.state.github, "sha256_file", side_effect=AssertionError("re-read")):
+            self.assertEqual(self.digest(cache=cache), first)
+
+    def native(self, **extra) -> str:
+        return self.digest("native", install_files=["mods/x.dll", "mods/x.ini"], **extra)
+
+    def test_a_native_is_digested_over_its_install_list_alone(self) -> None:
+        self.put("mods/x.dll", b"MZ")
+        self.put("mods/x.ini", b"fov = 1\n")
+        first = self.native()
+        self.put("mods/x/log.txt", b"2026-01-01 started")
+        self.put("logs/x_2026-01-01.log", b"dated")
+        self.put("crash.dmp", b"dump")
+        self.assertEqual(self.native(), first)
+        self.put("mods/x/log.txt", b"2026-02-02 started")
+        self.assertEqual(self.native(), first)
+
+    def test_an_edited_or_missing_file_from_the_install_list_changes_it(self) -> None:
+        dll = self.put("mods/x.dll", b"MZ")
+        self.put("mods/x.ini", b"fov = 1\n")
+        first = self.native()
+        self.put("mods/x.ini", b"fov = 2\n")
+        self.assertNotEqual(self.native(), first)
+        self.put("mods/x.ini", b"fov = 1\n")
+        self.assertEqual(self.native(), first)
+        dll.unlink()
+        self.assertNotEqual(self.native(), first)
+
+    def test_a_config_the_dll_generated_is_part_of_the_digest(self) -> None:
+        self.put("mods/x.dll", b"MZ")
+        self.put("mods/x.ini", b"fov = 1\n")
+        first = self.native()
+        self.put("mods/x/damage_competition.ini", b"damage = 1\n")
+        mine = self.native()
+        self.assertNotEqual(mine, first)
+        self.put("mods/x/damage_competition.ini", b"damage = 1\n")
+        self.assertEqual(self.native(), mine)
+        self.put("mods/x/damage_competition.ini", b"damage = 9\n")
+        self.assertNotEqual(self.native(), mine)
+
+    def test_load_txt_and_json_and_toml_and_cfg_count_as_config_wherever_they_are(self) -> None:
+        self.put("mods/x.dll", b"MZ")
+        base = self.native()
+        for rel in ("load.txt", "deep/er/settings.json", "a.toml", "b.cfg"):
+            with self.subTest(rel=rel):
+                self.put(rel, b"1")
+                self.assertNotEqual(self.native(), base)
+                (self.mod / rel).unlink()
+
+    def test_a_native_with_no_install_list_is_digested_like_a_package(self) -> None:
+        self.put("mods/x.dll", b"MZ")
+        self.assertEqual(self.digest("native", install_files=None), self.digest("package"))
+
+    def test_a_missing_listed_file_is_not_the_same_as_an_empty_one(self) -> None:
+        self.put("mods/x.dll", b"MZ")
+        self.put("mods/x.ini", b"")
+        with_empty = self.native()
+        (self.mod / "mods/x.ini").unlink()
+        self.assertNotEqual(self.native(), with_empty)
+
+
 if __name__ == "__main__":
     unittest.main()

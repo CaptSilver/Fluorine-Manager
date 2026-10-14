@@ -12,12 +12,14 @@ No Qt and no mobase in here.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+from pathlib import Path
 from typing import NamedTuple
 
-from . import generated, kinds, state
+from . import generated, kinds, state, treewalk
 from .ermlib import gamebuild
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
@@ -306,3 +308,46 @@ def dumps(doc: dict) -> str:
 def build_of(doc: dict) -> gamebuild.BuildId:
     """The game build a list was made on, as a BuildId (Steam's build id is per machine and left empty)."""
     return gamebuild.BuildId(steam_buildid="", **doc["game_build"])
+
+
+# -- the digest of an installed mod -------------------------------------------
+
+
+def _file_sha(cache: dict, path) -> str | None:
+    """sha256 of a regular file through the hash cache; None when it is not there."""
+    if not os.path.isfile(path):
+        return None
+    return state.cached_sha256(cache, path)
+
+
+def _digest(pairs: list[tuple[str, str | None]]) -> str:
+    digest = hashlib.sha256()
+    for rel, sha in sorted(pairs):
+        # A file the install list names that is gone digests as "-", which no
+        # sha256 is, so losing it moves the digest.
+        digest.update(f"{rel}\0{sha or '-'}\n".encode())
+    return digest.hexdigest()
+
+
+def content_sha256(mod_dir, kind: str, *, install_files: list[str] | None, view: dict | None, cache: dict) -> str:
+    """sha256 over the sorted (path, sha256(file)) pairs of what the game and me3 see of the mod.
+
+    Mod Organizer's meta.ini and `.mohidden` entries are not content. A mod
+    with prune or rename rules is digested through its view (`view` maps path
+    to file), because the view is what me3 loads. A native is digested over its
+    install list and any config file under its folder: DLL mods write logs and
+    crash dumps beside themselves, and a digest over the whole folder would move
+    after the first session. Their generated configs are gameplay state a
+    partner can diverge on, so those count. A native with no install list is
+    digested like any other mod.
+    """
+    base = Path(mod_dir)
+    if kind == kinds.NATIVE and install_files is not None:
+        covered = set(install_files)
+        covered.update(rel for rel, _path in treewalk.package_files(base, strict=True) if kinds.is_config_file(rel.rsplit("/", 1)[-1]))
+        return _digest([(rel, _file_sha(cache, base / rel)) for rel in covered])
+    if view is not None:
+        files = list(view.items())
+    else:
+        files = [(rel, path) for rel, path in treewalk.package_files(base, strict=True)]
+    return _digest([(rel, _file_sha(cache, path)) for rel, path in files])
