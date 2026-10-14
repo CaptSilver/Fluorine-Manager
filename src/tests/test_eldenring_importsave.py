@@ -399,6 +399,26 @@ class AcceptTests(SaveCase):
         self.assertIn("has changed since the copy", self.report.text())
         self.assertIn("takes a new copy first", self.report.text())
 
+    def test_a_backup_that_is_a_link_to_the_save_refuses_before_asking(self) -> None:
+        self.backup.unlink()
+        self.backup.symlink_to(self.save_dir / "ER0000.sl2")
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(self.confirmations, [])
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertFalse(self.paths.import_overrides.exists())
+        self.assertIn("not a regular file", self.report.text())
+
+    def test_a_backup_swapped_for_a_link_while_the_confirmation_is_open_is_refused(self) -> None:
+        def confirm(text: str) -> bool:
+            self.backup.unlink()
+            self.backup.symlink_to(self.save_dir / "ER0000.sl2")
+            return True
+
+        self.confirm_accept = confirm
+        self.assertFalse(self.review_with_route())
+        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
+        self.assertFalse(self.paths.import_overrides.exists())
+
     def test_a_save_that_changes_while_the_confirmation_is_open_is_refused(self) -> None:
         def confirm(text: str) -> bool:
             (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b" changed meanwhile")

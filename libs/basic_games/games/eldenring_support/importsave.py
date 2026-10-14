@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from . import importoverrides, kinds, saves, state
+from . import fsprobe, importoverrides, kinds, saves, state
 from .ermlib import github
 from .ermlib.errors import ErmError
 
@@ -159,8 +159,12 @@ def _act(action, vanilla, save_dir, paths, stamp, running, steam_running, instal
 
 def _backup_problem(vanilla: Path, backup: Path | None) -> str | None:
     """Why the copy taken before the import cannot vouch for `vanilla`; None when it can."""
-    if backup is None or not os.path.isfile(backup):
+    kind = fsprobe.kind(backup) if backup is not None else None
+    if kind is None:
         return f"the copy taken before the import ({backup}) is not there"
+    if kind != fsprobe.FILE:
+        # A link to the save would hash the same as the save and recover nothing.
+        return f"the copy taken before the import ({backup}) is not a regular file"
     try:
         if github.sha256_file(backup) != github.sha256_file(vanilla):
             return f"{vanilla.name} has changed since the copy {backup} was taken"
