@@ -98,9 +98,7 @@ class GateCase(unittest.TestCase):
         self.base.mkdir()
         self.ini = self.base / "ModOrganizer.ini"
         self.ini.write_text("")
-        self.organizer = types.SimpleNamespace(
-            basePath=lambda: str(self.base), settingsFilePath=lambda: str(self.ini)
-        )
+        self.organizer = types.SimpleNamespace(basePath=lambda: str(self.base))
         self.paths = state.InstancePaths(self.organizer)
         self.game = FakeGame(self.install)
         self.binary = me3_host.binary_path()
@@ -810,14 +808,14 @@ class EnvironmentTests(GateCase):
         settings.endArray()
         settings.sync()
 
-    def test_the_ini_is_the_one_the_core_names_even_when_the_base_directory_is_elsewhere(self) -> None:
+    def test_a_base_directory_moved_away_from_the_ini_stops_the_launch(self) -> None:
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
         self.store_wrapper_entry(self.ini, "FOO=1")
         self.organizer.basePath = lambda: str(elsewhere)
         args = " ".join(me3.entry_args(state.InstancePaths(self.organizer), self.install / "Game"))
         self.assertFalse(self.launch(cwd=state.InstancePaths(self.organizer).root, args=args))
-        self.assert_vetoed(gate.ENTRY_WRAPPER_OPTIONS, "FOO=1", recorded=False)
+        self.assert_vetoed(gate.ENTRY_SETTINGS_UNREADABLE, str(elsewhere / "ModOrganizer.ini"), "base directory", recorded=False)
 
     def test_an_ini_that_is_missing_or_unreadable_stops_the_launch(self) -> None:
         for make in (lambda: self.ini.unlink(), lambda: (self.ini.mkdir())):
@@ -825,7 +823,7 @@ class EnvironmentTests(GateCase):
                 self.vetoes.clear()
                 make()
                 self.assertFalse(self.launch())
-                self.assert_vetoed(gate.ENTRY_SETTINGS_UNREADABLE, str(self.ini), "wrapper options")
+                self.assert_vetoed(gate.ENTRY_SETTINGS_UNREADABLE, str(self.ini), "wrapper options", "base directory")
                 if self.ini.is_dir():
                     self.ini.rmdir()
 

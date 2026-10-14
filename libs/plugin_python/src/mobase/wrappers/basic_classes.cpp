@@ -575,7 +575,6 @@ namespace mo2::python {
             .def("profileName", &IOrganizer::profileName)
             .def("profilePath", &IOrganizer::profilePath)
             .def("winePrefixPath", &IOrganizer::winePrefixPath)
-            .def("settingsFilePath", &IOrganizer::settingsFilePath)
             .def("downloadsPath", &IOrganizer::downloadsPath)
             .def("overwritePath", &IOrganizer::overwritePath)
             .def("basePath", &IOrganizer::basePath)

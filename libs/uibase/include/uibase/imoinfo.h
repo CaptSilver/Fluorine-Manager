@@ -629,12 +629,6 @@ public:
    * Appended for Fluorine plugins; existing implementations can use the default.
    */
   virtual QString winePrefixPath() const { return {}; }
-
-  /** Absolute path of the instance's settings file (ModOrganizer.ini). This is
-   * not always basePath() + "/ModOrganizer.ini": the base directory can be moved.
-   * Empty when unavailable.
-   */
-  virtual QString settingsFilePath() const { return {}; }
 };
 
 }  // namespace MOBase
