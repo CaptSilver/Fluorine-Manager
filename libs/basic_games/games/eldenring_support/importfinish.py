@@ -41,7 +41,7 @@ from .ermlib.errors import ErmError
 TITLE = "Elden Ring: Import from erm"
 KEY_DONE = "erm_import_done"
 VERIFIED, UNVERIFIED = "verified", "unverified"
-_HARDEN_TOOL = 'Tools > "Elden Ring: Harden/Unharden launcher…"'
+_HARDEN_TOOL = 'Tools > Tool Plugins > Elden Ring > Harden or unharden launcher…'
 
 
 @dataclass

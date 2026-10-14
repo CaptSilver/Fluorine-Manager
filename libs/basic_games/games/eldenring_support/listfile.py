@@ -587,7 +587,7 @@ def _outputs(paths: state.InstancePaths) -> dict:
     ):
         raise ExportError(
             "The generated mod has not been built yet, so the list cannot say what the merge produced. "
-            'Run Tools > "Elden Ring: Rebuild merges…" first.'
+            'Run Tools > Tool Plugins > Elden Ring > Rebuild merges… first.'
         )
     ini = f"{generated.ERSC_DIR}/{coop_settings.INI_NAME}"
     return {rel: sha for rel, sha in recorded.items() if rel != ini}
@@ -886,7 +886,7 @@ def _output_findings(paths: state.InstancePaths, doc: dict) -> list[Finding]:
         return [
             _fix(
                 GENERATED_OUTPUT_MISMATCH, "",
-                'the generated mod has not been built here yet. Run Tools > "Elden Ring: Rebuild merges…".',
+                'the generated mod has not been built here yet. Run Tools > Tool Plugins > Elden Ring > Rebuild merges….',
             )
         ]
     found = []

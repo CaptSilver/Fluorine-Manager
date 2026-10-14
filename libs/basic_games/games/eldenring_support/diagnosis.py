@@ -450,7 +450,7 @@ class Diagnosis:
                     "SAVE_SENTINEL_TRIPPED",
                     "The erm import is waiting on ER0000.sl2. A profile without Seamless Co-op may have written it, "
                     "and once erm's Steam launch option is gone a Steam Play loads it under Easy Anti-Cheat. In "
-                    'Tools > "Elden Ring: Save tools…", "Quarantine ER0000.sl2…" or "Move a save to the modded '
+                    'Tools > Tool Plugins > Elden Ring > Save tools…, "Quarantine ER0000.sl2…" or "Move a save to the modded '
                     'name…" takes it out of Steam\'s reach, and "Mark the session\'s save as reviewed" audits it and asks '
                     "whether it ever ran under a profile without Seamless Co-op, as the import does. Until then the "
                     "import is not marked done.",
@@ -492,7 +492,7 @@ class Diagnosis:
                     "SAVE_SENTINEL_TRIPPED",
                     "A modded session wrote to your vanilla save, usually because a mod failed to load and took the "
                     f"save redirect with it. {outcome}\n{where}\nNothing was deleted.\n\n"
-                    'In Tools > "Elden Ring: Save tools…", "Move a save to the modded name…" plays that '
+                    'In Tools > Tool Plugins > Elden Ring > Save tools…, "Move a save to the modded name…" plays that '
                     'character through me3, and "Mark the session\'s save as reviewed" clears this note.',
                     TOOL_SAVES,
                     informational=True,

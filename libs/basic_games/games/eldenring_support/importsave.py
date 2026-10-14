@@ -50,7 +50,7 @@ ACTION = (
 _PURGE = "purge Steam Cloud"
 _OPEN = (
     "The import is not marked done until this is settled. Run it again to be asked, or use "
-    'Tools > "Elden Ring: Save tools…".'
+    'Tools > Tool Plugins > Elden Ring > Save tools….'
 )
 
 

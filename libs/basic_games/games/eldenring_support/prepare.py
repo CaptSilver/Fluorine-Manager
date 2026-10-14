@@ -288,7 +288,7 @@ def _check_mods(organizer, refs: list[mods.ModRef]) -> list[str]:
             raise Veto(
                 "Mod list",
                 f"{ref.name} is a native mod without a usable DLL (recorded: {ref.native_dll!r}).",
-                'Open Tools > "Elden Ring: Set mod kind…" and choose the DLL.',
+                'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and choose the DLL.',
                 NATIVE_DLL_MISSING,
             )
         if ref.kind == kinds.NATIVE:
@@ -298,7 +298,7 @@ def _check_mods(organizer, refs: list[mods.ModRef]) -> list[str]:
                     "Mod list",
                     f"{ref.name} lists config files that cannot be deployed to Game/mods/ "
                     f"(recorded: {listed!r}).",
-                    'Open Tools > "Elden Ring: Set mod kind…" and correct them.',
+                    'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and correct them.',
                     deploy.DEPLOY_CONFIG_INVALID,
                 )
         if ref.kind == kinds.UNKNOWN:
@@ -357,14 +357,14 @@ def prepare(
             "Generated mod",
             f"The {generated.NAME} mod is {'missing' if placement == mods.ABSENT else 'disabled'}. "
             "Without it the merged files and Seamless Co-op are not loaded.",
-            'Run Tools > "Elden Ring: Rebuild merges…", which creates and enables it.',
+            'Run Tools > Tool Plugins > Elden Ring > Rebuild merges…, which creates and enables it.',
             MERGED_MOD_MISSING,
         )
     if placement == mods.BELOW_ANOTHER:
         raise Veto(
             "Generated mod",
             f"Another enabled mod is above {generated.NAME}, so its copy of a merged file could win.",
-            'Run Tools > "Elden Ring: Rebuild merges…", which moves it back to the top.',
+            'Run Tools > Tool Plugins > Elden Ring > Rebuild merges…, which moves it back to the top.',
             MERGED_MOD_MISPLACED,
         )
     refs = mods.enabled_mods(organizer)

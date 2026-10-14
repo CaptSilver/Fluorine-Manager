@@ -658,9 +658,9 @@ def sync_removes(
 # -- the whole deploy ---------------------------------------------------------
 
 STEP = "Deployed config files"
-_SYNC_TOOL = 'Tools > "Elden Ring: Sync deployed files…"'
-_HARDEN_TOOL = 'Tools > "Elden Ring: Harden/Unharden launcher…"'
-_SET_KIND_FIX = 'Open Tools > "Elden Ring: Set mod kind…" and correct the config files of that mod.'
+_SYNC_TOOL = 'Tools > Tool Plugins > Elden Ring > Sync deployed files…'
+_HARDEN_TOOL = 'Tools > Tool Plugins > Elden Ring > Harden or unharden launcher…'
+_SET_KIND_FIX = 'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and correct the config files of that mod.'
 _FIXES = {
     DEPLOY_COLLISION: "Disable one of those mods.",
     DEPLOY_RESERVED: _SET_KIND_FIX,

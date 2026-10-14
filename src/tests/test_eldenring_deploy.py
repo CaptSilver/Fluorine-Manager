@@ -803,7 +803,7 @@ class SyncTests(ModListCase):
                 self.launcher_state = launcher
                 refusal = self.refused()
                 self.assertEqual(refusal.key, hardening.HARDEN_REQUIRED)
-                self.assertIn("Harden/Unharden launcher", refusal.text())
+                self.assertIn("Harden or unharden launcher", refusal.text())
                 self.assertIn(hardening.describe(launcher), refusal.text())
                 self.assertFalse((self.game / "mods").exists())
                 self.assertEqual(deploy.read_manifest(self.paths), deploy.Manifest())

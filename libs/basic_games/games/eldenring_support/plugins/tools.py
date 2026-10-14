@@ -59,16 +59,21 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
     def setParentWidget(self, parent) -> None:
         self._parent = parent
 
+    def dialogTitle(self) -> str:
+        # displayName() carries a "/" so Fluorine files the tool under an
+        # "Elden Ring" submenu; a window title reads better with a colon.
+        return self.displayName().replace("/", ": ", 1)
+
     def _ask_answer(self, text: str, title: str | None = None) -> str | None:
         answers = [importsave.YES, importsave.NO, importsave.UNKNOWN]
         labels = ["Yes, it did", "No, it never did", "I do not know"]
-        index = _choose(self._parent, title or self.displayName(), text, labels)
+        index = _choose(self._parent, title or self.dialogTitle(), text, labels)
         return None if index is None else answers[index]
 
     def _ask_action(self, text: str, preselect: str, title: str | None = None) -> str | None:
         actions = [importsave.QUARANTINE, importsave.MODDED, importsave.KEEP]
         index = _choose(
-            self._parent, title or self.displayName(), text, [ACTION_LABELS[a] for a in actions],
+            self._parent, title or self.dialogTitle(), text, [ACTION_LABELS[a] for a in actions],
             default=actions.index(preselect),
         )
         return None if index is None else actions[index]
@@ -105,16 +110,16 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
 
     def _prepared_action(self, error, action) -> None:
         if error is not None:
-            qWarning(f"{self.displayName()}: could not place the {generated.NAME} mod: {error!r}")
+            qWarning(f"{self.dialogTitle()}: could not place the {generated.NAME} mod: {error!r}")
             QMessageBox.critical(
-                self._parent, self.displayName(),
+                self._parent, self.dialogTitle(),
                 f"The {generated.NAME} mod could not be enabled and raised to the top: {error}\n\n{self._placement_tail}",
             )
             return
         try:
             prepared = self._the_gate().rebuild()
         except gate.Veto as veto:
-            QMessageBox.critical(self._parent, self.displayName(), veto.text())
+            QMessageBox.critical(self._parent, self.dialogTitle(), veto.text())
             return
         action(prepared)
 
@@ -123,13 +128,13 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
         try:
             action()
         except ErmError as exc:
-            QMessageBox.critical(self._parent, self.displayName(), str(exc))
+            QMessageBox.critical(self._parent, self.dialogTitle(), str(exc))
         except Exception as exc:
             qWarning(
-                f"{self.displayName()}: unexpected failure: {exc!r}\n{traceback.format_exc()}"
+                f"{self.dialogTitle()}: unexpected failure: {exc!r}\n{traceback.format_exc()}"
             )
             QMessageBox.critical(
-                self._parent, self.displayName(), f"Unexpected failure: {exc}"
+                self._parent, self.dialogTitle(), f"Unexpected failure: {exc}"
             )
 
 
@@ -168,18 +173,18 @@ class InstallMe3Tool(EldenRingTool):
         return "Install or adopt the pinned me3 mod host that launches Elden Ring."
 
     def displayName(self) -> str:
-        return "Elden Ring: Install me3…"
+        return "Elden Ring/Install me3…"
 
     def tooltip(self) -> str:
         return "Install or adopt the pinned me3 release; nothing is downloaded when it is already there."
 
     def run(self) -> None:
-        busy = Busy(self.displayName(), self._parent)
+        busy = Busy(self.dialogTitle(), self._parent)
         try:
             result = me3_host.ensure(self._organizer, progress=busy.update)
         finally:
             busy.close()
-        QMessageBox.information(self._parent, self.displayName(), describe(result))
+        QMessageBox.information(self._parent, self.dialogTitle(), describe(result))
 
 
 def _choose(parent, title: str, text: str, labels: list[str], default: int | None = None) -> int | None:
@@ -319,13 +324,13 @@ class SaveToolsTool(EldenRingTool):
         return "Back up, restore, quarantine and audit Elden Ring saves, and settle a save restore that is pending."
 
     def displayName(self) -> str:
-        return "Elden Ring: Save tools…"
+        return "Elden Ring/Save tools…"
 
     def tooltip(self) -> str:
         return "Back up or restore a save, take ER0000.sl2 out of Steam's reach, audit a save, or settle a pending restore."
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         paths = state.InstancePaths(self._organizer)
         try:
             record, damaged = session.load_last_launch(paths), None
@@ -353,7 +358,7 @@ class SaveToolsTool(EldenRingTool):
 
     def _settle(self, paths: state.InstancePaths, pending: dict) -> str | None:
         """Ask what to do about the pending restore. MORE when the user wants the other tools."""
-        title = self.displayName()
+        title = self.dialogTitle()
         # A record whose write was lost has no list of moved files; they are still on disk.
         pending = session.with_moved(paths, pending)
         partial = bool(pending["quarantined"])
@@ -409,15 +414,15 @@ class SaveToolsTool(EldenRingTool):
         actions[AUDIT] = lambda: self._audit(paths)
         if "sentinel_tripped" in record or importsave.unreviewed(self._organizer):
             actions[REVIEWED] = lambda: self._reviewed(paths, pending)
-        picked = qtui.pick_item(self._parent, self.displayName(), "Save tool:", list(actions))
+        picked = qtui.pick_item(self._parent, self.dialogTitle(), "Save tool:", list(actions))
         if picked is not None:
             actions[picked]()
 
     def _info(self, text: str) -> None:
-        QMessageBox.information(self._parent, self.displayName(), text)
+        QMessageBox.information(self._parent, self.dialogTitle(), text)
 
     def _yes(self, text: str) -> bool:
-        return QMessageBox.question(self._parent, self.displayName(), text) == QMessageBox.StandardButton.Yes
+        return QMessageBox.question(self._parent, self.dialogTitle(), text) == QMessageBox.StandardButton.Yes
 
     @staticmethod
     def _listed(found: list) -> str:
@@ -483,7 +488,7 @@ class SaveToolsTool(EldenRingTool):
             self._info(f"There are no backups of a save to put back in {paths.save_backups}.{hint}")
             return
         names = {f"{b.path.relative_to(paths.save_backups)}  (to {b.base})": b for b in found}
-        picked = qtui.pick_item(self._parent, self.displayName(), "Backup to restore:", list(names))
+        picked = qtui.pick_item(self._parent, self.dialogTitle(), "Backup to restore:", list(names))
         if picked is None:
             return
         backup = names[picked]
@@ -532,7 +537,7 @@ class SaveToolsTool(EldenRingTool):
         if not options:
             self._info("There is no ER0000.sl2, and no copy of what a modded session wrote to it, to move.")
             return
-        picked = qtui.pick_item(self._parent, self.displayName(), "Save to make the modded save:", list(options))
+        picked = qtui.pick_item(self._parent, self.dialogTitle(), "Save to make the modded save:", list(options))
         if picked is None:
             return
         if not self._yes(
@@ -554,9 +559,9 @@ class SaveToolsTool(EldenRingTool):
         if not options:
             self._info("There are no saves to audit.")
             return
-        picked = qtui.pick_item(self._parent, self.displayName(), "Save to audit:", list(options))
+        picked = qtui.pick_item(self._parent, self.dialogTitle(), "Save to audit:", list(options))
         if picked is not None:
-            qtui.show_text(self._parent, self.displayName(), saves.audit_text(options[picked]))
+            qtui.show_text(self._parent, self.dialogTitle(), saves.audit_text(options[picked]))
 
     def _refuse_pending(self, pending: dict | None) -> None:
         if pending and pending.get("unswept"):
@@ -639,13 +644,13 @@ class HardenTool(EldenRingTool):
         return "Swap start_protected_game.exe for a locked copy of the game, or put the real launcher back."
 
     def displayName(self) -> str:
-        return "Elden Ring: Harden/Unharden launcher…"
+        return "Elden Ring/Harden or unharden launcher…"
 
     def tooltip(self) -> str:
         return "Needed while config files are deployed into Game/mods/; undo it before a Steam update."
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         game_dir = Path(self._organizer.managedGame().dataDirectory().absolutePath())
         paths = state.InstancePaths(self._organizer)
         try:
@@ -668,7 +673,7 @@ class HardenTool(EldenRingTool):
             )
 
     def _act(self, action: str, game_dir: Path, paths, deployed: int, cache: dict):
-        busy = Busy(self.displayName(), self._parent)
+        busy = Busy(self.dialogTitle(), self._parent)
         busy.update("Waiting for the system password prompt, if one appears")
         try:
             if action == HARDEN:
@@ -686,7 +691,7 @@ class HardenTool(EldenRingTool):
     def _undeploy_then_unharden(self, game_dir: Path, paths, deployed: int, cache: dict):
         answer = QMessageBox.question(
             self._parent,
-            self.displayName(),
+            self.dialogTitle(),
             f"{deployed} config file(s) are deployed in Game/mods/. They would be left under a launcher "
             "that starts Easy Anti-Cheat.\n\nRemove them first, then unharden?",
         )
@@ -713,13 +718,13 @@ class SyncDeployedTool(EldenRingTool):
         return "Make Game/mods/ hold exactly the config files the enabled native mods ask for."
 
     def displayName(self) -> str:
-        return "Elden Ring: Sync deployed files…"
+        return "Elden Ring/Sync deployed files…"
 
     def tooltip(self) -> str:
         return "Copy, update and remove the config files natives read from Game/mods/<Name>/."
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         busy = None
         try:
             # Inside the try so a refused run tells the listeners too.
@@ -778,7 +783,7 @@ class RebuildTool(EldenRingTool):
         return "Merge the enabled mods into the generated mod now, without launching the game."
 
     def displayName(self) -> str:
-        return "Elden Ring: Rebuild merges…"
+        return "Elden Ring/Rebuild merges…"
 
     def tooltip(self) -> str:
         return "Run the same checks and merges a launch runs, and stop there."
@@ -787,7 +792,7 @@ class RebuildTool(EldenRingTool):
 
     def run(self) -> None:
         self._prepared_then(
-            lambda prepared: QMessageBox.information(self._parent, self.displayName(), describe_rebuild(prepared))
+            lambda prepared: QMessageBox.information(self._parent, self.dialogTitle(), describe_rebuild(prepared))
         )
 
 
@@ -831,7 +836,7 @@ class SetModKindTool(EldenRingTool):
         return "Choose how the Elden Ring plugin loads a mod: package, native, Seamless Co-op or not at all."
 
     def displayName(self) -> str:
-        return "Elden Ring: Set mod kind…"
+        return "Elden Ring/Set mod kind…"
 
     def tooltip(self) -> str:
         return "Set or re-detect what kind of mod this is."
@@ -843,7 +848,7 @@ class SetModKindTool(EldenRingTool):
             mod = modlist.getMod(name)
             if mod is not None and not mod.isSeparator() and name != generated.NAME:
                 names.append(name)
-        title = self.displayName()
+        title = self.dialogTitle()
         if not names:
             QMessageBox.information(self._parent, title, "There are no mods to set.")
             return
@@ -879,7 +884,7 @@ class SetModKindTool(EldenRingTool):
         kinds.set_kind(mod, kind, native_dll=native_dll, deploy_config=deploy_config)
         note = (
             "\n\nIts config files are copied into Game/mods/ at every launch, which needs the launcher "
-            'hardened: Tools > "Elden Ring: Harden/Unharden launcher…".'
+            'hardened: Tools > Tool Plugins > Elden Ring > Harden or unharden launcher….'
             if deploy_config
             else ""
         )
@@ -903,7 +908,7 @@ class SetModKindTool(EldenRingTool):
             ticked = kinds.propose_deploy_config(kinds.PathListing(mod.absolutePath()), native_dll)
         return qtui.pick_files(
             self._parent,
-            self.displayName(),
+            self.dialogTitle(),
             f"Config files to copy into Game/mods/{Path(native_dll).stem}/ at every launch. Tick them for a "
             "mod that reads its config.ini from there (AdjustTheFov and the other LukeYui mods do). Leave "
             "them unticked for one that reads it from its own folder. A ticked file needs the hardened "
@@ -924,7 +929,7 @@ class ImportFromErmTool(EldenRingTool):
         )
 
     def displayName(self) -> str:
-        return "Elden Ring: Import from erm…"
+        return "Elden Ring/Import from erm…"
 
     def tooltip(self) -> str:
         return (
@@ -933,7 +938,7 @@ class ImportFromErmTool(EldenRingTool):
         )
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         procs.refuse_while_running(None, "run the import")
         folder = qtui.choose_folder(self._parent, title, str(Path.home()))
         if folder is None:
@@ -1045,13 +1050,13 @@ class ExportListTool(EldenRingTool):
         return "Write this profile's mods, order, merge rules and pins to a file a partner can check against."
 
     def displayName(self) -> str:
-        return "Elden Ring: Export list…"
+        return "Elden Ring/Export list…"
 
     def tooltip(self) -> str:
         return "Prepare the mods as a launch does, then save them as a shareable list."
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         rules = state.read_profile_rules(self._organizer.profilePath())
         name = qtui.ask_text(self._parent, title, "Name of the list:", self._organizer.profileName())
         if name is None:
@@ -1105,13 +1110,13 @@ class VerifyListTool(EldenRingTool):
         return "Compare this setup with a shareable list and show every difference."
 
     def displayName(self) -> str:
-        return "Elden Ring: Verify against a list…"
+        return "Elden Ring/Verify against a list…"
 
     def tooltip(self) -> str:
         return "Prepare the mods as a launch does, then list what differs from the chosen list."
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         profile = self._organizer.profilePath()
         rules = state.read_profile_rules(profile)
         active = rules["active_list"]
@@ -1142,7 +1147,7 @@ class VerifyListTool(EldenRingTool):
             with archives.hash_cache(paths) as cache:
                 findings = listfile.verify(self._organizer, doc, live=prepared.live, cache=cache)
         text = describe_comparison(doc, findings)
-        qWarning(f"Elden Ring: {self.displayName()}: {text}")
+        qWarning(f"Elden Ring: {self.dialogTitle()}: {text}")
         qtui.show_text(self._parent, title, text)
 
 
@@ -1158,7 +1163,7 @@ class ImportListTool(EldenRingTool):
         return "Install and arrange the mods a shareable list names, downloading what is missing."
 
     def displayName(self) -> str:
-        return "Elden Ring: Import list…"
+        return "Elden Ring/Import list…"
 
     def tooltip(self) -> str:
         return "Fetch, check and install the listed mods, then make the list this profile's active list."
@@ -1168,7 +1173,7 @@ class ImportListTool(EldenRingTool):
         if self._fetcher is None:
             self._fetcher = fetch.Fetcher(
                 organizer, state.InstancePaths(organizer), schedule=qtui.run_later, open_url=qtui.open_url,
-                critical=lambda text: QMessageBox.critical(self._parent, self.displayName(), text),
+                critical=lambda text: QMessageBox.critical(self._parent, self.dialogTitle(), text),
             )
             # Connected once for the life of the plugin: the manager cannot disconnect.
             self._fetcher.attach(organizer.downloadManager())
@@ -1176,7 +1181,7 @@ class ImportListTool(EldenRingTool):
         return self._fetcher
 
     def run(self) -> None:
-        title = self.displayName()
+        title = self.dialogTitle()
         procs.refuse_while_running(None, "import the list")
         path = qtui.choose_open_file(self._parent, title, str(Path.home()), LIST_FILTER)
         if path is None:

@@ -51,7 +51,7 @@ ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
 
 _Veto = Veto
 
-_SAVE_TOOLS = 'Tools > "Elden Ring: Save tools…"'
+_SAVE_TOOLS = 'Tools > Tool Plugins > Elden Ring > Save tools…'
 
 # The entry's options whose value is a path. Compared by realpath, because
 # /home is a symlink to /var/home on this machine and an entry stored with
@@ -251,8 +251,8 @@ class LaunchGate:
         if doc is None:
             return
         fix = (
-            'Run Tools > "Elden Ring: Import list…" with the list to fetch and install what differs, or '
-            '"Elden Ring: Verify against a list…" for the whole picture; that dialog can also stop using '
+            'Run Tools > Tool Plugins > Elden Ring > Import list… with the list to fetch and install what differs, or '
+            'Tools > Tool Plugins > Elden Ring > Verify against a list… for the whole picture; that dialog can also stop using '
             "the active list."
         )
         with self._busy("Elden Ring: checking the active list") as busy:
@@ -433,7 +433,7 @@ class LaunchGate:
                 raise _Veto(
                     "me3 host",
                     reason,
-                    'Run Tools > "Elden Ring: Install me3…" to retry by hand.',
+                    'Run Tools > Tool Plugins > Elden Ring > Install me3… to retry by hand.',
                     ME3_INSTALL_FAILED,
                 ) from exc
 
@@ -854,7 +854,7 @@ class LaunchGate:
                 SESSION_TITLE,
                 f"The modded session changed {', '.join(changed)}, and the game is still "
                 "running, so the save was not put back.\n\nQuit the game, then open "
-                'Tools > "Elden Ring: Save tools…" and restore the pre-session '
+                'Tools > Tool Plugins > Elden Ring > Save tools… and restore the pre-session '
                 "snapshot. Until then Run is blocked.",
             )
             return
@@ -880,7 +880,7 @@ class LaunchGate:
                     else ""
                 )
                 + "Do not press Play in Steam. "
-                'Open Tools > "Elden Ring: Save tools…" to try again.'
+                'Open Tools > Tool Plugins > Elden Ring > Save tools… to try again.'
             )
             self._show_modal(SESSION_TITLE, text + self._record_failure(paths, data))
             return

@@ -197,7 +197,7 @@ def launcher_problems(
             Problem(
                 HARDEN_REQUIRED,
                 "Config files are, or are about to be, deployed into Game/mods/, and the launcher is "
-                f"not hardened ({launcher}). Open Tools > Elden Ring: Harden/Unharden launcher.",
+                f"not hardened ({launcher}). Open Tools > Tool Plugins > Elden Ring > Harden or unharden launcher.",
             )
         )
     keys = {SWAPPED_UNLOCKED: HARDEN_PARTIAL, STALE: HARDEN_STALE, RESTORED: HARDEN_RESTORED}

@@ -2019,7 +2019,7 @@ class DeployStepTests(DeployGateCase):
         self.want()
         with mock.patch.object(gate.deploy, "apply_copies", wraps=deploy.apply_copies) as copies:
             self.assertFalse(self.launch())
-        self.assert_vetoed(hardening.HARDEN_REQUIRED, "Harden/Unharden launcher", "start_protected_game.exe")
+        self.assert_vetoed(hardening.HARDEN_REQUIRED, "Harden or unharden launcher", "start_protected_game.exe")
         copies.assert_not_called()
         self.assertFalse((self.install / "Game/mods").exists())
         self.ensure.assert_not_called()

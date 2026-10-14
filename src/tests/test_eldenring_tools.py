@@ -151,9 +151,20 @@ class CreatePluginsTests(ToolCase):
             ],
         )
 
+    def test_every_tool_sits_in_the_elden_ring_submenu(self) -> None:
+        shown = [plugin for plugin in PLUGINS.createPlugins() if isinstance(plugin, tools.EldenRingTool)]
+        self.assertEqual(len(shown), 10)
+        for plugin in shown:
+            group, slash, entry = plugin.displayName().partition("/")
+            self.assertEqual((group, slash), ("Elden Ring", "/"), plugin.displayName())
+            self.assertTrue(entry and "/" not in entry, plugin.displayName())
+
+    def test_dialogs_are_titled_with_a_colon_not_the_menu_slash(self) -> None:
+        self.assertEqual(self.tool.dialogTitle(), "Elden Ring: Install me3…")
+
     def test_the_tool_is_named_and_limited_to_the_game(self) -> None:
         self.assertEqual(self.tool.name(), "Elden Ring Install me3")
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Install me3…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Install me3…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
 
@@ -296,7 +307,7 @@ class SaveToolsCase(ToolCase):
 class SaveToolsTests(SaveToolsCase):
     def test_it_is_named_and_limited_to_the_game(self) -> None:
         self.assertEqual(self.tool.name(), "Elden Ring Save tools")
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Save tools…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Save tools…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_nothing_pending_opens_the_other_tools_without_the_snapshot_choice(self) -> None:
@@ -1098,7 +1109,7 @@ class RebuildToolTests(ModToolCase):
         )
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Rebuild merges…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Rebuild merges…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_with_the_mod_in_place_the_result_is_shown_straight_away(self) -> None:
@@ -1380,7 +1391,7 @@ class ImportFromErmToolTests(ModToolCase):
         return choose, pick, show, import_run
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Import from erm…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Import from erm…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_the_chosen_folder_and_profiles_reach_the_importer_and_the_report_is_shown_once(self) -> None:
@@ -1629,7 +1640,7 @@ class HardenToolCase(ModToolCase):
 
 class HardenToolTests(HardenToolCase):
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Harden/Unharden launcher…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Harden or unharden launcher…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_a_vanilla_launcher_offers_only_harden_and_describes_it(self) -> None:
@@ -1779,7 +1790,7 @@ class SyncDeployedToolTests(HardenToolCase):
         self.tool.display()
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Sync deployed files…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Sync deployed files…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_with_nothing_to_do_it_says_so_and_changes_nothing(self) -> None:
@@ -1799,7 +1810,7 @@ class SyncDeployedToolTests(HardenToolCase):
     def test_an_unhardened_launcher_is_refused_with_the_harden_tool_named_and_nothing_copied(self) -> None:
         self.run_tool()
         [text] = self.shown("critical")
-        self.assertIn("Harden/Unharden launcher", text)
+        self.assertIn("Harden or unharden launcher", text)
         self.assertFalse((self.game_dir / "mods").exists())
         self.assertEqual(self.heard, [1])
 
@@ -1887,7 +1898,7 @@ class ExportListToolTests(ListToolCase):
         return ask, save
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Export list…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Export list…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_the_list_is_written_with_the_name_and_seed_typed_and_the_seed_is_written_back_to_the_profile(self) -> None:
@@ -1999,7 +2010,7 @@ class VerifyListToolTests(ListToolCase):
         return menu, pick, show
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Verify against a list…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Verify against a list…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_without_an_active_list_the_only_choice_is_a_file(self) -> None:
@@ -2145,7 +2156,7 @@ class ImportListToolTests(ListToolCase):
         self.modlist.flush_installed()
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring: Import list…")
+        self.assertEqual(self.tool.displayName(), "Elden Ring/Import list…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
     def test_the_confirmation_says_what_is_downloaded_and_not_touched(self) -> None:

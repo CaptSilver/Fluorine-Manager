@@ -212,7 +212,7 @@ def plan_profile(organizer, views: dict[str, Path]) -> ProfilePlan:
                 raise ProfileError(
                     "NATIVE_DLL_MISSING",
                     f"{ref.name} is a native mod without a usable DLL (recorded: {ref.native_dll!r}). "
-                    'Open Tools > "Elden Ring: Set mod kind…" and choose the DLL.',
+                    'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and choose the DLL.',
                 )
             natives.append((ref.name, ref.path / ref.native_dll))
     if generated_ref is not None:
