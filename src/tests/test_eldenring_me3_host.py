@@ -554,8 +554,10 @@ class InstallFromArchiveTests(InstallCase):
         self.paths.me3_host_staging.parent.mkdir(parents=True)
         self.paths.me3_host_staging.write_text("not a folder")
         with mock.patch.object(Path, "unlink", side_effect=PermissionError("no")):
-            with self.assertRaises(me3_host.Me3HostError):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
                 me3_host.install(self.paths, self.archive)
+        self.assertIn("clear the staging folder", str(caught.exception))
+        self.assertIn(str(self.paths.me3_host_staging), str(caught.exception))
         self.assertFalse(self.binary.exists())
 
     def test_a_staging_folder_that_cannot_be_created_is_a_readable_error(self) -> None:
@@ -570,6 +572,8 @@ class InstallFromArchiveTests(InstallCase):
         with mock.patch.object(Path, "mkdir", fail_for_staging):
             with self.assertRaises(me3_host.Me3HostError) as caught:
                 me3_host.install(self.paths, self.archive)
+        self.assertIn("create the staging folder", str(caught.exception))
+        self.assertIn(str(self.paths.me3_host_staging), str(caught.exception))
         self.assertIn("read-only", str(caught.exception))
         self.assert_nothing_installed()
 
@@ -585,7 +589,46 @@ class InstallFromArchiveTests(InstallCase):
         with mock.patch.object(Path, "mkdir", fail_for_extracted):
             with self.assertRaises(me3_host.Me3HostError) as caught:
                 me3_host.install(self.paths, self.archive)
-        self.assertIn("no space left", str(caught.exception))
+        message = str(caught.exception)
+        self.assertIn("create the extraction folder", message)
+        self.assertIn(str(self.paths.me3_host_staging / "extracted"), message)
+        self.assertIn("no space left", message)
+        self.assertNotIn("gzip", message)
+        self.assert_nothing_installed()
+
+    def test_a_member_that_cannot_be_written_out_is_not_reported_as_a_bad_archive(self) -> None:
+        self.use_archive()
+        with mock.patch.object(
+            me3_host.tarfile.TarFile, "extract", side_effect=OSError("no space left on device")
+        ):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
+                me3_host.install(self.paths, self.archive)
+        message = str(caught.exception)
+        self.assertIn("cannot unpack bin/me3", message)
+        self.assertIn(str(self.paths.me3_host_staging / "extracted"), message)
+        self.assertIn("no space left on device", message)
+        self.assertNotIn("gzip", message)
+        self.assert_nothing_installed()
+
+    def test_an_archive_that_cannot_be_opened_names_the_file_not_its_format(self) -> None:
+        self.use_archive()
+        with mock.patch.object(me3_host.tarfile, "open", side_effect=PermissionError("denied")):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
+                me3_host.install(self.paths, self.archive)
+        message = str(caught.exception)
+        self.assertIn(f"cannot read {self.archive}", message)
+        self.assertIn("denied", message)
+        self.assertNotIn("gzip", message)
+        self.assert_nothing_installed()
+
+    def test_a_garbage_archive_is_still_reported_as_one(self) -> None:
+        data = b"this is not a tarball" * 40
+        self.archive = self.tmp / "me3.tar.gz"
+        self.archive.write_bytes(data)
+        self.use_pin(pin_for(FILES, archive_sha256=sha(data)))
+        with self.assertRaises(me3_host.Me3HostError) as caught:
+            me3_host.install(self.paths, self.archive)
+        self.assertIn("gzip tar archive", str(caught.exception))
         self.assert_nothing_installed()
 
     def test_a_member_that_cannot_be_read_back_for_hashing_is_a_readable_error(self) -> None:
@@ -601,6 +644,7 @@ class InstallFromArchiveTests(InstallCase):
             with self.assertRaises(me3_host.Me3HostError) as caught:
                 me3_host.install(self.paths, self.archive)
         self.assertIn("input/output error", str(caught.exception))
+        self.assertIn(str(self.paths.me3_host_staging / "extracted"), str(caught.exception))
         self.assert_nothing_installed()
 
     def test_an_interrupted_install_leaves_the_other_files_as_they_were(self) -> None:
@@ -616,8 +660,10 @@ class InstallFromArchiveTests(InstallCase):
             return real_replace(source, destination)
 
         with mock.patch("os.replace", flaky):
-            with self.assertRaises(me3_host.Me3HostError):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
                 me3_host.install(self.paths, self.archive)
+        self.assertIn(f"could not write {self.host_dll}", str(caught.exception))
+        self.assertIn("disk full", str(caught.exception))
         self.assertEqual(replaced[0], "me3-launcher.exe")
         self.assertEqual(self.launcher.read_bytes(), FILES["bin/win64/me3-launcher.exe"])
         self.assertEqual(self.host_dll.read_bytes(), OLD["bin/win64/me3_mod_host.dll"])
@@ -744,8 +790,12 @@ class EnsureTests(InstallCase):
                     "download_stream",
                     side_effect=urllib.error.URLError("connection reset"),
                 ):
-            with self.assertRaises(me3_host.Me3HostError):
+            with self.assertRaises(me3_host.Me3HostError) as caught:
                 me3_host.ensure(organizer(self.instance))
+        self.assertIn(
+            f"to {state.InstancePaths(organizer(self.instance)).me3_host_staging / 'me3-linux-amd64.tar.gz'}",
+            str(caught.exception),
+        )
         self.assert_nothing_installed()
 
     def test_progress_messages_arrive_in_order(self) -> None:

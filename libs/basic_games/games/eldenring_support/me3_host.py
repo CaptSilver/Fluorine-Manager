@@ -261,9 +261,12 @@ def install(
     staging = paths.me3_host_staging
     try:
         _clear_staging(staging)
+    except OSError as exc:
+        raise Me3HostError(f"cannot clear the staging folder {staging}: {exc}") from exc
+    try:
         staging.mkdir(parents=True)
     except OSError as exc:
-        raise Me3HostError(f"cannot create {staging}: {exc}") from exc
+        raise Me3HostError(f"cannot create the staging folder {staging}: {exc}") from exc
     try:
         source = _obtain_archive(archive, staging, notify)
         extracted = _extract_members(source, staging, notify)
@@ -336,17 +339,26 @@ def _obtain_archive(archive, staging: Path, notify: Progress) -> Path:
     try:
         github.download_stream(asset["url"], target, sha256=PIN.archive_sha256)
     except _FETCH_ERRORS as exc:
-        raise Me3HostError(f"could not download {asset['name']}: {exc}") from exc
+        # A full disk and a dropped connection are both OSErrors; the
+        # destination is what tells them apart for the reader.
+        raise Me3HostError(f"could not download {asset['name']} to {target}: {exc}") from exc
     return target
 
 
 def _extract_members(archive: Path, staging: Path, notify: Progress) -> dict[str, Path]:
-    """Unpack the three pinned members and check each against its hash."""
+    """Unpack the three pinned members and check each against its hash.
+
+    Each failure names the step and the path, so a full disk or an unreadable
+    folder is never reported as a bad archive.
+    """
     notify("Checking the archive")
     out = staging / "extracted"
     wanted = (BINARY_MEMBER, *WINDOWS_BIN_MEMBERS)
     try:
         out.mkdir()
+    except OSError as exc:
+        raise Me3HostError(f"cannot create the extraction folder {out}: {exc}") from exc
+    try:
         with tarfile.open(archive, "r:gz") as tar:
             everything = tar.getmembers()
             for member in everything:
@@ -361,18 +373,25 @@ def _extract_members(archive: Path, staging: Path, notify: Progress) -> dict[str
                         f"{archive.name} has no {name}. That is the native Linux build's "
                         "layout, so this may be the Windows archive."
                     )
-                tar.extract(member, out, filter="data")
+                try:
+                    tar.extract(member, out, filter="data")
+                except OSError as exc:
+                    raise Me3HostError(f"cannot unpack {name} into {out}: {exc}") from exc
     except tarfile.FilterError as exc:
         raise Me3HostError(f"{archive.name} has an unsafe member and was not unpacked: {exc}") from exc
-    except (tarfile.TarError, EOFError, OSError, zlib.error) as exc:
+    except (tarfile.TarError, EOFError, zlib.error) as exc:
         raise Me3HostError(f"cannot read {archive.name} as a gzip tar archive: {exc}") from exc
+    except OSError as exc:
+        # Opening the file or reading it through the decompressor failed; the
+        # bytes never got as far as being judged a bad archive.
+        raise Me3HostError(f"cannot read {archive}: {exc}") from exc
 
     extracted: dict[str, Path] = {}
     for name in wanted:
         try:
             actual = github.sha256_file(out / name)
         except OSError as exc:
-            raise Me3HostError(f"cannot read {name} back from {archive.name}: {exc}") from exc
+            raise Me3HostError(f"cannot read {name} back from {out}: {exc}") from exc
         if actual != PIN.member_sha256[name]:
             raise IntegrityError(
                 f"{name} in {archive.name} has sha256 {actual}, but the pin expects "
@@ -384,15 +403,16 @@ def _extract_members(archive: Path, staging: Path, notify: Progress) -> dict[str
 
 def _place(extracted: dict[str, Path], notify: Progress) -> None:
     windows_bin = windows_bin_dir()
-    try:
-        for name in WINDOWS_BIN_MEMBERS:
-            notify(f"Installing {Path(name).name}")
-            atomic.write_bytes_atomic(windows_bin / Path(name).name, extracted[name].read_bytes())
-        # The binary goes last so a pinned binary never sits next to Windows
-        # parts that were not replaced yet and could pass for an install.
-        notify("Installing me3")
-        atomic.write_bytes_atomic(
-            binary_path(), extracted[BINARY_MEMBER].read_bytes(), mode=0o755
-        )
-    except OSError as exc:
-        raise Me3HostError(f"could not write the me3 files: {exc}") from exc
+    # The binary goes last so a pinned binary never sits next to Windows parts
+    # that were not replaced yet and could pass for an install.
+    steps = [
+        (windows_bin / Path(name).name, extracted[name], 0o644, f"Installing {Path(name).name}")
+        for name in WINDOWS_BIN_MEMBERS
+    ]
+    steps.append((binary_path(), extracted[BINARY_MEMBER], 0o755, "Installing me3"))
+    for destination, source, mode, message in steps:
+        notify(message)
+        try:
+            atomic.write_bytes_atomic(destination, source.read_bytes(), mode=mode)
+        except OSError as exc:
+            raise Me3HostError(f"could not write {destination}: {exc}") from exc
