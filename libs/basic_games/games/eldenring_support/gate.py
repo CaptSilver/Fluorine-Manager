@@ -523,34 +523,57 @@ class LaunchGate:
         try:
             result = session.restore_changed(paths, effective)
         except ErmError as exc:
+            kept = list(getattr(exc, "quarantined", []))
             data["pending_restore"] = {
                 "reason": "restore-failed",
                 "sentinel": effective,
                 "changed": changed,
                 "exit_code": exit_code,
                 "error": str(exc),
+                "quarantined": [str(path) for path in kept],
             }
             sentinel["swept"] = {"outcome": "pending", "exit_code": exit_code}
-            session.save_last_launch(paths, data)
-            self._show_modal(
-                SESSION_TITLE,
+            text = (
                 f"The modded session changed {', '.join(changed)} and putting the "
-                f"pre-session save back failed: {exc}\n\nDo not press Play in Steam. "
-                'Open Tools > "Elden Ring: Save tools…" to try again.',
+                f"pre-session save back failed: {exc}\n\n"
+                + (
+                    "What the session wrote is kept at:\n" + self._listed(kept) + "\n\n"
+                    if kept
+                    else ""
+                )
+                + "Do not press Play in Steam. "
+                'Open Tools > "Elden Ring: Save tools…" to try again.'
             )
+            self._show_modal(SESSION_TITLE, text + self._record_failure(paths, data))
             return
         sentinel["swept"] = {"outcome": "restored", "exit_code": exit_code}
         data["sentinel_tripped"] = session.tripped(result)
-        session.save_last_launch(paths, data)
-        where = "\n".join(f"  {path}" for path in result.quarantined) or "  (there was nothing to keep)"
-        self._show_modal(
-            SESSION_TITLE,
+        # Built before the record is written: if that write fails the dialog
+        # still has to say where the session's copy went.
+        text = (
             f"The modded session wrote to your vanilla save ({', '.join(changed)}). "
             "Normally it writes ER0000_modded; this happens when a mod fails to load "
             "and takes the save redirect with it.\n\n"
             "The pre-session save is back. What the session wrote is kept at:\n"
-            f"{where}\n\n"
+            f"{self._listed(result.quarantined)}\n\n"
             "Do not press Play in Steam until you have read this. Steam Cloud syncs "
             "around Steam's own launches; if Steam shows a cloud conflict for this "
-            "save, keep the local copy.",
+            "save, keep the local copy."
         )
+        self._show_modal(SESSION_TITLE, text + self._record_failure(paths, data))
+
+    @staticmethod
+    def _listed(paths) -> str:
+        return "\n".join(f"  {path}" for path in paths) or "  (there was nothing to keep)"
+
+    def _record_failure(self, paths: state.InstancePaths, data: dict) -> str:
+        """Save the record; the sentence to add to the dialog if that fails, else ''."""
+        try:
+            session.save_last_launch(paths, data)
+        except OSError as exc:
+            self._warn(f"Elden Ring: could not write {paths.last_launch}: {exc}")
+            return (
+                f"\n\nFluorine also could not write {paths.last_launch}: {exc}. The save "
+                "folder is as described above; the next launch compares it again."
+            )
+        return ""

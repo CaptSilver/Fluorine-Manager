@@ -45,7 +45,16 @@ class LaunchStateError(ErmError):
 
 
 class SnapshotError(ErmError):
-    """A save snapshot could not be taken, trusted or restored."""
+    """A save snapshot could not be taken, trusted or restored.
+
+    `quarantined` lists the session's files a restore had already moved to
+    save-backups/quarantine/ when it failed, so the caller can record where
+    they went.
+    """
+
+    def __init__(self, *args: object, quarantined: list[Path] | None = None) -> None:
+        super().__init__(*args)
+        self.quarantined: list[Path] = list(quarantined or [])
 
 
 def load_last_launch(paths: state.InstancePaths) -> dict:
@@ -113,6 +122,9 @@ def _check_shape(data: dict) -> None:
         raise LaunchStateError("pending_restore.changed is not a list of names")
     if not isinstance(pending.get("reason", ""), str):
         raise LaunchStateError("pending_restore.reason is not text")
+    quarantined = pending.get("quarantined", [])
+    if not isinstance(quarantined, list) or not all(isinstance(p, str) for p in quarantined):
+        raise LaunchStateError("pending_restore.quarantined is not a list of paths")
 
 
 def _check_sentinel(sentinel: object, where: str) -> None:
@@ -318,7 +330,10 @@ def restore_changed(paths: state.InstancePaths, sentinel: dict, stamp: str | Non
     work: list[tuple[str, dict | None, bytes | None]] = []
     for name in saves.GUARDED:
         recorded = sentinel["files"][name]
-        differs, _ = check_file(recorded, save_dir / name)
+        try:
+            differs, _ = check_file(recorded, save_dir / name)
+        except OSError as exc:
+            raise SnapshotError(f"cannot compare {save_dir / name} with its snapshot: {exc}") from exc
         if not differs:
             continue
         data = _read_snapshot(snapshot_dir / name, recorded)
@@ -330,6 +345,21 @@ def restore_changed(paths: state.InstancePaths, sentinel: dict, stamp: str | Non
         work.append((name, recorded, data))
 
     result = Restored(restored=[], quarantined=[])
+    try:
+        _restore_work(work, save_dir, paths, stamp, result)
+    except SnapshotError as exc:
+        exc.quarantined = list(result.quarantined)
+        raise
+    return result
+
+
+def _restore_work(
+    work: list[tuple[str, dict | None, bytes | None]],
+    save_dir: Path,
+    paths: state.InstancePaths,
+    stamp: str,
+    result: Restored,
+) -> None:
     for name, recorded, data in work:
         target = save_dir / name
         if os.path.lexists(target):
@@ -354,7 +384,6 @@ def restore_changed(paths: state.InstancePaths, sentinel: dict, stamp: str | Non
         with contextlib.suppress(OSError):
             os.utime(target, ns=(recorded["mtime_ns"], recorded["mtime_ns"]))
         result.restored.append(name)
-    return result
 
 
 def _move_durably(source: Path, destination: Path) -> None:
@@ -394,38 +423,65 @@ def _read_snapshot(path: Path, recorded: dict | None) -> bytes | None:
     return data
 
 
-def restore_pending(
-    paths: state.InstancePaths, running: Callable[[], list] | None = None
-) -> Restored:
-    """The Save tools' "restore the pre-session snapshot".
-
-    Refuses while the game is up: it would race the game's own writes.
-    `running` defaults to the process scan, looked up at call time.
-    """
-    data = load_last_launch(paths)
-    pending = data.get("pending_restore")
-    if not pending:
-        raise ErmError("No save restore is pending.")
+def _refuse_while_running(running: Callable[[], list] | None, then: str) -> None:
+    """Raise while the game or me3 is up. `running` defaults to the process scan,
+    looked up at call time."""
     up = (running or procs.game_running)()
     if up:
         raise ErmError(
             "Elden Ring or me3 is still running ("
             + ", ".join(f"{name} pid {pid}" for pid, name in up)
-            + "). Quit the game, then restore."
+            + f"). Quit the game, then {then}."
         )
-    result = restore_changed(paths, pending["sentinel"])
+
+
+def restore_pending(
+    paths: state.InstancePaths, running: Callable[[], list] | None = None
+) -> Restored:
+    """The Save tools' "restore the pre-session snapshot".
+
+    Refuses while the game is up: it would race the game's own writes. Files
+    an earlier attempt already quarantined stay on the record, whether this
+    attempt finishes or fails again.
+    """
+    data = load_last_launch(paths)
+    pending = data.get("pending_restore")
+    if not pending:
+        raise ErmError("No save restore is pending.")
+    _refuse_while_running(running, "restore")
+    earlier = list(pending.get("quarantined", []))
+    try:
+        result = restore_changed(paths, pending["sentinel"])
+    except SnapshotError as exc:
+        if exc.quarantined:
+            pending["quarantined"] = _merged(earlier, exc.quarantined)
+            save_last_launch(paths, data)
+        raise
     _close_pending(data, pending, "restored")
+    result.quarantined = [Path(p) for p in _merged(earlier, result.quarantined)]
     data["sentinel_tripped"] = tripped(result)
     save_last_launch(paths, data)
     return result
 
 
-def keep_session_save(paths: state.InstancePaths) -> Path | None:
-    """The Save tools' "keep the session's save": the snapshot goes to save-backups/."""
+def _merged(earlier: list[str], now: list[Path]) -> list[str]:
+    """`earlier` followed by the paths in `now` it does not already hold."""
+    return earlier + [str(p) for p in now if str(p) not in earlier]
+
+
+def keep_session_save(
+    paths: state.InstancePaths, running: Callable[[], list] | None = None
+) -> Path | None:
+    """The Save tools' "keep the session's save": the snapshot goes to save-backups/.
+
+    Refuses while the game is up, like the restore: a save the game is still
+    writing is not one to settle.
+    """
     data = load_last_launch(paths)
     pending = data.get("pending_restore")
     if not pending:
         raise ErmError("No save restore is pending.")
+    _refuse_while_running(running, "keep the session's save")
     snapshot = Path(pending["sentinel"]["snapshot_dir"])
     moved = None
     if os.path.isdir(snapshot):

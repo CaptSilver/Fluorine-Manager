@@ -1022,6 +1022,71 @@ class SweepTests(GateCase):
         self.assertIn("does not match", data["pending_restore"]["error"])
         self.assertIn("Do not press Play", self.modals[0][1])
 
+    def fail_bak_write_back(self):
+        real = session.atomic.write_bytes_atomic
+
+        def write(path, data, *args, **kwargs):
+            if Path(path).name == "ER0000.sl2.bak":
+                raise OSError(28, "No space left on device")
+            return real(path, data, *args, **kwargs)
+
+        return mock.patch.object(session.atomic, "write_bytes_atomic", side_effect=write)
+
+    def test_a_partial_restore_names_every_quarantined_file_and_a_retry_records_them(self) -> None:
+        self.append("ER0000.sl2")
+        self.append("ER0000.sl2.bak")
+        with self.fail_bak_write_back():
+            self.finish()
+        kept = [str(p) for p in self.quarantined()]
+        self.assertEqual(len(kept), 2)
+        pending = self.last_launch()["pending_restore"]
+        self.assertEqual(pending["reason"], "restore-failed")
+        self.assertEqual(sorted(pending["quarantined"]), kept)
+        for path in kept:
+            self.assertIn(path, self.modals[0][1])
+        session.restore_pending(self.paths, running=lambda: [])
+        self.assertEqual(
+            sorted(self.last_launch()["sentinel_tripped"]["quarantined"]), kept
+        )
+        self.assertEqual((self.save_dir / "ER0000.sl2.bak").read_bytes(), BAK)
+
+    def test_a_record_that_cannot_be_written_after_a_restore_still_says_where_the_copy_went(self) -> None:
+        self.append("ER0000.sl2")
+        real = session.save_last_launch
+
+        def failing(paths, data):
+            if "sentinel_tripped" in data:
+                raise OSError(28, "No space left on device")
+            return real(paths, data)
+
+        with mock.patch.object(gate.session, "save_last_launch", failing):
+            self.finish()
+        [kept] = self.quarantined()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertEqual(len(self.modals), 1)
+        text = self.modals[0][1]
+        self.assertIn("pre-session save is back", text)
+        self.assertIn(str(kept), text)
+        self.assertIn("No space left", text)
+        self.assertNotIn("could not check", text)
+
+    def test_a_record_that_cannot_be_written_after_a_failed_restore_still_names_the_quarantine(self) -> None:
+        self.append("ER0000.sl2")
+        self.append("ER0000.sl2.bak")
+        real = session.save_last_launch
+
+        def failing(paths, data):
+            if "pending_restore" in data:
+                raise OSError(28, "No space left on device")
+            return real(paths, data)
+
+        with self.fail_bak_write_back(), mock.patch.object(gate.session, "save_last_launch", failing):
+            self.finish()
+        self.assertEqual(len(self.modals), 1)
+        for path in self.quarantined():
+            self.assertIn(str(path), self.modals[0][1])
+        self.assertIn("No space left", self.modals[0][1])
+
     def test_a_missing_snapshot_is_the_same_failure(self) -> None:
         self.append("ER0000.sl2")
         (Path(self.last_launch()["sentinel"]["snapshot_dir"]) / "ER0000.sl2").unlink()
