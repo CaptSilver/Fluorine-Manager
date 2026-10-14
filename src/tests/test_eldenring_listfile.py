@@ -340,6 +340,18 @@ class ContentDigestTests(unittest.TestCase):
     def native(self, **extra) -> str:
         return self.digest("native", install_files=["mods/x.dll", "mods/x.ini"], **extra)
 
+    def test_a_hidden_file_in_a_natives_install_list_is_not_content(self) -> None:
+        self.put("mods/x.dll", b"dll")
+        listed = ["mods/x.dll", "mods/x.bin.mohidden", "hidden.mohidden/y.bin", "meta.ini"]
+        self.put("mods/x.bin.mohidden", b"one")
+        self.put("hidden.mohidden/y.bin", b"one")
+        self.put("meta.ini", b"one")
+        first = self.digest("native", install_files=listed)
+        self.put("mods/x.bin.mohidden", b"TWO")
+        self.put("hidden.mohidden/y.bin", b"TWO")
+        self.put("meta.ini", b"TWO")
+        self.assertEqual(self.digest("native", install_files=listed), first)
+
     def test_a_native_is_digested_over_its_install_list_alone(self) -> None:
         self.put("mods/x.dll", b"MZ")
         self.put("mods/x.ini", b"fov = 1\n")

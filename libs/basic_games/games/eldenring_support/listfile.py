@@ -329,6 +329,12 @@ def _digest(pairs: list[tuple[str, str | None]]) -> str:
     return digest.hexdigest()
 
 
+def _is_content_path(rel: str) -> bool:
+    """False for Mod Organizer's meta.ini and anything under a `.mohidden` name."""
+    parts = rel.split("/")
+    return rel != treewalk.META_INI and not any(part.endswith(treewalk.HIDDEN_SUFFIX) for part in parts)
+
+
 def content_sha256(mod_dir, kind: str, *, install_files: list[str] | None, view: dict | None, cache: dict) -> str:
     """sha256 over the sorted (path, sha256(file)) pairs of what the game and me3 see of the mod.
 
@@ -343,7 +349,7 @@ def content_sha256(mod_dir, kind: str, *, install_files: list[str] | None, view:
     """
     base = Path(mod_dir)
     if kind == kinds.NATIVE and install_files is not None:
-        covered = set(install_files)
+        covered = {rel for rel in install_files if _is_content_path(rel)}
         covered.update(rel for rel, _path in treewalk.package_files(base, strict=True) if kinds.is_config_file(rel.rsplit("/", 1)[-1]))
         return _digest([(rel, _file_sha(cache, base / rel)) for rel in covered])
     if view is not None:
