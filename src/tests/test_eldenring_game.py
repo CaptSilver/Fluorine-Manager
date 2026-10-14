@@ -398,11 +398,157 @@ class ModKindWiringTests(GameCase):
         self.assertIs(organizer.pluginSetting("Simple Installer", "silent"), False)
         self.assertTrue(organizer.isPluginEnabled("Fomod Installer"))
 
+    def test_a_refused_state_or_removal_callback_fails_init(self) -> None:
+        for name in ("onModStateChanged", "onModRemoved"):
+            with self.subTest(name):
+                refusing = FakeOrganizer(self.base)
+                setattr(refusing.mod_list, name, lambda callback: False)
+                with mock.patch.object(GAME, "qWarning"):
+                    self.assertIs(self.game.init(refusing), False)
+
     def test_the_co_op_password_is_a_plugin_setting_with_an_empty_default(self) -> None:
         self.assertEqual(
             [setting[0] for setting in self.game.settings()], ["coop_password"]
         )
         self.assertEqual(self.game.settings()[0][2], "")
+
+
+class FakeTimer:
+    """QTimer.singleShot that records the callbacks instead of waiting for an event loop."""
+
+    scheduled: list = []
+
+    @classmethod
+    def singleShot(cls, milliseconds, callback) -> None:  # noqa: N802 - Qt spelling
+        cls.scheduled.append((milliseconds, callback))
+
+    @classmethod
+    def fire(cls) -> None:
+        queued, cls.scheduled = cls.scheduled, []
+        for _, callback in queued:
+            callback()
+
+
+class DeployedFilesWiringTests(GameCase):
+    def setUp(self) -> None:
+        super().setUp()
+        (self.install / "Game").mkdir(parents=True)
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+        FakeTimer.scheduled = []
+        # The sync asks procs.game_running(); the host's real process list must not decide a test.
+        for patcher in (
+            mock.patch.object(GAME, "QTimer", FakeTimer),
+            mock.patch.object(GAME, "qWarning"),
+            mock.patch.object(GAME.deploy.procs, "game_running", return_value=[]),
+        ):
+            started = patcher.start()
+            self.addCleanup(patcher.stop)
+            if patcher.attribute == "qWarning":
+                self.warn = started
+        self.heard = []
+        self.addCleanup(GAME.problems.subscribe(lambda: self.heard.append(1)))
+        self.paths = GAME.state.InstancePaths(self.organizer)
+        self.modlist = self.organizer.mod_list
+        mod = self.modlist.add("Thing mod", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n"})
+        GAME.kinds.set_kind(
+            mod, GAME.kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=["mods/Thing/config.ini"]
+        )
+        self.deployed = self.install / "Game/mods/Thing/config.ini"
+
+    def deploy_now(self) -> None:
+        """What a launch under a hardened launcher leaves behind."""
+        wanted = GAME.deploy.desired(self.organizer)
+        manifest = GAME.deploy.Manifest()
+        GAME.deploy.apply_copies(
+            GAME.deploy.plan(wanted, manifest, self.install / "Game"), manifest, self.paths, self.install / "Game"
+        )
+
+    def changed(self) -> None:
+        self.modlist.state_callbacks[0]({"Thing mod": 0})
+
+    def test_both_callbacks_are_the_same_handler(self) -> None:
+        self.assertEqual(len(self.modlist.state_callbacks), 1)
+        self.assertEqual(len(self.modlist.removed_callbacks), 1)
+
+    def test_a_change_with_nothing_deployed_only_tells_the_listeners(self) -> None:
+        self.changed()
+        self.modlist.removed_callbacks[0]("Thing mod")
+        self.assertEqual(FakeTimer.scheduled, [])
+        self.assertEqual(self.heard, [1, 1])
+
+    def test_with_a_file_deployed_a_whole_burst_of_changes_schedules_one_sync_for_the_next_turn(self) -> None:
+        self.deploy_now()
+        for _ in range(3):
+            self.changed()
+        self.modlist.removed_callbacks[0]("Thing mod")
+        self.assertEqual([ms for ms, _ in FakeTimer.scheduled], [0])
+
+    def test_the_sync_removes_the_files_of_a_disabled_native_and_tells_the_listeners_again(self) -> None:
+        self.deploy_now()
+        self.assertTrue(self.deployed.exists())
+        self.modlist.active.discard("Thing mod")
+        self.changed()
+        self.heard.clear()
+        FakeTimer.fire()
+        self.assertFalse(self.deployed.exists())
+        self.assertFalse((self.install / "Game/mods/Thing").exists())
+        self.assertEqual(self.heard, [1])
+        self.assertTrue(any("Removed mods/Thing/config.ini" in call.args[0] for call in self.warn.call_args_list))
+
+    def test_a_later_burst_schedules_again_once_the_sync_has_run(self) -> None:
+        self.deploy_now()
+        self.changed()
+        FakeTimer.fire()
+        self.changed()
+        self.assertEqual(len(FakeTimer.scheduled), 1)
+
+    def test_a_native_that_is_still_enabled_keeps_its_file(self) -> None:
+        self.deploy_now()
+        self.changed()
+        FakeTimer.fire()
+        self.assertTrue(self.deployed.exists())
+
+    def test_a_running_game_leaves_the_files_and_the_log_says_why(self) -> None:
+        self.deploy_now()
+        self.modlist.active.discard("Thing mod")
+        self.changed()
+        with mock.patch.object(GAME.deploy.procs, "game_running", return_value=[(4242, "eldenring.exe")]):
+            FakeTimer.fire()
+        self.assertTrue(self.deployed.exists())
+        self.assertTrue(any("eldenring.exe (pid 4242)" in call.args[0] for call in self.warn.call_args_list))
+
+    def test_nothing_happens_for_another_game(self) -> None:
+        self.deploy_now()
+        self.game.active = False
+        self.changed()
+        self.modlist.removed_callbacks[0]("x")
+        self.assertEqual((FakeTimer.scheduled, self.heard), ([], []))
+
+    def test_a_damaged_manifest_is_logged_once_and_never_escapes(self) -> None:
+        self.paths.deploy_manifest.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.deploy_manifest.write_text("{")
+        self.changed()
+        FakeTimer.fire()
+        self.assertEqual(self.warn.call_count, 1)
+        self.assertIn("deploy-manifest.json", self.warn.call_args.args[0])
+
+    def test_a_failure_while_scheduling_or_syncing_is_logged_and_never_escapes(self) -> None:
+        with mock.patch.object(GAME.state, "InstancePaths", side_effect=RuntimeError("scheduling")):
+            self.changed()
+        self.assertIn("scheduling", self.warn.call_args.args[0])
+        self.deploy_now()
+        self.changed()
+        with mock.patch.object(GAME.deploy, "sync_removes", side_effect=RuntimeError("syncing")):
+            FakeTimer.fire()
+        self.assertIn("syncing", self.warn.call_args.args[0])
+        self.changed()
+        self.assertEqual(len(FakeTimer.scheduled), 1)
+
+    def test_before_init_finishes_the_handler_is_a_no_op(self) -> None:
+        fresh = GAME.EldenRingGame()
+        fresh._on_mod_list_changed({"x": 0})
+        self.assertEqual(FakeTimer.scheduled, [])
 
 
 if __name__ == "__main__":

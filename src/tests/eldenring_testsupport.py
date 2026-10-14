@@ -184,6 +184,8 @@ class FakeModList:
         self.order: list[str] = []
         self.active: set[str] = set()
         self.installed_callbacks: list = []
+        self.state_callbacks: list = []
+        self.removed_callbacks: list = []
         self.queued_installs: list[FakeMod] = []
         self.refuse_changes = False
 
@@ -254,6 +256,14 @@ class FakeModList:
 
     def onModInstalled(self, callback) -> bool:  # noqa: N802
         self.installed_callbacks.append(callback)
+        return True
+
+    def onModStateChanged(self, callback) -> bool:  # noqa: N802
+        self.state_callbacks.append(callback)
+        return True
+
+    def onModRemoved(self, callback) -> bool:  # noqa: N802
+        self.removed_callbacks.append(callback)
         return True
 
     def flush_installed(self) -> None:

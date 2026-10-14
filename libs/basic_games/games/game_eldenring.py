@@ -17,12 +17,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QDir, QFileInfo, qWarning
+from PyQt6.QtCore import QDir, QFileInfo, QTimer, qWarning
 
 import mobase
 
 from ..basic_game import BasicGame
-from .eldenring_support import checker, gate, kinds, me3, me3_host, prepare, qtui, saves, state
+from .eldenring_support import (
+    checker, deploy, gate, kinds, me3, me3_host, prepare, problems, qtui, saves, state,
+)
 
 ENTRY_TITLE = "Elden Ring (me3)"
 
@@ -53,6 +55,7 @@ class EldenRingGame(BasicGame):
     # ignore the call, on an instance init() has not finished with.
     _gate: gate.LaunchGate | None = None
     _parent_widget = None
+    _removal_sync_pending = False
 
     def init(self, organizer) -> bool:
         if not super().init(organizer):
@@ -74,6 +77,8 @@ class EldenRingGame(BasicGame):
         # overload, the one with the working directory and arguments.
         registered = (
             organizer.modList().onModInstalled(self._on_mod_installed),
+            organizer.modList().onModStateChanged(self._on_mod_list_changed),
+            organizer.modList().onModRemoved(self._on_mod_list_changed),
             organizer.onAboutToRun(self._on_about_to_run),
             organizer.onFinishedRun(self._on_finished_run),
             organizer.onUserInterfaceInitialized(self._on_user_interface_initialized),
@@ -105,6 +110,50 @@ class EldenRingGame(BasicGame):
             kinds.record_on_install(mod)
         except Exception as exc:
             qWarning(f"Elden Ring: could not record the kind of {mod.name()}: {exc!r}")
+
+    def _on_mod_list_changed(self, *_changed) -> None:
+        # A mod was enabled, disabled, or removed. Connected for every game
+        # plugin, active or not, and a Qt slot underneath, so nothing may escape.
+        # A burst of these (a profile switch) schedules one sync.
+        if not self.isActive() or self._gate is None:
+            return
+        try:
+            problems.invalidate()
+            if self._removal_sync_pending or not self._something_is_deployed():
+                return
+            self._removal_sync_pending = True
+            QTimer.singleShot(0, self._sync_removals)
+        except Exception as exc:
+            qWarning(f"Elden Ring: could not schedule the removal of deployed config files: {exc!r}")
+
+    def _something_is_deployed(self) -> bool:
+        try:
+            manifest = deploy.read_manifest(state.InstancePaths(self._organizer))
+        except state.StateError:
+            return True  # the sync reports the damaged file once, in the log
+        return bool(manifest.files or manifest.dirs)
+
+    def _sync_removals(self) -> None:
+        """Take the config files of a disabled or removed native out of Game/.
+
+        A removal needs no hardened launcher, so this does not wait for the
+        next launch. Copies are never made here: the first deploy may need the
+        pkexec prompt, and a copy that fails half-way has no dialog to report to.
+        """
+        self._removal_sync_pending = False
+        try:
+            if not self.isActive():
+                return
+            paths = state.InstancePaths(self._organizer)
+            applied = deploy.sync_removes(self._organizer, paths, Path(self.dataDirectory().absolutePath()))
+            if applied.skipped:
+                qWarning(f"Elden Ring: deployed config files stay in Game/mods/ while {applied.skipped}")
+            for line in applied.lines():
+                qWarning(f"Elden Ring deploy: {line}")
+        except Exception as exc:
+            qWarning(f"Elden Ring: could not remove deployed config files: {exc!r}")
+        finally:
+            problems.invalidate()
 
     def _show_critical(self, title: str, text: str) -> None:
         qtui.critical(self._parent_widget, title, text)
