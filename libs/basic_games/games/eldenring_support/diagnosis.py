@@ -22,7 +22,7 @@ from typing import Callable
 
 from . import (
     archives, coop_settings, deploy, doctor, environment, fsprobe, gate, generated, hardening, importsave, inventory,
-    kinds, listfile, me3_host, mods, pe, prepare, procs, qtui, saves, session, state,
+    kinds, listfile, me3_host, merge_engine, mods, pe, prepare, procs, qtui, saves, session, state,
 )
 from .ermlib import gamebuild, steam
 from .ermlib import paths as ermpaths
@@ -83,6 +83,7 @@ KEYS: tuple[str, ...] = (
     "STEAM_LAUNCH_OPTION",
     "ENTRY_SETTINGS_UNREADABLE",
     "ACTIVE_LIST_MISMATCH",
+    "MERGE_CONFLICTS",
 )
 
 TITLES: dict[str, str] = {
@@ -135,6 +136,7 @@ TITLES: dict[str, str] = {
     "STEAM_LAUNCH_OPTION": "Steam has a launch option set for Elden Ring",
     "ENTRY_SETTINGS_UNREADABLE": "The instance's settings file cannot be read",
     "ACTIVE_LIST_MISMATCH": "This setup is not the one the active list describes",
+    "MERGE_CONFLICTS": "Some mods ship the same file and the merge had to adapt or pick one",
 }
 
 # The guided fixes that need no tool of the plugin's own. The diagnose plugin
@@ -566,6 +568,7 @@ class Diagnosis:
         rows += self._runtime_file_rows(natives)
         rows += self._rule_rows()
         rows += self._generated_rows(context)
+        rows += self._merge_rows(context)
         return rows
 
     def _invalid_dlls(self, natives: list[mods.ModRef]) -> list[str]:
@@ -664,7 +667,26 @@ class Diagnosis:
             Problem(
                 "RULE_NAMES_UNKNOWN_MOD",
                 "A rule in the profile's eldenring.json names a mod that is not there. A merge with such a rule "
-                "stops at launch:\n" + "\n".join(lines),
+                "adapts and warns at launch; a missing vanilla source still stops it:\n" + "\n".join(lines),
+            )
+        ]
+
+    def _merge_rows(self, context: Context) -> list[Problem]:
+        """Files the last merge could not combine, from the decisions it recorded.
+
+        Read from the state, not computed: this pass never merges. A launch
+        refreshes it. Nothing blocks a launch because of these, so the row is
+        information.
+        """
+        recorded = state.read_cache(context.paths.generated_state).get("decisions")
+        lines = merge_engine.warnings_for(merge_engine.decisions_from_state(recorded))
+        if not lines:
+            return []
+        return [
+            Problem(
+                "MERGE_CONFLICTS",
+                "As of the last merge. Nothing blocks a launch:\n" + "\n".join(f"  {line}" for line in lines),
+                informational=True,
             )
         ]
 

@@ -20,6 +20,7 @@ generated = support.module(PACKAGE, "generated")
 hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
 me3_host = support.module(PACKAGE, "me3_host")
+merge_engine = support.module(PACKAGE, "merge_engine")
 kinds = support.module(PACKAGE, "kinds")
 listfile = support.module(PACKAGE, "listfile")
 procs = support.module(PACKAGE, "procs")
@@ -161,6 +162,10 @@ class KeyTests(unittest.TestCase):
             diagnosis.KEYS[:5],
             ("VANILLA_UNKNOWN", "GAME_DIR_STRAYS", "VANILLA_CHANGED", "VANILLA_ADDED", "REGULATION_UNPINNED"),
         )
+
+    def test_the_merge_conflicts_key_is_appended_after_the_older_ones(self) -> None:
+        self.assertGreater(diagnosis.number("MERGE_CONFLICTS"), diagnosis.number("ACTIVE_LIST_MISMATCH"))
+        self.assertEqual(diagnosis.KEYS[-1], "MERGE_CONFLICTS")
 
     def test_html_is_escaped_and_lines_are_kept(self) -> None:
         self.assertEqual(diagnosis.as_html("a < b & c\nd"), "a &lt; b &amp; c<br>d")
@@ -705,6 +710,13 @@ class RuleRowTests(DiagnosisCase):
         self.write_rules({"merges": [rule], "vanilla_sources": {"ancestor": {"archive": "x.zip"}}})
         self.assertEqual(self.problems(), [])
 
+    def test_the_unknown_mod_row_no_longer_claims_a_launch_stops(self) -> None:
+        self.write_rules({"merges": [{"path": "msg/x.dcx", "strategy": "concat", "mods": ["ghost"], "prefer": "ghost"}]})
+        text = self.one("RULE_NAMES_UNKNOWN_MOD").text
+        self.assertIn("adapts and warns at launch", text)
+        self.assertIn("a missing vanilla source still stops it", text)
+        self.assertNotIn("stops at launch", text)
+
     def test_a_damaged_rules_file_is_its_own_row(self) -> None:
         state.profile_rules(self.organizer.profilePath()).write_text("{nope")
         self.assertIn("eldenring.json", self.one("RULES_DAMAGED").text)
@@ -715,6 +727,51 @@ class GeneratedRowTests(DiagnosisCase):
         mod_dir = Path(self.organizer.modsPath()) / generated.NAME
         generated.build(mod_dir, self.paths.generated_state, [("msg/x.dcx", b"merged")], "fingerprint")
         return mod_dir
+
+    WON = merge_engine.Decision(
+        "msg/engus/item_dlc02.msgbnd.dcx", merge_engine.WINNER, ("great-rune-overhaul", "nofalldead"), "nofalldead",
+        "fmg-3way", False, "entry 1 row 5: both sides changed it and differ",
+    )
+
+    def build_with(self, *decisions) -> None:
+        mod_dir = Path(self.organizer.modsPath()) / generated.NAME
+        generated.build(
+            mod_dir, self.paths.generated_state, [("msg/x.dcx", b"merged")], "fingerprint",
+            decisions=[decision.to_json() for decision in decisions],
+        )
+
+    def test_a_file_that_a_mod_won_is_information_that_names_the_file_and_the_mods(self) -> None:
+        self.build_with(self.WON)
+        problem = self.one("MERGE_CONFLICTS")
+        self.assertTrue(problem.informational)
+        self.assertIsNone(problem.fix)
+        for text in ("msg/engus/item_dlc02.msgbnd.dcx", "great-rune-overhaul", "nofalldead", "last merge"):
+            self.assertIn(text, problem.text)
+
+    def test_merged_and_identical_files_are_not_a_problem(self) -> None:
+        merged = self.WON._replace(outcome=merge_engine.MERGED, winner=None, detail="")
+        same = self.WON._replace(outcome=merge_engine.IDENTICAL, winner=None, detail="")
+        self.build_with(merged, same)
+        self.assertEqual(self.problems(), [])
+
+    def test_a_declared_merge_that_adapted_is_reported_with_what_it_adapted_to(self) -> None:
+        adapted = self.WON._replace(outcome=merge_engine.MERGED, winner=None, declared=True, detail="prefer = 'x' is not one of its providers")
+        self.build_with(adapted)
+        self.assertIn("prefer = 'x'", self.one("MERGE_CONFLICTS").text)
+
+    def test_a_damaged_record_of_decisions_is_not_a_problem_and_not_a_crash(self) -> None:
+        self.build()
+        recorded = state.read_cache(self.paths.generated_state)
+        recorded["decisions"] = [None, 3, {"outcome": "winner"}]
+        state.write_json(self.paths.generated_state, recorded)
+        self.assertEqual(self.problems(), [])
+
+    def test_an_edited_output_is_still_corrupt_beside_a_win(self) -> None:
+        self.build_with(self.WON)
+        (Path(self.organizer.modsPath()) / generated.NAME / "msg/x.dcx").write_bytes(b"edited")
+        keys = self.keys()
+        self.assertIn("MERGE_CONFLICTS", keys)
+        self.assertIn("MERGE_CORRUPT", keys)
 
     def test_a_missing_or_disabled_generated_mod_points_at_the_ensure_fix(self) -> None:
         self.modlist.active.discard(generated.NAME)
