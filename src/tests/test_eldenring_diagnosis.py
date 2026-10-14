@@ -816,6 +816,88 @@ class SteamLaunchOptionRowTests(DiagnosisCase):
         self.assertIn("1002", self.one("STEAM_LAUNCH_OPTION").text)
 
 
+class WatchTests(DiagnosisCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.watch = diagnosis.Watch(self.organizer, self.game)
+
+    def test_the_first_look_only_takes_a_baseline(self) -> None:
+        self.assertFalse(self.watch.changed())
+
+    def test_an_untouched_setup_never_reports_a_change(self) -> None:
+        self.watch.changed()
+        self.assertFalse(self.watch.changed())
+        self.assertFalse(self.watch.changed())
+
+    def test_a_new_file_a_vanished_one_a_moved_stat_and_a_new_link_are_each_a_change(self) -> None:
+        self.put("steam_api64.dll", b"MZ steam")
+        self.adopt("eldenring.exe", "steam_api64.dll")
+        self.watch.changed()
+        for act in (
+            lambda: self.put("new.bin"),
+            lambda: (self.game_dir / "new.bin").unlink(),
+            lambda: (self.game_dir / "steam_api64.dll").write_bytes(b"MZ stoam"),
+            lambda: self.put("steam_api64.dll", b"MZ steam"),
+            lambda: (self.game_dir / "version.dll").symlink_to(self.tmp / "x.dll"),
+        ):
+            act()
+            self.assertTrue(self.watch.changed())
+            self.assertFalse(self.watch.changed())
+
+    def test_a_moved_mtime_with_the_same_bytes_is_not_a_change_and_nothing_is_written(self) -> None:
+        self.watch.changed()
+        before = self.paths.vanilla_inventory.read_bytes()
+        os.utime(self.game_dir / "eldenring.exe", ns=(1, 1))
+        self.assertFalse(self.watch.changed())
+        self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+
+    def test_only_entries_whose_stat_moved_are_read(self) -> None:
+        self.watch.changed()
+        with mock.patch.object(diagnosis.inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+            self.watch.changed()
+            self.assertEqual(hashed.call_count, 0)
+            os.utime(self.game_dir / "eldenring.exe", ns=(1, 1))
+            self.watch.changed()
+            self.watch.changed()
+        self.assertEqual(hashed.call_count, 1)
+
+    def test_steams_manifest_keys_and_launch_option_are_changes(self) -> None:
+        self.watch.changed()
+        acf = self.library / "steamapps/appmanifest_1245620.acf"
+        acf.write_text('"AppState"\n{\n\t"buildid"\t\t"25080141"\n\t"StateFlags"\t\t"1030"\n}\n')
+        self.assertTrue(self.watch.changed())
+        config = self.home / ".local/share/Steam/userdata/1001/config/localconfig.vdf"
+        config.parent.mkdir(parents=True)
+        (self.home / ".local/share/Steam/steamapps").mkdir(parents=True, exist_ok=True)
+        config.write_text('"UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "1245620" { "LaunchOptions" "-x" } } } } } }')
+        self.assertTrue(self.watch.changed())
+        self.assertFalse(self.watch.changed())
+
+    def test_a_build_change_and_what_a_diff_would_ask_about_are_changes(self) -> None:
+        self.watch.changed()
+        self.set_buildid("25999999")
+        self.assertTrue(self.watch.changed())
+        self.put("version.dll")
+        self.assertTrue(self.watch.changed())
+        self.assertFalse(self.watch.changed())
+
+    def test_no_inventory_and_a_damaged_one_are_steady_states_not_changes(self) -> None:
+        self.paths.vanilla_inventory.unlink()
+        self.watch.changed()
+        self.assertFalse(self.watch.changed())
+        self.paths.vanilla_inventory.write_text("{nope")
+        self.assertTrue(self.watch.changed())
+        self.assertFalse(self.watch.changed())
+
+    def test_a_pass_never_writes_game_or_the_inventory_or_the_manifest(self) -> None:
+        self.put("bink2w64.dll")
+        before = (tree(self.install), self.paths.vanilla_inventory.read_bytes())
+        self.watch.changed()
+        self.watch.changed()
+        self.assertEqual((tree(self.install), self.paths.vanilla_inventory.read_bytes()), before)
+        self.assertFalse(self.paths.deploy_manifest.exists())
+
+
 class FailureTests(DiagnosisCase):
     def test_a_check_that_raises_becomes_a_row_naming_it_and_does_not_stop_the_others(self) -> None:
         with mock.patch.object(diagnosis.inventory, "read", side_effect=RuntimeError("boom")):

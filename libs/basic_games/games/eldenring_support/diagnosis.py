@@ -769,3 +769,57 @@ def _enabled_ersc(organizer):
         return coop_settings.enabled_ersc(organizer)
     except coop_settings.DuplicateErscError:
         return None
+
+
+class Watch:
+    """What the 60 s poll compares: has anything the problems list reports moved since the last look?
+
+    Four things change under the plugin's feet with no event to hear: Steam's
+    app manifest (a build id, an update queued or failed), Steam's launch
+    option, and the contents of Game/ itself, since Steam Play is ungated and
+    runs Easy Anti-Cheat over whatever is there. The folder is read the way a
+    launch reads it, stat first and the bytes of only those entries whose stat
+    moved, so an untouched tree costs one walk. It reads and never writes
+    Game/, the inventory or the manifest.
+    """
+
+    _APPMANIFEST_KEYS = ("buildid", "StateFlags", "ScheduledAutoUpdate", "UpdateResult")
+
+    def __init__(self, organizer, game) -> None:
+        self._organizer = organizer
+        self._game = game
+        self._last: tuple | None = None
+
+    def changed(self) -> bool:
+        """Whether something moved since the previous call. The first call only takes a baseline."""
+        now = self._signature()
+        before, self._last = self._last, now
+        return before is not None and before != now
+
+    def _signature(self) -> tuple:
+        paths = state.InstancePaths(self._organizer)
+        game_dir = Path(self._game.dataDirectory().absolutePath())
+        library = saves.library_root(self._game.gameDirectory().absolutePath())
+        try:
+            appmanifest = steam.read_appmanifest(library) if library is not None else {}
+        except (OSError, ValueError):
+            appmanifest = {}
+        manifest_keys = tuple(appmanifest.get(key) for key in self._APPMANIFEST_KEYS)
+        options = tuple(environment.steam_launch_options(saves.steam_install_root()))
+        return (manifest_keys, options, self._folder(paths, game_dir, environment.steam_buildid(library)))
+
+    def _folder(self, paths: state.InstancePaths, game_dir: Path, buildid: str | None) -> tuple:
+        try:
+            vanilla = inventory.read(paths)
+            manifest = deploy.read_manifest(paths)
+        except state.StateError:
+            return ("damaged",)
+        if vanilla is None or buildid is None:
+            return ("unrecorded",)
+        desired = inventory.desired_shas(deploy.desired(self._organizer))
+        with archives.hash_cache(paths) as cache:
+            if inventory.build_changed(vanilla, buildid):
+                found = inventory.diff(game_dir, manifest, vanilla, desired=desired, cache=cache)
+                return ("update", tuple(found.suspects()), tuple(found.symlinks), tuple(found.unreadable))
+            found = inventory.check(game_dir, manifest, vanilla, buildid, desired=desired, cache=cache)
+            return ("same", found.signature())
