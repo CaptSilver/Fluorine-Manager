@@ -888,5 +888,465 @@ class ExportDocumentTests(World):
         self.assertEqual(doc["codecs"], {"zstd": 7})
 
 
+class VerifyCase(World):
+    """Two nexus mods installed and exported; each test breaks one thing and verifies."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.pack = self.install(
+            "pack", {"regulation.bin": b"one", "msg/a.dcx": b"two"}, nexus_id=1928, file_id=49812, version="26.2",
+            archive_files={"Wrapper/regulation.bin": b"one", "Wrapper/msg/a.dcx": b"two"},
+        )
+        self.fov = self.install(
+            "adjust-the-fov", {"mods/AdjustTheFov.dll": b"MZ", "mods/AdjustTheFov/config.ini": b"fov = 1\n"},
+            nexus_id=325, file_id=1234, version="2.0.1",
+        )
+        self.doc = self.export()
+
+    def verify(self, doc=None, **changes) -> list:
+        options = {
+            "live": LIVE, "cache": self.cache, "codecs": lambda: CODECS,
+            "host_status": lambda: me3_host.Status(me3_host.OK, "me3 0.13.0"),
+        }
+        options.update(changes)
+        return listfile.verify(self.organizer, self.doc if doc is None else doc, **options)
+
+    def kinds_of(self, findings) -> list[str]:
+        return [item.kind for item in findings]
+
+    def found(self, kind: str, **changes) -> list:
+        return [item for item in self.verify(**changes) if item.kind == kind]
+
+    def listed(self, name: str) -> dict:
+        return self.entry(self.doc, name)
+
+
+class VerifyRoundTripTests(VerifyCase):
+    def test_a_setup_verifies_clean_against_its_own_export(self) -> None:
+        self.assertEqual(self.verify(), [])
+
+    def test_a_local_mod_is_verified_by_content_and_reported_as_unpinned(self) -> None:
+        self.modlist.add("mine", files={"regulation.bin": b"hand made"})
+        self.doc = self.export()
+        findings = self.verify()
+        self.assertEqual(self.kinds_of(findings), ["unpinned_local"])
+        self.assertFalse(findings[0].blocking)
+        self.assertEqual(listfile.blocking(findings), [])
+
+    def test_a_disabled_local_mod_is_not_reported_as_unpinned(self) -> None:
+        self.modlist.add("mine", files={"regulation.bin": b"x"}, enabled=False)
+        self.doc = self.export()
+        self.assertEqual(self.verify(), [])
+
+    def test_a_list_that_is_not_a_list_raises_the_format_error(self) -> None:
+        with self.assertRaises(listfile.ListFormatError):
+            self.verify({"format": 2})
+
+    def test_a_verify_changes_nothing_in_the_instance(self) -> None:
+        before = sorted(
+            (str(p.relative_to(self.tmp)), p.stat().st_mtime_ns) for p in self.organizer.base.rglob("*") if p.is_file()
+        )
+        self.verify()
+        after = sorted(
+            (str(p.relative_to(self.tmp)), p.stat().st_mtime_ns) for p in self.organizer.base.rglob("*") if p.is_file()
+        )
+        self.assertEqual(before, after)
+
+
+class VerifyModTests(VerifyCase):
+    def test_a_listed_mod_that_is_not_installed_is_missing(self) -> None:
+        self.modlist.removeMod(self.pack)
+        found = self.found("missing")
+        self.assertEqual([(item.subject, item.blocking) for item in found], [("pack", True)])
+
+    def test_a_missing_native_whose_dll_path_leaves_the_folder_is_unsafe_before_anything_is_installed(self) -> None:
+        self.listed("adjust-the-fov")["native_dll"] = "../Other Mod/x.dll"
+        self.modlist.removeMod(self.fov)
+        self.assertEqual(
+            sorted(item.kind for item in self.verify() if item.subject == "adjust-the-fov"),
+            ["missing", "native_dll_unsafe"],
+        )
+        self.listed("adjust-the-fov")["native_dll"] = "/abs/x.dll"
+        self.assertIn("native_dll_unsafe", self.kinds_of(self.verify()))
+
+    def test_a_missing_manual_mod_names_the_files_it_has_to_end_up_with(self) -> None:
+        self.install(
+            "fomod", {"Option A/regulation.bin": b"1"}, nexus_id=9, version="1",
+            archive_files={"fomod/x.xml": b"x", "Option A/regulation.bin": b"1"},
+        )
+        self.doc = self.export()
+        self.modlist.removeMod(self.modlist.getMod("fomod"))
+        text = self.found("missing")[0].text
+        self.assertIn("Option A/regulation.bin", text)
+
+    def test_another_archive_for_the_same_name_is_a_hash_mismatch(self) -> None:
+        support.write_zip(self.organizer.downloads / "pack.zip", {"other.bin": b"different"})
+        found = self.found("hash_mismatch")
+        self.assertEqual([item.subject for item in found], ["pack"])
+
+    def test_another_version_is_a_version_mismatch(self) -> None:
+        self.pack._version = "27.0"
+        self.assertEqual([item.subject for item in self.found("version_mismatch")], ["pack"])
+
+    def test_a_github_tag_that_differs_is_a_version_mismatch(self) -> None:
+        self.install("gh", {"mods/g.dll": b"MZ"}, settings={"github_repo_id": 5, "github_tag": "v1"})
+        self.doc = self.export()
+        self.modlist.getMod("gh").setPluginSetting(kinds.PLUGIN, "github_tag", "v2")
+        self.assertEqual([item.subject for item in self.found("version_mismatch")], ["gh"])
+
+    def test_two_different_file_ids_mismatch_but_a_missing_one_on_either_side_does_not(self) -> None:
+        self.listed("pack")["file_id"] = 5
+        self.assertEqual([item.subject for item in self.found("file_id_mismatch")], ["pack"])
+        self.listed("pack")["file_id"] = None
+        self.assertEqual(self.found("file_id_mismatch"), [])
+        self.listed("pack")["file_id"] = 49812
+        Path(str(self.organizer.downloads / "pack.zip") + ".meta").unlink()
+        self.assertEqual(self.found("file_id_mismatch"), [])
+
+    def test_the_archive_of_an_installed_mod_being_gone_is_archive_missing(self) -> None:
+        (self.organizer.downloads / "pack.zip").unlink()
+        found = self.found("archive_missing")
+        self.assertEqual([(item.subject, item.blocking) for item in found], [("pack", True)])
+        self.assertEqual(self.found("hash_mismatch"), [])
+
+    def test_a_manual_entry_is_not_held_to_an_archive(self) -> None:
+        self.install(
+            "fomod", {"Option A/regulation.bin": b"1"}, nexus_id=9, version="1",
+            archive_files={"fomod/x.xml": b"x", "Option A/regulation.bin": b"1"},
+        )
+        self.doc = self.export()
+        (self.organizer.downloads / "fomod.zip").unlink()
+        self.assertEqual(self.verify(), [])
+
+    def test_an_edited_file_is_a_content_mismatch(self) -> None:
+        (Path(self.pack.absolutePath()) / "regulation.bin").write_bytes(b"EDITED")
+        self.assertEqual([item.subject for item in self.found("content_mismatch")], ["pack"])
+
+    def test_a_hidden_file_is_a_content_mismatch(self) -> None:
+        folder = Path(self.pack.absolutePath())
+        (folder / "msg/a.dcx").rename(folder / "msg/a.dcx.mohidden")
+        self.assertEqual([item.subject for item in self.found("content_mismatch")], ["pack"])
+
+    def test_a_manual_entry_names_the_files_that_differ_from_the_list(self) -> None:
+        mod = self.install(
+            "fomod", {"Option A/regulation.bin": b"1"}, nexus_id=9, version="1",
+            archive_files={"fomod/x.xml": b"x", "Option A/regulation.bin": b"1", "Option B/regulation.bin": b"2"},
+        )
+        self.doc = self.export()
+        folder = Path(mod.absolutePath())
+        (folder / "Option B").mkdir()
+        (folder / "Option B/regulation.bin").write_bytes(b"2")
+        (folder / "Option A/regulation.bin").unlink()
+        text = self.found("content_mismatch")[0].text
+        self.assertIn("Option B/regulation.bin", text)
+        self.assertIn("Option A/regulation.bin", text)
+
+    def test_a_log_a_native_wrote_after_install_is_not_a_difference(self) -> None:
+        folder = Path(self.fov.absolutePath())
+        (folder / "mods/AdjustTheFov/log.txt").write_text("started 2026-01-01")
+        (folder / "logs").mkdir()
+        (folder / "logs/AdjustTheFov_2026-01-01.log").write_text("dated")
+        self.assertEqual(self.verify(), [])
+        (folder / "mods/AdjustTheFov/log.txt").write_text("started 2026-02-02")
+        self.assertEqual(self.verify(), [])
+
+    def test_an_edited_config_of_a_native_is_a_content_mismatch_naming_it(self) -> None:
+        (Path(self.fov.absolutePath()) / "mods/AdjustTheFov/config.ini").write_text("fov = 9\n")
+        found = self.found("content_mismatch")
+        self.assertEqual([item.subject for item in found], ["adjust-the-fov"])
+
+    def test_a_config_a_native_generated_counts_when_partners_differ_and_not_when_they_agree(self) -> None:
+        folder = Path(self.fov.absolutePath())
+        (folder / "mods/AdjustTheFov/damage_competition.ini").write_text("damage = 1\n")
+        mine = self.export()
+        self.assertEqual(self.verify(mine), [])
+        (folder / "mods/AdjustTheFov/damage_competition.ini").write_text("damage = 2\n")
+        self.assertEqual([item.subject for item in self.found("content_mismatch")] , ["adjust-the-fov"])
+        (folder / "mods/AdjustTheFov/damage_competition.ini").write_text("damage = 1\n")
+        self.assertEqual(self.verify(mine), [])
+
+    def test_a_native_file_from_the_install_list_going_missing_is_a_content_mismatch(self) -> None:
+        (Path(self.fov.absolutePath()) / "mods/AdjustTheFov/config.ini").unlink()
+        self.assertIn("adjust-the-fov", [item.subject for item in self.verify() if item.kind == "content_mismatch"])
+
+    def test_a_file_that_cannot_be_read_is_a_finding_not_a_crash(self) -> None:
+        real = state.cached_sha256
+
+        def refuse(cache, path):
+            if str(path).endswith("a.dcx"):
+                raise PermissionError("denied")
+            return real(cache, path)
+
+        with mock.patch.object(state, "cached_sha256", refuse):
+            found = self.found("content_mismatch")
+        self.assertEqual([item.subject for item in found], ["pack"])
+        self.assertIn("cannot read", found[0].text)
+
+    def test_a_folder_that_cannot_be_listed_is_a_content_mismatch_and_not_a_clean_pass(self) -> None:
+        def unlistable(top, onerror=None):
+            if onerror is not None:
+                onerror(PermissionError(13, "Permission denied", str(top)))
+            return iter(())
+
+        with mock.patch.object(listfile.treewalk.os, "walk", unlistable):
+            found = self.found("content_mismatch")
+        self.assertEqual(sorted(item.subject for item in found), ["adjust-the-fov", "pack"])
+        self.assertIn("cannot read", found[0].text)
+
+    def test_a_mod_with_rules_is_verified_through_its_view(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [{"mod": "pack", "paths": ["msg/a.dcx"]}], "renames": []},
+        )
+        self.doc = self.export()
+        self.assertEqual(self.verify(), [])
+        (Path(self.pack.absolutePath()) / "msg/a.dcx").write_bytes(b"edited but pruned away")
+        self.assertEqual(self.verify(), [])
+
+    def test_another_kind_is_a_kind_mismatch(self) -> None:
+        self.listed("pack")["kind"] = "ersc"
+        self.assertEqual([item.subject for item in self.found("kind_mismatch")], ["pack"])
+
+    def test_another_native_dll_is_a_mismatch_and_so_is_a_list_with_none(self) -> None:
+        self.listed("adjust-the-fov")["native_dll"] = "mods/Other.dll"
+        folder = Path(self.fov.absolutePath())
+        (folder / "mods/Other.dll").write_bytes(b"MZ")
+        self.assertEqual([item.subject for item in self.found("native_dll_mismatch")], ["adjust-the-fov"])
+
+    def test_deploy_config_is_compared_as_sorted_lists_so_order_never_counts(self) -> None:
+        folder = Path(self.fov.absolutePath())
+        (folder / "mods/AdjustTheFov/b.ini").write_text("b")
+        self.fov.setPluginSetting(
+            kinds.PLUGIN, "deploy_config",
+            json.dumps(["mods/AdjustTheFov/config.ini", "mods/AdjustTheFov/b.ini"]),
+        )
+        self.listed("adjust-the-fov")["deploy_config"] = ["mods/AdjustTheFov/b.ini", "mods/AdjustTheFov/config.ini"]
+        self.assertEqual(self.found("deploy_config_mismatch"), [])
+        self.listed("adjust-the-fov")["deploy_config"] = []
+        self.assertEqual([item.subject for item in self.found("deploy_config_mismatch")], ["adjust-the-fov"])
+
+    def test_a_damaged_recorded_deploy_config_is_a_mismatch_too(self) -> None:
+        self.fov.setPluginSetting(kinds.PLUGIN, "deploy_config", "{nope")
+        found = self.found("deploy_config_mismatch")
+        self.assertEqual([item.subject for item in found], ["adjust-the-fov"])
+        self.assertIn("cannot be read", found[0].text)
+
+    def test_a_list_value_that_leaves_the_mod_folder_is_unsafe_before_it_is_a_mismatch(self) -> None:
+        for bad in ("../Other Mod/x.dll", "/etc/x.dll", "mods/NotThere.dll"):
+            with self.subTest(dll=bad):
+                self.listed("adjust-the-fov")["native_dll"] = bad
+                findings = self.verify()
+                self.assertIn("native_dll_unsafe", self.kinds_of(findings))
+                self.assertNotIn("native_dll_mismatch", self.kinds_of(findings))
+
+    def test_a_list_value_that_resolves_through_a_symlink_out_of_the_folder_is_unsafe(self) -> None:
+        outside = self.tmp / "outside.dll"
+        outside.write_bytes(b"MZ")
+        (Path(self.fov.absolutePath()) / "mods/Link.dll").symlink_to(outside)
+        self.listed("adjust-the-fov")["native_dll"] = "mods/Link.dll"
+        self.assertIn("native_dll_unsafe", self.kinds_of(self.verify()))
+
+    def test_a_recorded_value_that_is_unsafe_is_reported_even_when_the_list_agrees_with_it(self) -> None:
+        self.fov.setPluginSetting(kinds.PLUGIN, "native_dll", "../escape.dll")
+        self.listed("adjust-the-fov")["native_dll"] = "../escape.dll"
+        found = self.found("native_dll_unsafe")
+        self.assertEqual([item.subject for item in found], ["adjust-the-fov"])
+
+    def test_a_subdir_that_differs_is_a_mismatch(self) -> None:
+        self.listed("pack")["subdir"] = "Files/mod"
+        self.assertEqual([item.subject for item in self.found("subdir_mismatch")], ["pack"])
+
+    def test_a_mod_enabled_where_the_list_says_disabled_is_a_mismatch(self) -> None:
+        self.listed("pack")["enabled"] = False
+        self.assertEqual([item.subject for item in self.found("enabled_mismatch")], ["pack"])
+
+
+class VerifyListTests(VerifyCase):
+    def test_a_different_order_is_reported_at_the_first_divergence(self) -> None:
+        self.modlist.setPriority("pack", 1)
+        found = self.found("order_mismatch")
+        self.assertEqual(len(found), 1)
+        self.assertIn("adjust-the-fov", found[0].text)
+
+    def test_an_unlisted_mod_in_between_is_not_a_difference(self) -> None:
+        self.modlist.add("extra", enabled=False)
+        self.modlist.setPriority("extra", 1)
+        self.assertEqual(self.found("order_mismatch"), [])
+
+    def test_an_enabled_mod_the_list_does_not_name_is_extra_but_a_disabled_one_is_not(self) -> None:
+        self.modlist.add("unlisted", files={"mods/u.dll": b"MZ"})
+        self.modlist.add("parked", enabled=False)
+        found = self.found("extra_enabled")
+        self.assertEqual([item.subject for item in found], ["unlisted"])
+        self.assertTrue(found[0].blocking)
+
+    def test_the_generated_mod_is_never_extra(self) -> None:
+        self.modlist.add(generated.NAME)
+        self.assertEqual(self.found("extra_enabled"), [])
+
+    def test_rules_that_differ_say_which_table(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [{"mod": "pack", "paths": ["x"]}], "renames": []},
+        )
+        found = self.found("rules_differ")
+        self.assertEqual(len(found), 1)
+        self.assertIn("prunes", found[0].text)
+
+    def test_vanilla_sources_are_part_of_the_rules(self) -> None:
+        source = {"archive": "a.zip", "sha256": SHA_A, "source": "nexus", "nexus_id": 1, "file_id": None, "version": "v1"}
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {"anc": source}}
+        )
+        self.assertIn("vanilla_sources", self.found("rules_differ")[0].text)
+
+    def test_the_same_rules_with_their_keys_in_another_order_are_the_same_rules(self) -> None:
+        rule = {"path": "regulation.bin", "strategy": "param", "mods": ["pack"], "prefer": "pack"}
+        state.write_profile_rules(self.organizer.profilePath(), {"merges": [rule], "prunes": [], "renames": []})
+        self.doc = self.export()
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"renames": [], "prunes": [], "merges": [dict(reversed(list(rule.items())))]},
+        )
+        self.assertEqual(self.found("rules_differ"), [])
+
+    def test_another_seed_is_reported(self) -> None:
+        self.assertEqual(len(self.found("seed_differs")), 0)
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "randomizer_seed": "other"}
+        )
+        self.assertEqual(len(self.found("seed_differs")), 1)
+
+    def test_each_game_build_field_that_differs_is_named(self) -> None:
+        other = gamebuild.BuildId(
+            exe="2.7.2.0", app="1.17.1", regulation="11711000", steam_buildid="1", regulation_sha=SHA_A
+        )
+        found = self.found("game_build_differs", live=other)
+        self.assertEqual(len(found), 1)
+        self.assertIn("exe", found[0].text)
+        self.assertIn("regulation_sha", found[0].text)
+        self.assertNotIn("app", found[0].text.replace("apply", ""))
+
+    def test_the_steam_build_id_is_not_compared(self) -> None:
+        other = LIVE._replace(steam_buildid="999")
+        self.assertEqual(self.found("game_build_differs", live=other), [])
+
+    def test_other_codecs_are_reported_before_any_output(self) -> None:
+        self.write_outputs({"regulation.bin": SHA_A})
+        findings = self.verify(codecs=lambda: dict(CODECS, zstd=10600))
+        order = self.kinds_of(findings)
+        self.assertIn("codecs_differ", order)
+        self.assertLess(order.index("codecs_differ"), order.index("generated_output_mismatch"))
+
+    def test_codecs_that_cannot_be_read_are_a_finding(self) -> None:
+        def broken():
+            raise errors.ErmError("libzstd is missing")
+
+        found = self.found("codecs_differ", codecs=broken)
+        self.assertEqual(len(found), 1)
+        self.assertIn("libzstd is missing", found[0].text)
+
+    def test_a_list_made_with_another_me3_pin_is_reported(self) -> None:
+        self.doc["me3_version"] = "0.14.0"
+        self.assertEqual(len(self.found("me3_differs")), 1)
+        self.doc["me3_version"] = me3_host.PIN.version
+        self.doc["me3_sha256"] = SHA_A
+        self.assertEqual(len(self.found("me3_differs")), 1)
+
+    def test_an_installed_me3_that_is_not_the_pin_is_reported_and_a_missing_one_is_not(self) -> None:
+        for kind in (me3_host.OFF_PIN, me3_host.WINDOWS_BIN_MISSING, me3_host.WINDOWS_BIN_MISMATCH):
+            with self.subTest(kind=kind):
+                found = self.found("me3_differs", host_status=lambda kind=kind: me3_host.Status(kind))
+                self.assertEqual(len(found), 1)
+        self.assertEqual(self.found("me3_differs", host_status=lambda: me3_host.Status(me3_host.MISSING)), [])
+
+    def test_the_default_host_check_reads_the_instance_through_me3_host(self) -> None:
+        with mock.patch.object(me3_host, "status", return_value=me3_host.Status(me3_host.OFF_PIN)) as status:
+            findings = listfile.verify(self.organizer, self.doc, live=LIVE, cache=self.cache, codecs=lambda: CODECS)
+        self.assertEqual(status.call_args.args[0].root, self.paths.root)
+        self.assertIn("me3_differs", self.kinds_of(findings))
+
+    def test_a_merge_that_produced_other_bytes_is_a_generated_output_mismatch(self) -> None:
+        self.write_outputs({"regulation.bin": SHA_A})
+        found = self.found("generated_output_mismatch")
+        self.assertEqual([item.subject for item in found], ["regulation.bin"])
+
+    def test_the_ersc_dll_copy_is_an_output_like_any_other(self) -> None:
+        self.write_outputs({"regulation.bin": SHA_C, "SeamlessCoop/ersc.dll": SHA_A})
+        self.doc = self.export()
+        self.write_outputs({"regulation.bin": SHA_C, "SeamlessCoop/ersc.dll": SHA_B})
+        self.assertEqual([item.subject for item in self.found("generated_output_mismatch")], ["SeamlessCoop/ersc.dll"])
+
+    def test_an_output_the_list_lacks_and_one_this_setup_lacks_are_both_differences(self) -> None:
+        self.write_outputs({"regulation.bin": SHA_C, "msg/engus/item.msgbnd.dcx": SHA_A})
+        self.assertEqual([item.subject for item in self.found("generated_output_mismatch")], ["msg/engus/item.msgbnd.dcx"])
+        self.write_outputs({})
+        self.assertEqual([item.subject for item in self.found("generated_output_mismatch")], ["regulation.bin"])
+
+    def test_outputs_of_a_generated_mod_that_was_never_built_are_one_finding(self) -> None:
+        self.paths.generated_state.unlink()
+        found = self.found("generated_output_mismatch")
+        self.assertEqual(len(found), 1)
+        self.assertIn("Rebuild merges", found[0].text)
+
+    def test_outputs_can_be_left_out_for_a_check_that_may_not_build(self) -> None:
+        self.write_outputs({"regulation.bin": SHA_A})
+        self.assertEqual(self.found("generated_output_mismatch", check_outputs=False), [])
+
+    def test_a_vanilla_source_archive_that_is_not_in_downloads_is_archive_missing(self) -> None:
+        source = {"archive": "a.zip", "sha256": SHA_A, "source": "nexus", "nexus_id": 1, "file_id": None, "version": "v1"}
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {"anc": source}}
+        )
+        self.doc = self.export()
+        found = self.found("archive_missing")
+        self.assertEqual([item.subject for item in found], ["vanilla source anc"])
+
+    def test_a_vanilla_source_archive_held_only_under_another_name_is_archive_missing_and_names_the_copy(self) -> None:
+        data = b"ancestor"
+        sha = hashlib.sha256(data).hexdigest()
+        source = {"archive": "a.zip", "sha256": sha, "source": "nexus", "nexus_id": 1, "file_id": None, "version": "v1"}
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {"anc": source}}
+        )
+        self.doc = self.export()
+        (self.organizer.downloads / "3_a.zip").write_bytes(data)
+        found = self.found("archive_missing")
+        self.assertEqual([item.subject for item in found], ["vanilla source anc"])
+        self.assertIn("3_a.zip", found[0].text)
+
+    def test_a_vanilla_source_archive_under_its_recorded_name_with_the_pinned_bytes_is_fine(self) -> None:
+        data = b"ancestor"
+        sha = hashlib.sha256(data).hexdigest()
+        source = {"archive": "a.zip", "sha256": sha, "source": "nexus", "nexus_id": 1, "file_id": None, "version": "v1"}
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {"anc": source}}
+        )
+        self.doc = self.export()
+        (self.organizer.downloads / "a.zip").write_bytes(data)
+        self.assertEqual(self.found("archive_missing"), [])
+
+    def test_a_vanilla_source_archive_under_its_recorded_name_with_other_bytes_is_archive_missing(self) -> None:
+        sha = hashlib.sha256(b"ancestor").hexdigest()
+        source = {"archive": "a.zip", "sha256": sha, "source": "nexus", "nexus_id": 1, "file_id": None, "version": "v1"}
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {"anc": source}}
+        )
+        self.doc = self.export()
+        (self.organizer.downloads / "a.zip").write_bytes(b"something else")
+        self.assertEqual([item.subject for item in self.found("archive_missing")], ["vanilla source anc"])
+
+
+class DefaultCodecsTests(VerifyCase):
+    def test_the_compression_libraries_are_looked_up_when_a_check_runs_and_not_when_the_module_loads(self) -> None:
+        with mock.patch.object(listfile.generated, "codecs", return_value=dict(CODECS, zstd=1)) as read:
+            findings = listfile.verify(
+                self.organizer, self.doc, live=LIVE, cache=self.cache,
+                host_status=lambda: me3_host.Status(me3_host.OK),
+            )
+        read.assert_called_once_with()
+        self.assertIn("codecs_differ", self.kinds_of(findings))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -639,3 +639,339 @@ def export(
     except ListFormatError as exc:
         raise ExportError(f"This setup would not import back: {exc}") from exc
     return doc
+
+
+# -- checking a setup against a list -------------------------------------------
+
+
+def _fix(kind: str, subject: str, text: str, blocking: bool = True) -> Finding:
+    return Finding(kind, subject, text, blocking)
+
+
+def _native_findings(entry: dict, mod, mod_dir: Path, installed_kind: str) -> list[Finding]:
+    """Findings about the DLL and the deployed config files of a listed native."""
+    name = entry["name"]
+    found = []
+    listed_dll = entry["native_dll"]
+    recorded = kinds.recorded_native_dll(mod)
+    unsafe = False
+    # A list from a partner is untrusted: a plain string comparison would pass
+    # "../Other Mod/x.dll" as agreeing with a recording of the same text, and
+    # me3 would load code from outside the folder the digest covers.
+    named: dict[str, list[str]] = {}
+    for label, value in (("the list", listed_dll), ("this mod's recorded value", recorded)):
+        if value is not None:
+            named.setdefault(value, []).append(label)
+    for value, labels in named.items():
+        if not kinds.native_dll_ok(mod_dir, value):
+            unsafe = True
+            found.append(
+                _fix(
+                    NATIVE_DLL_UNSAFE, name,
+                    f"{' and '.join(labels)}: {value!r} is not a file inside the mod's own folder "
+                    "(a path that leaves it, or a file that is not there).",
+                )
+            )
+    if installed_kind != kinds.NATIVE:
+        return found
+    if not unsafe and recorded != listed_dll:
+        found.append(_fix(NATIVE_DLL_MISMATCH, name, f"the DLL is {recorded!r} here and {listed_dll!r} in the list."))
+    here = kinds.recorded_deploy_config(mod)
+    if here is None:
+        found.append(_fix(DEPLOY_CONFIG_MISMATCH, name, "the recorded config files cannot be read here."))
+    elif sorted(here) != sorted(entry["deploy_config"]):
+        found.append(
+            _fix(
+                DEPLOY_CONFIG_MISMATCH, name,
+                f"config files deployed to Game/mods/ are {sorted(here)!r} here and {sorted(entry['deploy_config'])!r} in the list.",
+            )
+        )
+    return found
+
+
+def _archive_findings(organizer, entry: dict, mod, cache: dict) -> list[Finding]:
+    """Hash, version and file id of the archive the mod was installed from (nexus and github entries)."""
+    name = entry["name"]
+    archive = archives.archive_path(organizer, mod)
+    if archive is None or not os.path.isfile(archive):
+        return [
+            _fix(
+                ARCHIVE_MISSING, name,
+                "the archive it was installed from is gone, so it cannot be checked against the list. "
+                "Download it again or reinstall the mod.",
+            )
+        ]
+    found = []
+    try:
+        sha = state.cached_sha256(cache, archive)
+    except OSError as exc:
+        return [_fix(HASH_MISMATCH, name, f"cannot read {archive.name} ({exc}).")]
+    if entry["sha256"] is not None and sha != entry["sha256"]:
+        found.append(_fix(HASH_MISMATCH, name, f"{archive.name} is not the archive the list pins."))
+    if entry["source"] == NEXUS:
+        if entry["version"] is not None and version_text(mod) != entry["version"]:
+            found.append(
+                _fix(VERSION_MISMATCH, name, f"version {version_text(mod) or 'unknown'} here, {entry['version']} in the list.")
+            )
+        sidecar = archives.meta_sidecar(archive)
+        here = sidecar["file_id"] if sidecar else None
+        # A missing id on either side is not a difference: the sha256 is what proves the file.
+        if here is not None and entry["file_id"] is not None and here != entry["file_id"]:
+            found.append(_fix(FILE_ID_MISMATCH, name, f"Nexus file {here} here, {entry['file_id']} in the list."))
+    elif entry["tag"] is not None and _setting_text(mod, kinds.KEY_GITHUB_TAG) != entry["tag"]:
+        found.append(
+            _fix(
+                VERSION_MISMATCH, name,
+                f"release {_setting_text(mod, kinds.KEY_GITHUB_TAG) or 'unknown'} here, {entry['tag']} in the list.",
+            )
+        )
+    return found
+
+
+def _content_finding(entry: dict, mod, rules: dict, cache: dict) -> Finding | None:
+    name = entry["name"]
+    mod_dir = Path(mod.absolutePath())
+    try:
+        view = None
+        if entry["kind"] == kinds.PACKAGE and views.has_rules(name, rules["prunes"], rules["renames"]):
+            view = views.view_files(name, mod_dir, rules["prunes"], rules["renames"])
+        install_files = kinds.recorded_install_files(mod) if entry["kind"] == kinds.NATIVE else None
+        digest = content_sha256(mod_dir, entry["kind"], install_files=install_files, view=view, cache=cache)
+    except ErmError as exc:
+        return _fix(CONTENT_MISMATCH, name, f"its files cannot be compared: {exc}")
+    except OSError as exc:
+        return _fix(CONTENT_MISMATCH, name, f"cannot read its files ({exc}).")
+    if digest == entry["content_sha256"]:
+        return None
+    listed = entry["installed_files"]
+    if entry["manual"] and listed is not None:
+        here = _visible_files(mod_dir)
+        extra, absent = sorted(set(here) - set(listed)), sorted(set(listed) - set(here))
+        parts = []
+        if extra:
+            parts.append("not in the list: " + ", ".join(extra))
+        if absent:
+            parts.append("missing: " + ", ".join(absent))
+        if parts:
+            return _fix(CONTENT_MISMATCH, name, "the files differ from the list (" + "; ".join(parts) + ").")
+    return _fix(
+        CONTENT_MISMATCH, name,
+        "the files differ from the list: a hand edit, another install choice or another archive.",
+    )
+
+
+def _mod_findings(organizer, entry: dict, mod, enabled: bool, rules: dict, cache: dict) -> list[Finding]:
+    name = entry["name"]
+    mod_dir = Path(mod.absolutePath())
+    installed_kind = kinds.mod_kind(mod)
+    found = []
+    if entry["kind"] == kinds.NATIVE:
+        found += _native_findings(entry, mod, mod_dir, installed_kind)
+    if installed_kind != entry["kind"]:
+        found.append(_fix(KIND_MISMATCH, name, f"{installed_kind} here, {entry['kind']} in the list."))
+    if _setting_text(mod, kinds.KEY_INSTALL_SUBDIR) != entry["subdir"]:
+        found.append(_fix(SUBDIR_MISMATCH, name, "it was installed from another folder of the archive than the list's."))
+    if enabled != entry["enabled"]:
+        found.append(
+            _fix(ENABLED_MISMATCH, name, f"{'enabled' if enabled else 'disabled'} here, {'enabled' if entry['enabled'] else 'disabled'} in the list.")
+        )
+    if entry["source"] != LOCAL and not entry["manual"]:
+        found += _archive_findings(organizer, entry, mod, cache)
+    content = _content_finding(entry, mod, rules, cache)
+    if content is not None:
+        found.append(content)
+    return found
+
+
+def _missing_finding(entry: dict) -> Finding:
+    text = "not installed."
+    if entry["manual"] and entry["installed_files"] is not None:
+        text += " It was installed by hand from the archive; install it so the folder holds exactly " + ", ".join(
+            entry["installed_files"]
+        ) + "."
+    elif entry["source"] == LOCAL:
+        text += " It is not downloadable; get it from the person who made the list."
+    return _fix(MISSING, entry["name"], text)
+
+
+def _order_finding(doc: dict, installed: dict) -> list[Finding]:
+    """The first place the installed mods the list names are in another order than the list's."""
+    listed = [entry["name"] for entry in doc["mods"] if entry["name"] in installed]
+    here = [name for name in installed if name in set(listed)]
+    for index, (mine, theirs) in enumerate(zip(here, listed)):
+        if mine != theirs:
+            return [
+                _fix(
+                    ORDER_MISMATCH, "",
+                    f"position {index + 1} among the listed mods is {mine!r} here and {theirs!r} in the list.",
+                )
+            ]
+    return []
+
+
+def _canonical(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _rules_findings(rules: dict, doc: dict) -> list[Finding]:
+    found = []
+    differing = []
+    for table in ("merges", "prunes", "renames"):
+        if _canonical(rules[table]) != _canonical(doc["rules"][table]):
+            differing.append(table)
+    try:
+        here = {key: _vanilla_source(raw, key) for key, raw in rules["vanilla_sources"].items()}
+    except ListFormatError:
+        here = None
+    if here is None or _canonical(here) != _canonical(doc["rules"]["vanilla_sources"]):
+        differing.append("vanilla_sources")
+    if differing:
+        found.append(_fix(RULES_DIFFER, "", "the profile's " + ", ".join(differing) + " differ from the list's."))
+    if rules["randomizer_seed"] != doc["randomizer_seed"]:
+        found.append(
+            _fix(SEED_DIFFERS, "", f"randomizer seed {rules['randomizer_seed']!r} here, {doc['randomizer_seed']!r} in the list.")
+        )
+    return found
+
+
+def _build_finding(doc: dict, live) -> list[Finding]:
+    here = live._asdict()
+    differing = [field for field in _GAME_BUILD_FIELDS if here[field] != doc["game_build"][field]]
+    if not differing:
+        return []
+    detail = ", ".join(f"{field} {here[field]!r} here and {doc['game_build'][field]!r} in the list" for field in differing)
+    return [_fix(GAME_BUILD_DIFFERS, "", f"the game build differs: {detail}. Everyone has to be on the same build.")]
+
+
+def _codecs_finding(doc: dict, codecs: Callable[[], dict]) -> list[Finding]:
+    try:
+        here = json.loads(json.dumps(codecs()))
+    except (ErmError, OSError) as exc:
+        return [_fix(CODECS_DIFFER, "", f"the compression libraries cannot be read here: {exc}")]
+    if _canonical(here) != _canonical(doc["codecs"]):
+        return [
+            _fix(
+                CODECS_DIFFER, "",
+                "a different compression library: the merged regulation.bin would differ byte for byte "
+                f"({_canonical(here)} here, {_canonical(doc['codecs'])} in the list).",
+            )
+        ]
+    return []
+
+
+_OFF_PIN_HOSTS = (me3_host.OFF_PIN, me3_host.WINDOWS_BIN_MISSING, me3_host.WINDOWS_BIN_MISMATCH)
+
+
+def _me3_findings(doc: dict, host_status: Callable[[], object]) -> list[Finding]:
+    found = []
+    pin = me3_host.PIN
+    if (doc["me3_version"], doc["me3_sha256"]) != (pin.version, pin.archive_sha256):
+        found.append(
+            _fix(
+                ME3_DIFFERS, "",
+                f"the list was made with me3 {doc['me3_version']} ({doc['me3_sha256'][:12]}); this plugin pins "
+                f"{pin.version} ({pin.archive_sha256[:12]}).",
+            )
+        )
+    status = host_status()
+    if status.kind in _OFF_PIN_HOSTS:
+        found.append(_fix(ME3_DIFFERS, "", f"the installed me3 is not the pinned release ({status.kind})."))
+    return found
+
+
+def _output_findings(paths: state.InstancePaths, doc: dict) -> list[Finding]:
+    try:
+        here = _outputs(paths)
+    except ExportError:
+        return [
+            _fix(
+                GENERATED_OUTPUT_MISMATCH, "",
+                'the generated mod has not been built here yet. Run Tools > "Elden Ring: Rebuild merges…".',
+            )
+        ]
+    found = []
+    for rel in sorted(set(here) | set(doc["outputs"])):
+        mine, theirs = here.get(rel), doc["outputs"].get(rel)
+        if mine != theirs:
+            found.append(
+                _fix(
+                    GENERATED_OUTPUT_MISMATCH, rel,
+                    f"the merge produced {mine[:12] if mine else 'nothing'} here and {theirs[:12] if theirs else 'nothing'} in the list.",
+                )
+            )
+    return found
+
+
+def _vanilla_findings(organizer, doc: dict, cache: dict) -> list[Finding]:
+    found = []
+    downloads = organizer.downloadsPath()
+    for key, source in doc["rules"]["vanilla_sources"].items():
+        # A merge opens downloads/<recorded name>, so that name has to hold the pinned bytes; a copy under
+        # another name does not help a Rebuild. Only the one file is hashed unless it is missing or wrong.
+        named = os.path.join(downloads, source["archive"])
+        if os.path.isfile(named) and state.cached_sha256(cache, named) == source["sha256"]:
+            continue
+        text = (
+            f"{source['archive']} (the unmodified file a merge compares against) is not in the downloads "
+            "folder under that name with the pinned bytes, so a Rebuild would fail and the merge cannot be proven the same."
+        )
+        elsewhere = archives.find_by_sha(downloads, source["sha256"], cache)
+        if elsewhere is not None:
+            text += f" The same bytes are in {os.path.basename(elsewhere)}; Import stages them under the recorded name."
+        found.append(_fix(ARCHIVE_MISSING, f"vanilla source {key}", text))
+    return found
+
+
+def verify(
+    organizer, doc: dict, *, live, cache: dict, codecs: Callable[[], dict] | None = None,
+    host_status: Callable[[], object] | None = None, check_outputs: bool = True,
+) -> list[Finding]:
+    """Everything that differs between this setup and `doc`, blocking findings and information.
+
+    Reads and never writes: it does not build the generated mod. With
+    `check_outputs`, the merge outputs recorded in the generated state are
+    compared with the list's, so the caller has to have built them first (the
+    launch gate has just prepared; the Verify tool prepares before it asks).
+    Raises ListFormatError when `doc` is not a list.
+    """
+    doc = check_document(doc)
+    paths = state.InstancePaths(organizer)
+    rules = state.read_profile_rules(organizer.profilePath())
+    present = {name: (mod, enabled) for name, mod, enabled in mods.listed_mods(organizer, exclude=(generated.NAME,))}
+    found: list[Finding] = []
+    for entry in doc["mods"]:
+        name = entry["name"]
+        if name in present:
+            mod, enabled = present[name]
+            found += _mod_findings(organizer, entry, mod, enabled, rules, cache)
+        else:
+            found.append(_missing_finding(entry))
+            # Only the string half of the check can run before the mod is installed,
+            # and it is enough to refuse to fetch or install a mod for it.
+            if entry["kind"] == kinds.NATIVE and entry["native_dll"] is not None and not is_safe_relpath(entry["native_dll"]):
+                found.append(
+                    _fix(
+                        NATIVE_DLL_UNSAFE, name,
+                        f"the list names {entry['native_dll']!r} as the DLL, which leaves the mod's own folder.",
+                    )
+                )
+        if entry["source"] == LOCAL and entry["enabled"]:
+            found.append(
+                _fix(
+                    UNPINNED_LOCAL, name,
+                    "a local mod: its files are checked, but a partner cannot download it.", blocking=False,
+                )
+            )
+    found += _order_finding(doc, {name: None for name in present})
+    listed_names = {entry["name"] for entry in doc["mods"]}
+    for name, (_mod, enabled) in present.items():
+        if enabled and name not in listed_names:
+            found.append(_fix(EXTRA_ENABLED, name, "enabled here and not in the list."))
+    found += _rules_findings(rules, doc)
+    found += _build_finding(doc, live)
+    found += _codecs_finding(doc, codecs or generated.codecs)
+    found += _me3_findings(doc, host_status or (lambda: me3_host.status(paths)))
+    found += _vanilla_findings(organizer, doc, cache)
+    if check_outputs:
+        found += _output_findings(paths, doc)
+    return found
