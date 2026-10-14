@@ -491,6 +491,9 @@ class SaveToolsMenuCase(SaveToolsCase):
         path.write_bytes(data)
         return path
 
+    def label(self, relative: str, base: str) -> str:
+        return f"{relative}  (to {base})"
+
     def note_a_tripped_session(self) -> None:
         session.save_last_launch(self.paths, {"sentinel_tripped": {"restored": ["ER0000.sl2"], "quarantined": []}})
 
@@ -551,9 +554,6 @@ class BackupToolTests(SaveToolsMenuCase):
 
 
 class RestoreBackupToolTests(SaveToolsMenuCase):
-    def label(self, relative: str, base: str) -> str:
-        return f"{relative}  (to {base})"
-
     def test_the_chosen_backup_is_copied_back_and_what_it_replaced_is_kept(self) -> None:
         self.put_backup(f"ER0000.co2.{STAMP}-manual", b"older co-op")
         with self.menu([tools.RESTORE_BACKUP, self.label(f"ER0000.co2.{STAMP}-manual", "ER0000.co2")]):
@@ -627,6 +627,67 @@ class RestoreBackupToolTests(SaveToolsMenuCase):
         with self.menu([tools.RESTORE_BACKUP, None]):
             self.tool.display()
         self.assertEqual(SHOWN, [])
+
+
+class UnsweptSessionToolTests(SaveToolsMenuCase):
+    """A sentinel nobody has settled yet, over an ER0000.sl2 that has changed since it was taken."""
+
+    def leave_unswept(self) -> None:
+        self.sentinel["swept"] = None
+        session.save_last_launch(self.paths, {"sentinel": self.sentinel})
+
+    def test_the_backup_of_steams_save_is_named_for_the_session(self) -> None:
+        self.leave_unswept()
+        with self.menu(tools.BACKUP):
+            self.tool.display()
+        by_base = {b.base: b for b in saves.restorable_backups(self.paths.save_backups)}
+        self.assertTrue(by_base["ER0000.sl2"].modded_session)
+        self.assertEqual(by_base["ER0000.co2"].label, "manual")
+        self.assertIn("modded-session", SHOWN[-1][2])
+
+    def test_nothing_is_put_into_steams_save(self) -> None:
+        self.leave_unswept()
+        name = f"ER0000.sl2.{STAMP}-manual"
+        self.put_backup(name, b"an older vanilla save")
+        with self.menu([tools.RESTORE_BACKUP, self.label(name, "ER0000.sl2")]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("not been checked", SHOWN[-1][2])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertFalse(any(p.name.endswith("-pre-restore") for p in self.paths.save_backups.iterdir()))
+
+    def test_quarantine_refuses_and_nothing_moves(self) -> None:
+        self.leave_unswept()
+        self.note_a_tripped_session_alongside()
+        with self.menu(tools.QUARANTINE):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("not been checked", SHOWN[-1][2])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertFalse((self.paths.save_backups / "quarantine").exists())
+        self.assertIn("sentinel_tripped", session.load_last_launch(self.paths))
+
+    def test_the_other_saves_can_still_be_restored(self) -> None:
+        self.leave_unswept()
+        name = f"ER0000.co2.{STAMP}-manual"
+        self.put_backup(name, b"older co-op")
+        with self.menu([tools.RESTORE_BACKUP, self.label(name, "ER0000.co2")]):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000.co2").read_bytes(), b"older co-op")
+
+    def test_an_unchanged_save_is_not_held_back(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(SL2)
+        self.leave_unswept()
+        with self.menu(tools.BACKUP):
+            self.tool.display()
+        by_base = {b.base: b for b in saves.restorable_backups(self.paths.save_backups)}
+        self.assertEqual(by_base["ER0000.sl2"].label, "manual")
+
+    def note_a_tripped_session_alongside(self) -> None:
+        session.save_last_launch(
+            self.paths,
+            {"sentinel": self.sentinel, "sentinel_tripped": {"restored": ["ER0000.sl2"], "quarantined": []}},
+        )
 
 
 class QuarantineToolTests(SaveToolsMenuCase):

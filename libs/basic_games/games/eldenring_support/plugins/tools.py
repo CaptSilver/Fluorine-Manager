@@ -137,6 +137,11 @@ def _choose(parent, title: str, text: str, labels: list[str]) -> int | None:
     return buttons.index(clicked) if clicked in buttons else None
 
 
+UNCHECKED = (
+    "ER0000.sl2 or ER0000.sl2.bak has changed since the last launch and the change has not been checked "
+    "against the snapshot yet, so it may hold what a modded session wrote. Restart Fluorine with the game "
+    "closed, or press Run, then try again."
+)
 RESTORE = "Restore the pre-session snapshot"
 KEEP = "Keep the session's save"
 GIVE_UP = "Stop restoring and leave the folder as it is"
@@ -264,7 +269,7 @@ class SaveToolsTool(EldenRingTool):
             pending = record.get("pending_restore")
             if pending and self._settle(paths, pending) != MORE:
                 return
-            self._menu(paths, record, bool(damaged))
+            self._menu(paths, record, bool(damaged), pending or self._unswept(record))
         finally:
             problems.invalidate()
 
@@ -296,8 +301,27 @@ class SaveToolsTool(EldenRingTool):
 
     # -- the rest ------------------------------------------------------------------
 
-    def _menu(self, paths: state.InstancePaths, record: dict, damaged: bool) -> None:
-        pending = record.get("pending_restore")
+    def _unswept(self, record: dict) -> dict | None:
+        """A stand-in for a pending restore while a session's save changes have not been looked at yet.
+
+        The gate settles a sentinel at startup or on the next Run, and it leaves
+        one open on purpose when the game was still up. Until it does, a changed
+        ER0000.sl2 or .bak may be what a modded session wrote, so the tools treat
+        it as they treat a pending restore. None when nothing is open or nothing
+        changed.
+        """
+        sentinel = record.get("sentinel")
+        if not isinstance(sentinel, dict) or sentinel.get("swept") is not None:
+            return None
+        try:
+            folder, _ = saves.save_files(self._organizer)
+            changed, _ = session.compare_sentinel(session.effective_baseline(sentinel, folder))
+        except Exception:
+            # An unreadable sentinel can hide a modded save as well as a damaged record can.
+            changed = list(saves.GUARDED)
+        return {"unswept": True, "changed": changed} if changed else None
+
+    def _menu(self, paths: state.InstancePaths, record: dict, damaged: bool, pending: dict | None) -> None:
         actions = {
             BACKUP: lambda: self._backup(paths, pending, damaged),
             RESTORE_BACKUP: lambda: self._restore_backup(paths, pending, damaged),
@@ -348,7 +372,10 @@ class SaveToolsTool(EldenRingTool):
             files, paths.save_backups, "manual", session.now_stamp(), session_files=wrote
         )
         named = sorted(wrote & {path.name for path in files})
-        why = "A restore may be pending" if damaged and not pending else "A restore is pending"
+        if pending and pending.get("unswept"):
+            why = "The last session's save changes have not been checked yet"
+        else:
+            why = "A restore may be pending" if damaged and not pending else "A restore is pending"
         note = (
             f"\n\n{why}, so the copy of {', '.join(named)} is named {saves.SESSION_LABEL}: "
             "it can be moved to the modded name but not restored into Steam's save."
@@ -380,6 +407,8 @@ class SaveToolsTool(EldenRingTool):
                 "The record of the last launch is damaged, so it is not known whether ER0000.sl2 and "
                 "ER0000.sl2.bak still hold what a modded session wrote. Nothing is put into Steam's save."
             )
+        if pending and pending.get("unswept") and backup.base in saves.GUARDED:
+            raise ErmError(UNCHECKED)
         if pending and backup.base in saves.GUARDED:
             raise ErmError(
                 "A restore of the pre-session snapshot is pending, so ER0000.sl2 and ER0000.sl2.bak still hold "
@@ -396,6 +425,8 @@ class SaveToolsTool(EldenRingTool):
         self._info(f"Restored {placed.destination}.{aside}")
 
     def _quarantine(self, paths: state.InstancePaths, pending: dict | None) -> None:
+        if pending and pending.get("unswept"):
+            raise ErmError(UNCHECKED)
         if pending:
             raise ErmError(
                 "A restore of the pre-session snapshot is pending, so ER0000.sl2 may hold what the session wrote. "
