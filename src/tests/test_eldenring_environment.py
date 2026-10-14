@@ -86,10 +86,21 @@ class ScanMe3ConfigTests(EnvironmentCase):
     def test_another_games_section_is_not_ours(self) -> None:
         self.assertEqual(self.scan("[game.sekiro]\nskip_logos = true\nexe = '/x'\n"), [])
 
-    def test_a_file_that_is_not_toml_is_a_warning_naming_it(self) -> None:
+    def test_a_file_this_parser_cannot_read_blocks_and_names_it(self) -> None:
         (found,) = self.scan("this is [not toml")
-        self.assertEqual((found.key, found.blocking), ("unreadable", False))
+        self.assertEqual((found.key, found.blocking), ("unreadable", True))
         self.assertIn("TOML", found.note)
+
+    def test_toml_1_1_syntax_blocks_because_me3_reads_it_and_this_parser_does_not(self) -> None:
+        for text in (
+            'steam_dir = "/x"\nt = {\n a = 1,\n}\n',
+            'steam_dir = "/x"\nt = {a = 1,}\n',
+            'steam_dir = "/x"\ne = "\\e"\n',
+            '\ufeffsteam_dir = "/x"\n',
+        ):
+            with self.subTest(text):
+                (found,) = self.scan(text)
+                self.assertEqual((found.key, found.blocking), ("unreadable", True))
 
     def test_a_link_is_read_through_and_reported_under_its_own_path(self) -> None:
         target = self.write(self.tmp / "real.toml", 'steam_dir = "/x"\n')

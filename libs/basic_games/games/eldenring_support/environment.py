@@ -73,8 +73,9 @@ def scan_me3_config(files: Iterable[Path]) -> list[ConfigFinding]:
     `steam_dir` is the one that blocks: with no --steam-dir token on the entry,
     me3 takes it from a config file and finds the game, the Proton tool and the
     compatdata prefix, with the save folder in it, from that Steam install.
-    The other keys are reported by name. A file that is not TOML is a finding
-    too: me3 would fail on it or ignore it, and the plugin cannot say which.
+    The other keys are reported by name. A file this parser cannot read blocks:
+    me3 reads TOML 1.1 and the standard library only 1.0, so what fails here
+    may still be a file me3 takes a steam_dir from.
     A link is read through, as me3 does (dotfiles managers make
     ~/.config/me3/me3.toml one). A path that is there but cannot be resolved to
     a regular file blocks, because a steam_dir behind it cannot be ruled out.
@@ -96,7 +97,9 @@ def scan_me3_config(files: Iterable[Path]) -> list[ConfigFinding]:
         try:
             data = tomllib.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-            found.append(ConfigFinding(path, "unreadable", False, f"it cannot be read as TOML: {exc}"))
+            # me3 parses TOML 1.1, which tomllib (1.0) rejects in places, so a
+            # file that fails here may still be one me3 reads a steam_dir from.
+            found.append(ConfigFinding(path, "unreadable", True, f"it cannot be read as TOML here: {exc}"))
             continue
         # The global keys sit at the top level of the file or under [options].
         options = [data, data["options"]] if isinstance(data.get("options"), dict) else [data]

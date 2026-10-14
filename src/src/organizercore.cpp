@@ -1304,6 +1304,11 @@ QString OrganizerCore::winePrefixPath() const
   return resolveWinePrefixPath(m_Settings, managedGame());
 }
 
+QString OrganizerCore::settingsFilePath() const
+{
+  return QDir::fromNativeSeparators(m_Settings.filename());
+}
+
 QString OrganizerCore::overwritePath() const
 {
   return QDir::fromNativeSeparators(m_Settings.paths().overwrite());

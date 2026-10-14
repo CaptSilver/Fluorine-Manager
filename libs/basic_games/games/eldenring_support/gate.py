@@ -42,6 +42,7 @@ SAVE_RESTORE_PENDING = "SAVE_RESTORE_PENDING"
 NATIVE_DLL_INVALID = "NATIVE_DLL_INVALID"
 ME3_INSTALL_FAILED = "ME3_INSTALL_FAILED"
 ENTRY_WRAPPER_OPTIONS = "ENTRY_WRAPPER_OPTIONS"
+ENTRY_SETTINGS_UNREADABLE = "ENTRY_SETTINGS_UNREADABLE"
 ME3_CONFIG_OVERRIDE = "ME3_CONFIG_OVERRIDE"
 ME3_CONFIG_STEAM_DIR = "ME3_CONFIG_STEAM_DIR"
 GAME_DIR_STRAYS = deploy.GAME_DIR_STRAYS
@@ -113,8 +114,8 @@ class LaunchGate:
     procs.game_running, `warn(message)` logs and `invalidate()` tells the
     problems listeners that something they report may have changed.
     `wrapper_options()` returns (title, options) for every stored me3 entry that
-    has wrapper options (qtui.stored_wrapper_options over ModOrganizer.ini
-    unless supplied): the wrapper is the one input the three-argument
+    has wrapper options (qtui.stored_wrapper_options over the instance's settings
+    file, the one organizer.settingsFilePath() names, unless supplied): the wrapper is the one input the three-argument
     onAboutToRun cannot show the gate.
     """
 
@@ -144,11 +145,7 @@ class LaunchGate:
         self._running = running
         self._warn = warn or (lambda message: None)
         self._desired = desired or (lambda: deploy.desired(self._organizer))
-        self._wrapper_options = wrapper_options or (
-            lambda: qtui.stored_wrapper_options(
-                Path(self._organizer.basePath()) / "ModOrganizer.ini", binary_real=me3_host.binary_path()
-            )
-        )
+        self._wrapper_options = wrapper_options or self._stored_wrapper_options
         # Looked up at call time, so a listener subscribed later is heard.
         self._invalidate = invalidate or (lambda: problems.invalidate())
         self._session_stamp: str | None = None
@@ -480,6 +477,27 @@ class LaunchGate:
                 ME3_CONFIG_OVERRIDE,
             )
         self._check_environment(step, notes)
+
+    def _stored_wrapper_options(self) -> list[tuple[str, str]]:
+        """The instance's own settings file is what holds the entries, and it is
+        not necessarily in basePath (the core lets the base directory be moved),
+        so ask the core for it. A file that is not there cannot be read, and
+        wrapper options on it cannot be ruled out."""
+        named = getattr(self._organizer, "settingsFilePath", None)
+        ini = Path(named() if callable(named) else Path(self._organizer.basePath()) / "ModOrganizer.ini")
+        try:
+            with open(ini, "rb"):
+                pass
+        except OSError as exc:
+            raise _Veto(
+                "Settings",
+                f"The instance's settings file {ini} cannot be read ({exc}), so the wrapper options "
+                "of the me3 entry cannot be checked. They become environment variables and a "
+                "program started in front of me3.",
+                "Make sure the instance's settings file exists and can be read, then launch again.",
+                ENTRY_SETTINGS_UNREADABLE,
+            ) from exc
+        return qtui.stored_wrapper_options(ini, binary_real=me3_host.binary_path())
 
     # The two inputs the token check cannot see: the entry's stored wrapper
     # options (environment variables and a program in front of me3) and the

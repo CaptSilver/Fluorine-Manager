@@ -385,6 +385,7 @@ public:
   QString profileName() const;
   QString profilePath() const;
   QString winePrefixPath() const;
+  QString settingsFilePath() const;
   QString downloadsPath() const;
   QString overwritePath() const;
   QString basePath() const;

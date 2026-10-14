@@ -95,7 +95,12 @@ class GateCase(unittest.TestCase):
         (self.install / "Game/start_protected_game.exe").write_bytes(b"MZ eac")
         (self.library / "steamapps/appmanifest_1245620.acf").write_text('"AppState"\n{\n}\n')
         self.base = self.tmp / "instance"
-        self.organizer = types.SimpleNamespace(basePath=lambda: str(self.base))
+        self.base.mkdir()
+        self.ini = self.base / "ModOrganizer.ini"
+        self.ini.write_text("")
+        self.organizer = types.SimpleNamespace(
+            basePath=lambda: str(self.base), settingsFilePath=lambda: str(self.ini)
+        )
         self.paths = state.InstancePaths(self.organizer)
         self.game = FakeGame(self.install)
         self.binary = me3_host.binary_path()
@@ -228,7 +233,7 @@ class ModeTests(GateCase):
         self.assertTrue(self.launch(binary="/anything/at/all/me3"))
         self.assertTrue(self.launch(binary=self.install / "Game/eldenring.exe"))
         self.assertEqual(self.vetoes, [])
-        self.assertFalse(self.base.exists())
+        self.assertFalse(self.paths.root.exists())
         self.ensure.assert_not_called()
 
     def test_a_tool_outside_the_game_folder_is_untouched(self) -> None:
@@ -238,7 +243,7 @@ class ModeTests(GateCase):
         self.assertTrue(self.launch(binary=tool))
         self.assertTrue(self.launch(binary="/usr/bin/xterm"))
         self.assertEqual(self.vetoes, [])
-        self.assertFalse(self.base.exists())
+        self.assertFalse(self.paths.root.exists())
 
     def test_every_exe_under_the_game_folder_is_vetoed(self) -> None:
         (self.install / "Game/ersc_launcher.exe").write_bytes(b"MZ")
@@ -792,6 +797,38 @@ class EnvironmentTests(GateCase):
                 if not passes:
                     self.assert_vetoed(gate.ENTRY_WRAPPER_OPTIONS, options)
 
+    def store_wrapper_entry(self, ini: Path, options: str) -> None:
+        from PyQt6.QtCore import QSettings
+
+        ini.parent.mkdir(parents=True, exist_ok=True)
+        settings = QSettings(str(ini), QSettings.Format.IniFormat)
+        settings.beginWriteArray("customExecutables", 1)
+        settings.setArrayIndex(0)
+        settings.setValue("title", "Elden Ring (me3)")
+        settings.setValue("binary", str(self.binary))
+        settings.setValue("wrapperOptions", options)
+        settings.endArray()
+        settings.sync()
+
+    def test_the_ini_is_the_one_the_core_names_even_when_the_base_directory_is_elsewhere(self) -> None:
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        self.store_wrapper_entry(self.ini, "FOO=1")
+        self.organizer.basePath = lambda: str(elsewhere)
+        args = " ".join(me3.entry_args(state.InstancePaths(self.organizer), self.install / "Game"))
+        self.assertFalse(self.launch(cwd=state.InstancePaths(self.organizer).root, args=args))
+        self.assert_vetoed(gate.ENTRY_WRAPPER_OPTIONS, "FOO=1", recorded=False)
+
+    def test_an_ini_that_is_missing_or_unreadable_stops_the_launch(self) -> None:
+        for make in (lambda: self.ini.unlink(), lambda: (self.ini.mkdir())):
+            with self.subTest(make):
+                self.vetoes.clear()
+                make()
+                self.assertFalse(self.launch())
+                self.assert_vetoed(gate.ENTRY_SETTINGS_UNREADABLE, str(self.ini), "wrapper options")
+                if self.ini.is_dir():
+                    self.ini.rmdir()
+
     def test_a_posix_path_in_the_entry_is_read_as_well(self) -> None:
         from PyQt6.QtCore import QSettings
 
@@ -836,10 +873,13 @@ class EnvironmentTests(GateCase):
         self.assertTrue(any(str(self.personal) in w and "windows_binaries_dir" in w for w in warnings))
         self.assertTrue(any("[game.eldenring] skip_logos" in w and "no token" in w for w in warnings))
 
-    def test_a_config_file_that_is_not_toml_warns_and_does_not_stop_the_launch(self) -> None:
-        self.write(self.system, "not [toml")
-        self.assertTrue(self.launch(), self.vetoes)
-        self.assertTrue(any("TOML" in w for w in self.last_launch()["report"]["warnings"]))
+    def test_a_config_file_that_is_not_toml_stops_the_launch_because_a_steam_dir_in_it_cannot_be_ruled_out(self) -> None:
+        for text in ("not [toml", 'steam_dir = "/other/steam"\nt = {\n a = 1,\n}\n'):
+            with self.subTest(text):
+                self.vetoes.clear()
+                self.write(self.system, text)
+                self.assertFalse(self.launch())
+                self.assert_vetoed(gate.ME3_CONFIG_STEAM_DIR, str(self.system), "not a file the gate can read", "TOML")
 
     def test_neither_file_existing_is_the_normal_case(self) -> None:
         self.assertTrue(self.launch(), self.vetoes)
