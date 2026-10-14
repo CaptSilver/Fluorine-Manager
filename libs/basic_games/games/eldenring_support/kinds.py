@@ -177,6 +177,26 @@ def propose_deploy_config(root: Listing, native_dll: str) -> list[str]:
     return [f"{prefix}{match}/{name}" for name in names]
 
 
+def follows_lukeyui_layout(mod_dir, native_dll) -> bool:
+    """Whether a native's DLL is laid out the way LukeYui's are, so it runs from Game/mods/<stem>/.
+
+    Those DLLs sit at the top of the mod folder or in a top-level mods/ folder,
+    or have a <stem>/ folder beside them. Nothing in the DLL's bytes says more,
+    so a DLL buried deeper (bin/x64/Foo.dll) is left alone: the plugin does not
+    claim a Game/ folder for a mod that shows no sign of using one.
+    """
+    if not native_dll_ok(mod_dir, native_dll):
+        return False
+    dll = PurePosixPath(native_dll)
+    if len(dll.parent.parts) == 0 or dll.parent.parts == ("mods",):
+        return True
+    beside = Path(mod_dir).joinpath(*dll.parent.parts)
+    try:
+        return any(n.lower() == dll.stem.lower() and (beside / n).is_dir() for n in os.listdir(beside))
+    except OSError:
+        return False
+
+
 def _under(path: str, folder: str) -> bool:
     return os.path.commonpath([path, folder]) == folder
 

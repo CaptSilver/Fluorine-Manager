@@ -18,6 +18,7 @@ deploy = support.module(PACKAGE, "deploy")
 hardening = support.module(PACKAGE, "hardening")
 kinds = support.module(PACKAGE, "kinds")
 veto = support.module(PACKAGE, "veto")
+inventory = support.module(PACKAGE, "inventory")
 state = support.module(PACKAGE, "state")
 
 SHA = "a" * 64
@@ -185,7 +186,8 @@ class DesiredTests(ModListCase):
         self.native("Off", enabled=False)
         self.modlist.add("Plain", files={"regulation.bin": b"x"}, kind="package")
         self.native("No list", dll="mods/Other.dll", config=())
-        self.assertEqual(deploy.desired(self.organizer), deploy.Desired())
+        wanted = deploy.desired(self.organizer)
+        self.assertEqual((wanted.files, wanted.findings), ({}, []))
 
     def test_a_reserved_shape_is_a_finding_naming_the_mod_and_nothing_is_wanted(self) -> None:
         mod = self.native("Thing mod")
@@ -765,6 +767,116 @@ class UndeployAndSyncRemovesTests(ApplyCase):
         self.paths.deploy_manifest.write_text("{")
         with self.assertRaises(state.StateError):
             deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+
+
+
+class OwnedLayoutFolderTests(ModListCase):
+    """A native without config files still owns mods/<stem>/, where its DLL writes its log."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.launcher_state = hardening.VANILLA
+        self.asked = 0
+
+    def launcher(self) -> str:
+        self.asked += 1
+        return self.launcher_state
+
+    def sync(self):
+        return deploy.sync(
+            deploy.desired(self.organizer), self.paths, self.game, launcher=self.launcher, stamp=STAMP
+        )
+
+    def bare(self, name="NoWeight", dll="NoWeight.dll", **kwargs):
+        return self.native(name, dll=dll, config=(), **kwargs)
+
+    def excluded(self, rel):
+        ctx = inventory.context(self.game, deploy.read_manifest(self.paths))
+        return inventory.excluded(rel, ctx)
+
+    def test_a_native_without_config_files_wants_its_stem_folder_and_no_file(self) -> None:
+        self.bare()
+        wanted = deploy.desired(self.organizer)
+        self.assertEqual(wanted.files, {})
+        self.assertEqual(wanted.dirs, {"mods/NoWeight"})
+
+    def test_a_dll_in_a_top_level_mods_folder_or_beside_its_stem_folder_follows_the_layout(self) -> None:
+        self.bare("A", dll="mods/A.dll")
+        self.bare("B", dll="bin/B.dll", extra={"bin/B/notes.txt": "x"})
+        self.assertEqual(deploy.desired(self.organizer).dirs, {"mods/A", "mods/B"})
+
+    def test_a_dll_buried_in_another_folder_does_not_follow_the_layout(self) -> None:
+        self.bare("Deep", dll="bin/x64/Deep.dll")
+        self.assertEqual(deploy.desired(self.organizer).dirs, set())
+
+    def test_a_disabled_or_non_native_mod_owns_nothing(self) -> None:
+        self.bare("Off", dll="Off.dll", enabled=False)
+        self.modlist.add("Plain", enabled=True, files={"Plain.dll": b"MZ"})
+        self.assertEqual(deploy.desired(self.organizer).dirs, set())
+
+    def test_a_native_that_deploys_config_files_keeps_the_folder_it_creates_itself(self) -> None:
+        self.native("Fov", dll="Fov.dll", config=("Fov/config.ini",))
+        self.assertEqual(deploy.desired(self.organizer).dirs, set())
+
+    def test_the_folder_is_recorded_without_creating_it_or_asking_for_the_hardened_launcher(self) -> None:
+        self.bare()
+        applied = self.sync()
+        self.assertEqual(applied, deploy.Applied())
+        self.assertEqual(self.asked, 0)
+        self.assertEqual(deploy.read_manifest(self.paths), deploy.Manifest({}, ["mods/NoWeight"]))
+        self.assertFalse((self.game / "mods").exists())
+
+    def test_the_log_the_dll_writes_in_a_session_is_noise_and_a_program_there_is_not(self) -> None:
+        self.bare()
+        self.sync()
+        (self.game / "mods/NoWeight").mkdir(parents=True)
+        (self.game / "mods/NoWeight/log.txt").write_text("log")
+        self.assertTrue(self.excluded("mods/NoWeight/log.txt"))
+        self.assertFalse(self.excluded("mods/NoWeight/helper.dll"))
+        self.assertFalse(self.excluded("mods/NoWeight/notes.txt"))
+
+    def test_a_second_sync_changes_nothing(self) -> None:
+        self.bare()
+        self.sync()
+        (self.game / "mods/NoWeight").mkdir(parents=True)
+        (self.game / "mods/NoWeight/log.txt").write_text("log")
+        self.assertEqual(self.sync(), deploy.Applied())
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, ["mods/NoWeight"])
+        self.assertTrue((self.game / "mods/NoWeight/log.txt").exists())
+
+    def test_disabling_the_mod_deletes_the_log_quarantines_anything_else_and_removes_the_folder(self) -> None:
+        self.bare()
+        self.sync()
+        folder = self.game / "mods/NoWeight"
+        folder.mkdir(parents=True)
+        (folder / "log.txt").write_text("log")
+        (folder / "notes.txt").write_text("mine")
+        self.organizer.mod_list.active.discard("NoWeight")
+        applied = self.sync()
+        self.assertFalse(folder.exists())
+        self.assertEqual(applied.noise, ["mods/NoWeight/log.txt"])
+        self.assertEqual([rel for rel, _ in applied.quarantined], ["mods/NoWeight/notes.txt"])
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, [])
+
+    def test_the_callback_sync_cleans_the_folder_of_a_disabled_mod_and_keeps_that_of_an_enabled_one(self) -> None:
+        self.bare("Keep", dll="Keep.dll")
+        self.bare("Drop", dll="Drop.dll")
+        self.sync()
+        for stem in ("Keep", "Drop"):
+            (self.game / "mods" / stem).mkdir(parents=True)
+            (self.game / "mods" / stem / "log.txt").write_text("log")
+        self.organizer.mod_list.active.discard("Drop")
+        deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+        self.assertTrue((self.game / "mods/Keep/log.txt").exists())
+        self.assertFalse((self.game / "mods/Drop").exists())
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, ["mods/Keep"])
+
+    def test_a_folder_already_in_game_is_owned_with_its_log(self) -> None:
+        (self.game / "mods/NoWeight").mkdir(parents=True)
+        (self.game / "mods/NoWeight/log.txt").write_text("log")
+        self.bare()
+        self.sync()
+        self.assertTrue(self.excluded("mods/NoWeight/log.txt"))
 
 
 class SyncTests(ModListCase):

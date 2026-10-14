@@ -429,8 +429,8 @@ def clean_game(
     move failed or the list was declined: Game/ is then part-way between
     erm's and vanilla.
 
-    Refuses, moving nothing, while the deploy manifest holds files or
-    folders: on a re-run after a gated launch, installed.json still names the
+    Refuses, moving nothing, while the deploy manifest holds files (folders
+    it only owns for a DLL's log place nothing): on a re-run after a gated launch, installed.json still names the
     config files Fluorine deployed over erm's, and quarantining them would
     leave the manifest naming files that are gone. A file that cannot be
     moved is reported and the rest go on. An edited
@@ -440,7 +440,7 @@ def clean_game(
     found = importgame.survey(organizer, installed, host.game_dir)
     earlier = bool(importgame.quarantined(paths, found.gone))
     manifest = deploy.read_manifest(paths)
-    if manifest.files or manifest.dirs:
+    if manifest.files:
         report.warn(
             "Fluorine has files deployed into Game/mods/, and moving them would leave the deploy record naming "
             "files that are gone. Undeploy them first (Sync deployed files), then run the import again. Nothing "
@@ -510,7 +510,7 @@ def offer_move_anyway(
     if ui.move_anyway is None:
         return None
     manifest = deploy.read_manifest(paths)
-    if manifest.files or manifest.dirs:
+    if manifest.files:
         report.info(
             "Moving erm's files now is not offered while Fluorine has files deployed into Game/mods/: "
             "undeploy them first (Sync deployed files)."

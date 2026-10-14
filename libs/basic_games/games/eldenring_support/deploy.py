@@ -53,7 +53,8 @@ class Entry:
 @dataclass
 class Manifest:
     """`files` maps "mods/<Name>/<file>" to what was placed; `dirs` lists the
-    "mods/<Name>" folders the plugin created, so it removes only those."""
+    "mods/<Name>" folders the plugin created or owns for a DLL's log, so it
+    removes only those and expects the DLL's log files in them."""
 
     files: dict[str, Entry] = field(default_factory=dict)
     dirs: list[str] = field(default_factory=list)
@@ -169,6 +170,10 @@ class Finding:
 class Desired:
     files: dict[str, Wanted] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
+    # "mods/<stem>" of every native that follows the LukeYui layout but has no
+    # config files to deploy: its DLL writes its log there, so the folder is
+    # the plugin's even though nothing is placed in it.
+    dirs: set[str] = field(default_factory=set)
 
 
 def dll_stem(native_dll: str) -> str:
@@ -271,6 +276,12 @@ def desired(organizer) -> Desired:
             )
             continue
         if not listed:
+            if (
+                ref.native_dll is not None
+                and name_ok(stem := dll_stem(ref.native_dll))
+                and kinds.follows_lukeyui_layout(ref.path, ref.native_dll)
+            ):
+                result.dirs.add(f"{MODS}/{stem}")
             continue
         if ref.native_dll is None:
             result.findings.append(
@@ -326,9 +337,14 @@ class Plan:
     adopts: list[tuple[str, Wanted]] = field(default_factory=list)
     # Not ours and not the wanted bytes, or not a plain file: never touched.
     strays: list[str] = field(default_factory=list)
+    # Folders wanted whether or not a file goes in them. `keep_dirs` is all of
+    # them, which apply_removes never empties; `new_dirs` is the ones the
+    # manifest does not list yet, which apply_copies records.
+    keep_dirs: set[str] = field(default_factory=set)
+    new_dirs: list[str] = field(default_factory=list)
 
     def empty(self) -> bool:
-        return not (self.copies or self.removes or self.adopts or self.strays)
+        return not (self.copies or self.removes or self.adopts or self.strays or self.new_dirs)
 
 
 @dataclass(frozen=True)
@@ -372,7 +388,9 @@ def plan(wanted: Desired, manifest: Manifest, game_dir) -> Plan:
     config.ini) is copied again from the mod folder, which is the source of
     truth, and what the DLL wrote is kept in the quarantine.
     """
-    result = Plan()
+    result = Plan(
+        keep_dirs=set(wanted.dirs), new_dirs=sorted(wanted.dirs - set(manifest.dirs))
+    )
     for rel, want in sorted(wanted.files.items()):
         found, digest = on_disk(game_dir, rel)
         entry = manifest.files.get(rel)
@@ -542,6 +560,11 @@ def apply_copies(
         manifest.files[rel] = Entry(want.sha256, want.size, want.mod)
         _record(paths, manifest)
         done.adopted.append(rel)
+    # Recorded, never created: the DLL makes the folder when it first writes its log.
+    for name_rel in plan.new_dirs:
+        if name_rel not in manifest.dirs:
+            manifest.dirs.append(name_rel)
+            _record(paths, manifest)
     for item in plan.copies:
         _copy_one(item, manifest, paths, game_dir, stamp, done)
     return done
@@ -621,7 +644,11 @@ def apply_removes(
         _record(paths, manifest)
         done.removed.append(rel)
     # A folder the same sync is about to copy into stays, with the DLL's log in it.
-    needed = {_folder_of(item.rel) for item in plan.copies} | {_folder_of(rel) for rel, _ in plan.adopts}
+    needed = (
+        {_folder_of(item.rel) for item in plan.copies}
+        | {_folder_of(rel) for rel, _ in plan.adopts}
+        | plan.keep_dirs
+    )
     _clean_folders(manifest, paths, game_dir, stamp, done, needed)
     return done
 
@@ -687,7 +714,8 @@ def sync(
     files in Game/ longer; then the findings, strays and harden vetoes; then
     the copies. A mod with a finding wants nothing, so its files go in the
     removals (desired() leaves none of a colliding mod's files in `wanted`).
-    Nothing is copied unless the launcher is hardened, and that is asked of `launcher()` only when a file is, or is about to be, deployed:
+    Nothing is copied unless the launcher is hardened, and that is asked of `launcher()` only when a file is, or is about to be, deployed
+    (a folder owned for a DLL's log places no file and does not ask):
     the hardened launcher has to be in place before the first file exists.
     `launcher` returns hardening.state(...).
     """

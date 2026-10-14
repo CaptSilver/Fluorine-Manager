@@ -360,6 +360,19 @@ class AdoptionTests(GameCase):
         self.assertFalse(self.adopt())
         self.assertIn("deployed", self.report.text())
 
+    def test_clean_game_refuses_on_deployed_files_but_not_on_folders_the_plugin_only_owns(self) -> None:
+        self.paths.deploy_manifest.parent.mkdir(parents=True, exist_ok=True)
+        clean = lambda: importfinish.clean_game(
+            self.organizer, self.installed, self.paths, self.host, self.script.ui(), self.report, "stamp"
+        )
+        self.paths.deploy_manifest.write_text(json.dumps({"files": {}, "dirs": ["mods/A"]}))
+        self.assertEqual(clean(), (True, False))
+        self.assertIn("none of erm's files are in Game/", self.report.text())
+        self.paths.deploy_manifest.write_text(
+            json.dumps({"files": {"mods/A/config.ini": {"sha256": "a" * 64, "size": 1, "mod": "a"}}, "dirs": ["mods/A"]})
+        )
+        self.assertEqual(clean(), (False, False))
+
 
 class LaunchOptionTests(GameCase):
     VALUE = "me3 launch -p /home/x/erm/tools/me3/erm-coop.me3 # %command%"
