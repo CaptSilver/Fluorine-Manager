@@ -1261,7 +1261,7 @@ class AfterTheSaveToolsTests(GateCase):
         self.assertEqual((folder / "ER0000.sl2").read_bytes(), SL2)
 
     def test_after_keeping_the_session_save_the_next_launch_snapshots_it(self) -> None:
-        session.keep_session_save(self.paths)
+        session.keep_session_save(self.paths, running=lambda: [])
         self.assertTrue(self.launch())
         folder = Path(self.last_launch()["sentinel"]["snapshot_dir"])
         self.assertEqual((folder / "ER0000.sl2").read_bytes(), self.written)
