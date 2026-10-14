@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import eldenring_testsupport as support
@@ -419,6 +420,320 @@ class VerifyTests(PlanCase):
             },
         )
 
+
+
+STAMP = "20261014T000000000001Z"
+
+
+class ApplyCase(PlanCase):
+    def run_plan(self, wanted, manifest=None, game=None):
+        """Plan and apply both halves the way a sync does; returns (manifest, applied)."""
+        manifest = deploy.read_manifest(self.paths) if manifest is None else manifest
+        result = deploy.plan(wanted, manifest, game or self.game)
+        applied = deploy.apply_removes(result, manifest, self.paths, game or self.game, STAMP)
+        applied.extend(deploy.apply_copies(result, manifest, self.paths, game or self.game, STAMP))
+        return manifest, applied
+
+    def quarantined(self) -> dict:
+        root = self.paths.quarantine_game / STAMP
+        return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()} if root.exists() else {}
+
+
+class ApplyCopiesTests(ApplyCase):
+    def test_a_copy_creates_the_folder_records_it_and_lands_with_the_wanted_bytes(self) -> None:
+        manifest, applied = self.run_plan(self.want())
+        self.assertEqual((self.game / "mods/Thing/config.ini").read_text(), "a=1\n")
+        self.assertEqual(applied.copied, ["mods/Thing/config.ini"])
+        self.assertEqual(manifest.dirs, ["mods/Thing"])
+        again = deploy.read_manifest(self.paths)
+        self.assertEqual(again.files, {"mods/Thing/config.ini": deploy.Entry(sha("a=1\n"), 4, "Thing mod")})
+        self.assertEqual(again.dirs, ["mods/Thing"])
+
+    def test_a_second_plan_after_the_apply_is_empty(self) -> None:
+        wanted = self.want()
+        self.run_plan(wanted)
+        self.assertTrue(deploy.plan(wanted, deploy.read_manifest(self.paths), self.game).empty())
+
+    def test_nothing_outside_mods_name_is_created_removed_or_modified(self) -> None:
+        self.put("regulation.bin", "vanilla")
+        self.put("sd/Data0.bdt", "vanilla")
+        before = {k: v for k, v in tree(self.game).items() if not k.startswith("mods")}
+        self.run_plan(self.want())
+        self.run_plan(deploy.Desired())
+        self.assertEqual({k: v for k, v in tree(self.game).items() if not k.startswith("mods")}, before)
+
+    def test_each_copy_is_recorded_as_it_lands_so_a_failure_leaves_one_recorded_and_nothing_else(self) -> None:
+        wanted = self.want()
+        second = self.want(rel="mods/Thing/second.ini", text="b=2\n")
+        wanted.files.update(second.files)
+        real = deploy.atomic.write_bytes_atomic
+
+        def fail_on_the_second(path, data, *args, **kwargs):
+            if Path(path).name == "second.ini":
+                raise OSError("disk full")
+            return real(path, data, *args, **kwargs)
+
+        with mock.patch.object(deploy.atomic, "write_bytes_atomic", side_effect=fail_on_the_second):
+            with self.assertRaises(deploy.DeployError) as caught:
+                self.run_plan(wanted)
+        self.assertIn("disk full", str(caught.exception))
+        on_disk_manifest = deploy.read_manifest(self.paths)
+        self.assertEqual(sorted(on_disk_manifest.files), ["mods/Thing/config.ini"])
+        self.assertTrue((self.game / "mods/Thing/config.ini").exists())
+        self.assertFalse((self.game / "mods/Thing/second.ini").exists())
+
+    def test_a_folder_that_was_already_there_is_used_but_not_claimed(self) -> None:
+        self.put("mods/Thing/their.ini", "theirs")
+        manifest, _ = self.run_plan(self.want())
+        self.assertEqual(manifest.dirs, [])
+        self.run_plan(deploy.Desired())
+        self.assertEqual((self.game / "mods/Thing/their.ini").read_text(), "theirs")
+        self.assertFalse((self.game / "mods/Thing/config.ini").exists())
+
+    def test_what_the_dll_rewrote_is_kept_in_the_quarantine_and_the_source_copied_again(self) -> None:
+        wanted = self.want()
+        self.run_plan(wanted)
+        (self.game / "mods/Thing/config.ini").write_text("written by the DLL\n")
+        _, applied = self.run_plan(wanted)
+        self.assertEqual((self.game / "mods/Thing/config.ini").read_text(), "a=1\n")
+        self.assertEqual(self.quarantined(), {"mods/Thing/config.ini": b"written by the DLL\n"})
+        self.assertEqual([rel for rel, _ in applied.quarantined], ["mods/Thing/config.ini"])
+
+    def test_an_edit_in_the_mod_folder_reaches_game_without_a_quarantine(self) -> None:
+        self.run_plan(self.want())
+        self.run_plan(self.want(text="a=2\n"))
+        self.assertEqual((self.game / "mods/Thing/config.ini").read_text(), "a=2\n")
+        self.assertEqual(self.quarantined(), {})
+
+    def test_an_unrecorded_file_with_the_wanted_bytes_is_recorded_not_rewritten(self) -> None:
+        path = self.put("mods/Thing/config.ini")
+        path.chmod(0o600)
+        before = path.stat().st_mtime_ns
+        manifest, applied = self.run_plan(self.want())
+        self.assertEqual((applied.adopted, applied.copied), (["mods/Thing/config.ini"], []))
+        self.assertEqual(path.stat().st_mtime_ns, before)
+        self.assertIn("mods/Thing/config.ini", deploy.read_manifest(self.paths).files)
+
+    def test_a_source_that_changed_after_it_was_checked_writes_nothing(self) -> None:
+        wanted = self.want()
+        source = wanted.files["mods/Thing/config.ini"].source
+        source.write_text("changed after the check\n")
+        with self.assertRaises(deploy.DeployError):
+            self.run_plan(wanted)
+        self.assertFalse((self.game / "mods").exists())
+        self.assertEqual(deploy.read_manifest(self.paths).files, {})
+
+    def test_a_file_that_appears_between_the_plan_and_the_copy_is_not_overwritten(self) -> None:
+        wanted = self.want()
+        manifest = deploy.Manifest()
+        result = deploy.plan(wanted, manifest, self.game)
+        self.put("mods/Thing/config.ini", "someone else's\n")
+        with self.assertRaises(deploy.DeployError):
+            deploy.apply_copies(result, manifest, self.paths, self.game, STAMP)
+        self.assertEqual((self.game / "mods/Thing/config.ini").read_text(), "someone else's\n")
+
+    def test_a_symlinked_mods_folder_is_refused_and_nothing_is_written_through_it(self) -> None:
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (self.game / "mods").symlink_to(elsewhere)
+        with self.assertRaises(deploy.DeployError):
+            deploy.apply_copies(
+                deploy.Plan(copies=[deploy.Copy("mods/Thing/config.ini", self.want().files["mods/Thing/config.ini"])]),
+                deploy.Manifest(), self.paths, self.game, STAMP,
+            )
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+
+class ApplyRemovesTests(ApplyCase):
+    def deployed(self, text="a=1\n"):
+        wanted = self.want(text=text)
+        self.run_plan(wanted)
+        return wanted
+
+    def test_a_file_that_still_matches_the_record_is_deleted_and_so_is_its_folder(self) -> None:
+        self.deployed()
+        manifest, applied = self.run_plan(deploy.Desired())
+        self.assertFalse((self.game / "mods/Thing").exists())
+        self.assertTrue((self.game / "mods").is_dir())
+        self.assertEqual((manifest.files, manifest.dirs), ({}, []))
+        self.assertEqual(applied.removed, ["mods/Thing/config.ini"])
+        self.assertEqual(applied.folders_removed, ["mods/Thing"])
+        self.assertEqual(self.quarantined(), {})
+
+    def test_a_file_that_differs_from_the_record_is_kept_not_deleted(self) -> None:
+        self.deployed()
+        (self.game / "mods/Thing/config.ini").write_text("written by the DLL\n")
+        self.run_plan(deploy.Desired())
+        self.assertEqual(self.quarantined(), {"mods/Thing/config.ini": b"written by the DLL\n"})
+        self.assertFalse((self.game / "mods/Thing").exists())
+
+    def test_a_recorded_file_that_is_already_gone_is_just_forgotten(self) -> None:
+        self.deployed()
+        (self.game / "mods/Thing/config.ini").unlink()
+        manifest, applied = self.run_plan(deploy.Desired())
+        self.assertEqual((manifest.files, manifest.dirs), ({}, []))
+        self.assertEqual(applied.removed, ["mods/Thing/config.ini"])
+
+    def test_the_dlls_log_and_crash_dumps_go_with_the_folder_and_anything_else_is_kept(self) -> None:
+        self.deployed()
+        for name, text in (("log.txt", "log"), ("Thing.LOG", "log"), ("crash.dmp", "dump"), ("notes.txt", "mine")):
+            self.put(f"mods/Thing/{name}", text)
+        self.put("mods/Thing/sub/inner.ini", "inner")
+        self.put("mods/Thing/sub/log.txt", "inner log")
+        (self.game / "mods/Thing/link").symlink_to(self.tmp)
+        _, applied = self.run_plan(deploy.Desired())
+        self.assertFalse((self.game / "mods/Thing").exists())
+        self.assertEqual(
+            self.quarantined(),
+            {"mods/Thing/notes.txt": b"mine", "mods/Thing/sub/inner.ini": b"inner"},
+        )
+        self.assertTrue((self.paths.quarantine_game / STAMP / "mods/Thing/link").is_symlink())
+        self.assertEqual(
+            sorted(applied.noise), ["mods/Thing/Thing.LOG", "mods/Thing/crash.dmp", "mods/Thing/log.txt", "mods/Thing/sub/log.txt"]
+        )
+
+    def test_a_folder_the_plugin_did_not_create_stays_with_its_own_files(self) -> None:
+        self.put("mods/Thing/their.ini", "theirs")
+        wanted = self.want()
+        self.run_plan(wanted)
+        self.put("mods/Thing/log.txt", "log")
+        self.run_plan(deploy.Desired())
+        self.assertEqual(sorted(p.name for p in (self.game / "mods/Thing").iterdir()), ["log.txt", "their.ini"])
+
+    def test_the_folder_stays_while_another_recorded_file_is_in_it(self) -> None:
+        wanted = self.want()
+        wanted.files.update(self.want(rel="mods/Thing/second.ini", text="b=2\n").files)
+        self.run_plan(wanted)
+        self.run_plan(self.want())
+        self.assertEqual(sorted(p.name for p in (self.game / "mods/Thing").iterdir()), ["config.ini"])
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, ["mods/Thing"])
+
+    def test_the_folder_stays_when_the_same_sync_copies_something_new_into_it(self) -> None:
+        self.deployed()
+        self.put("mods/Thing/log.txt", "log")
+        replacement = self.want(rel="mods/Thing/other.ini", text="c=3\n")
+        self.run_plan(replacement)
+        self.assertEqual(
+            sorted(p.name for p in (self.game / "mods/Thing").iterdir()), ["log.txt", "other.ini"]
+        )
+
+    def test_a_removed_file_replaced_by_a_link_is_left_alone_and_stays_recorded(self) -> None:
+        self.deployed()
+        (self.game / "mods/Thing/config.ini").unlink()
+        (self.game / "mods/Thing/config.ini").symlink_to(self.tmp)
+        manifest, applied = self.run_plan(deploy.Desired())
+        self.assertIn("mods/Thing/config.ini", manifest.files)
+        self.assertTrue((self.game / "mods/Thing/config.ini").is_symlink())
+
+    def test_a_failed_unlink_is_reported_and_the_record_keeps_the_file(self) -> None:
+        self.deployed()
+        with mock.patch.object(deploy.os, "unlink", side_effect=PermissionError("denied")):
+            with self.assertRaises(deploy.DeployError) as caught:
+                self.run_plan(deploy.Desired())
+        self.assertIn("denied", str(caught.exception))
+        self.assertIn("mods/Thing/config.ini", deploy.read_manifest(self.paths).files)
+
+    def test_a_folder_left_over_from_a_crash_is_cleaned_on_the_next_remove(self) -> None:
+        self.put("mods/Thing/log.txt", "log")
+        manifest = deploy.Manifest({}, ["mods/Thing"])
+        deploy.write_manifest(self.paths, manifest)
+        applied = deploy.apply_removes(deploy.Plan(), manifest, self.paths, self.game, STAMP)
+        self.assertFalse((self.game / "mods/Thing").exists())
+        self.assertEqual(deploy.read_manifest(self.paths).dirs, [])
+        self.assertEqual(applied.folders_removed, ["mods/Thing"])
+
+
+class UndeployAndSyncRemovesTests(ApplyCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.organizer = support.FakeOrganizer(self.tmp / "instance")
+        self.native_mod = self.organizer.mod_list.add(
+            "Thing mod", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n"}
+        )
+        kinds.set_kind(self.native_mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=["mods/Thing/config.ini"])
+        wanted = deploy.desired(self.organizer)
+        self.run_plan(wanted)
+
+    def test_undeploy_all_empties_the_manifest_and_removes_every_folder_it_made(self) -> None:
+        self.put("mods/Thing/log.txt", "log")
+        applied = deploy.undeploy_all(self.paths, self.game, STAMP)
+        self.assertEqual(applied.removed, ["mods/Thing/config.ini"])
+        self.assertEqual(deploy.read_manifest(self.paths), deploy.Manifest())
+        self.assertFalse((self.game / "mods/Thing").exists())
+
+    def test_a_disabled_native_leaves_game_with_no_launch(self) -> None:
+        self.organizer.mod_list.active.discard("Thing mod")
+        applied = deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+        self.assertEqual(applied.removed, ["mods/Thing/config.ini"])
+        self.assertFalse((self.game / "mods/Thing").exists())
+
+    def test_a_deleted_native_leaves_game_too(self) -> None:
+        self.organizer.mod_list.removeMod(self.native_mod)
+        applied = deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+        self.assertEqual(applied.removed, ["mods/Thing/config.ini"])
+
+    def test_a_native_that_is_still_enabled_keeps_its_file_and_nothing_is_copied(self) -> None:
+        (self.game / "mods/Thing/config.ini").unlink()
+        applied = deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+        self.assertEqual(deploy.Applied(), applied)
+        self.assertFalse((self.game / "mods/Thing/config.ini").exists())
+
+    def test_edits_in_the_mod_folder_are_not_copied_by_the_callback_sync(self) -> None:
+        (Path(self.native_mod.absolutePath()) / "mods/Thing/config.ini").write_text("a=2\n")
+        deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+        self.assertEqual((self.game / "mods/Thing/config.ini").read_text(), "a=1\n")
+
+    def test_a_running_game_means_nothing_is_touched_and_the_reason_is_returned(self) -> None:
+        self.organizer.mod_list.active.discard("Thing mod")
+        applied = deploy.sync_removes(
+            self.organizer, self.paths, self.game, running=lambda: [(4242, "eldenring.exe")]
+        )
+        self.assertIn("eldenring.exe (pid 4242)", applied.skipped)
+        self.assertTrue((self.game / "mods/Thing/config.ini").exists())
+        self.assertIn("mods/Thing/config.ini", deploy.read_manifest(self.paths).files)
+
+    def test_without_a_scan_given_the_process_scan_decides(self) -> None:
+        self.organizer.mod_list.active.discard("Thing mod")
+        with mock.patch.object(deploy.procs, "game_running", return_value=[(7, "me3")]):
+            applied = deploy.sync_removes(self.organizer, self.paths, self.game)
+        self.assertIn("me3 (pid 7)", applied.skipped)
+        self.assertTrue((self.game / "mods/Thing/config.ini").exists())
+
+    def test_an_empty_manifest_is_a_no_op_that_does_not_even_look_for_the_game(self) -> None:
+        deploy.undeploy_all(self.paths, self.game, STAMP)
+        applied = deploy.sync_removes(self.organizer, self.paths, self.game, running=self.fail)
+        self.assertEqual(applied, deploy.Applied())
+
+    def test_a_damaged_manifest_raises_instead_of_reading_as_empty(self) -> None:
+        self.paths.deploy_manifest.write_text("{")
+        with self.assertRaises(state.StateError):
+            deploy.sync_removes(self.organizer, self.paths, self.game, running=lambda: [])
+
+
+class AppliedTests(unittest.TestCase):
+    def test_attention_is_what_was_kept_and_what_was_left_and_nothing_else(self) -> None:
+        applied = deploy.Applied(
+            copied=["mods/A/c.ini"], removed=["mods/B/c.ini"], noise=["mods/B/log.txt"],
+            quarantined=[("mods/B/n.txt", Path("/q/n.txt"))], left=["mods/C/c.ini: it is not a plain file"],
+        )
+        self.assertEqual(
+            applied.attention(),
+            ["Kept mods/B/n.txt in /q/n.txt", "Left mods/C/c.ini: it is not a plain file"],
+        )
+        self.assertEqual(deploy.Applied().attention(), [])
+        self.assertEqual(applied.lines()[-2:], applied.attention())
+
+    def test_extend_adds_every_list_and_lines_name_each_thing(self) -> None:
+        one = deploy.Applied(copied=["mods/A/c.ini"], removed=["mods/B/c.ini"])
+        two = deploy.Applied(
+            noise=["mods/B/log.txt"], folders_removed=["mods/B"], left=["mods/C/c.ini: it is not a plain file"],
+            quarantined=[("mods/B/n.txt", Path("/q/n.txt"))],
+        )
+        one.extend(two)
+        text = "\n".join(one.lines())
+        for word in ("Copied mods/A/c.ini", "Removed mods/B/c.ini", "Removed the folder mods/B",
+                     "Deleted mods/B/log.txt", "Kept mods/B/n.txt in /q/n.txt", "Left mods/C/c.ini"):
+            self.assertIn(word, text)
 
 
 if __name__ == "__main__":

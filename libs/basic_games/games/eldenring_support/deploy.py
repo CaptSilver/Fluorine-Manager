@@ -14,12 +14,14 @@ told apart from it.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import Callable
 
-from . import fsprobe, kinds, mods, state
+from . import atomic, fsprobe, kinds, mods, procs, quarantine, session, state
 from .ermlib import github
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
@@ -310,6 +312,15 @@ class Drift:
     why: str
 
 
+def _blocked_above(game_dir: Path, rel: str) -> bool:
+    """Whether a folder on the way down to `rel` is a link or not a folder."""
+    parts = rel.split("/")
+    return any(
+        fsprobe.kind(game_dir.joinpath(*parts[:depth])) not in (None, fsprobe.DIR)
+        for depth in range(1, len(parts))
+    )
+
+
 def on_disk(game_dir, rel: str) -> tuple[str | None, str | None]:
     """(kind, sha256) of what is at Game/`rel`; the hash only for a plain file.
 
@@ -317,10 +328,8 @@ def on_disk(game_dir, rel: str) -> tuple[str | None, str | None]:
     path "other": the plugin never reads or writes through one.
     """
     game_dir = Path(game_dir)
-    parts = rel.split("/")
-    for depth in range(1, len(parts)):
-        if fsprobe.kind(game_dir.joinpath(*parts[:depth])) not in (None, fsprobe.DIR):
-            return fsprobe.OTHER, None
+    if _blocked_above(game_dir, rel):
+        return fsprobe.OTHER, None
     path = game_dir / rel
     found = fsprobe.kind(path)
     if found != fsprobe.FILE:
@@ -382,3 +391,232 @@ def verify(manifest: Manifest, game_dir) -> list[Drift]:
         elif digest != entry.sha256:
             found.append(Drift(rel, "its bytes changed"))
     return found
+
+
+# -- doing it -----------------------------------------------------------------
+
+_NOISE_SUFFIXES = (".log", ".dmp")
+
+
+def is_noise(name: str) -> bool:
+    """A file the DLL writes at runtime beside its config: its log and crash dumps."""
+    lowered = name.lower()
+    return lowered == "log.txt" or lowered.endswith(_NOISE_SUFFIXES)
+
+
+@dataclass
+class Applied:
+    """What an apply did, for the dialogs and the log."""
+
+    copied: list[str] = field(default_factory=list)
+    adopted: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    quarantined: list[tuple[str, Path]] = field(default_factory=list)
+    noise: list[str] = field(default_factory=list)
+    folders_removed: list[str] = field(default_factory=list)
+    left: list[str] = field(default_factory=list)
+    skipped: str | None = None
+
+    def extend(self, other: "Applied") -> None:
+        for name in ("copied", "adopted", "removed", "quarantined", "noise", "folders_removed", "left"):
+            getattr(self, name).extend(getattr(other, name))
+
+    def attention(self) -> list[str]:
+        """What a person should read after a launch: what was kept and what was left alone."""
+        return [f"Kept {rel} in {where}" for rel, where in self.quarantined] + [
+            f"Left {why}" for why in self.left
+        ]
+
+    def lines(self) -> list[str]:
+        out = []
+        out += [f"Copied {rel}" for rel in self.copied]
+        out += [f"Recorded {rel}, already in place" for rel in self.adopted]
+        out += [f"Removed {rel}" for rel in self.removed]
+        out += [f"Removed the folder {rel}" for rel in self.folders_removed]
+        out += [f"Deleted {rel}, written by the mod while it ran" for rel in self.noise]
+        return out + self.attention()
+
+
+def _folder_of(rel: str) -> str:
+    return "/".join(rel.split("/")[:2])
+
+
+def _make_folders(rel: str, manifest: Manifest, paths: state.InstancePaths, game_dir: Path) -> None:
+    """mods/ and mods/<Name>/, the second recorded before it is created.
+
+    Only a folder this call creates is recorded as the plugin's, so a mods/<Name>/
+    that already held someone's files is never removed with the last of ours.
+    """
+    mods_dir = game_dir / MODS
+    found = fsprobe.kind(mods_dir)
+    if found is None:
+        os.mkdir(mods_dir)
+    elif found != fsprobe.DIR:
+        raise DeployError(f"{mods_dir} is not a folder")
+    name_rel = _folder_of(rel)
+    folder = game_dir / name_rel
+    found = fsprobe.kind(folder)
+    if found is None:
+        if name_rel not in manifest.dirs:
+            manifest.dirs.append(name_rel)
+            write_manifest(paths, manifest)
+        os.mkdir(folder)
+    elif found != fsprobe.DIR:
+        raise DeployError(f"{folder} is not a folder")
+
+
+def _copy_one(
+    item: Copy, manifest: Manifest, paths: state.InstancePaths, game_dir: Path, stamp: str, done: Applied
+) -> None:
+    rel, want = item.rel, item.wanted
+    try:
+        data = want.source.read_bytes()
+    except OSError as exc:
+        raise DeployError(f"cannot read {want.source}: {exc}") from exc
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != want.sha256:
+        raise DeployError(f"{want.source} changed after it was checked, so {rel} was not written")
+    found, current = on_disk(game_dir, rel)
+    recorded = manifest.files.get(rel)
+    unchanged = found == fsprobe.FILE and (current == digest or (recorded is not None and current == recorded.sha256))
+    if not (found is None or unchanged or (item.keep_existing and found == fsprobe.FILE)):
+        raise DeployError(f"{game_dir / rel} appeared or changed after the plan was made, so it was not overwritten")
+    try:
+        _make_folders(rel, manifest, paths, game_dir)
+        if item.keep_existing and found == fsprobe.FILE:
+            done.quarantined.append((rel, quarantine.move_out(paths, game_dir, rel, stamp)))
+        atomic.write_bytes_atomic(game_dir / rel, data)
+        written = github.sha256_file(game_dir / rel)
+    except (OSError, quarantine.QuarantineError) as exc:
+        raise DeployError(f"cannot write {game_dir / rel}: {exc}") from exc
+    if written != digest:
+        raise DeployError(f"{game_dir / rel} does not read back as the file that was written")
+    manifest.files[rel] = Entry(digest, len(data), want.mod)
+    write_manifest(paths, manifest)
+    done.copied.append(rel)
+
+
+def apply_copies(
+    plan: Plan, manifest: Manifest, paths: state.InstancePaths, game_dir, stamp: str | None = None
+) -> Applied:
+    """Record the adoptions and make the copies, writing the manifest after each one.
+
+    A crash leaves at most one file the manifest does not list, and the next
+    plan adopts it by its bytes. `manifest` is the one `plan` was made from.
+    """
+    done, stamp, game_dir = Applied(), stamp or session.now_stamp(), Path(game_dir)
+    for rel, want in plan.adopts:
+        manifest.files[rel] = Entry(want.sha256, want.size, want.mod)
+        write_manifest(paths, manifest)
+        done.adopted.append(rel)
+    for item in plan.copies:
+        _copy_one(item, manifest, paths, game_dir, stamp, done)
+    return done
+
+
+def _empty_folder(folder: Path, game_dir: Path, paths: state.InstancePaths, stamp: str, done: Applied) -> None:
+    """Clear what is left in a folder the plugin created, so it can be removed.
+
+    The DLL wrote its log there for as long as the config was deployed, so a
+    log or a crash dump goes with the folder. Anything else is someone's and
+    is kept in the quarantine.
+    """
+    for current, dirs, names in os.walk(folder, topdown=False):
+        here = Path(current)
+        for name in names + [d for d in dirs if os.path.islink(here / d)]:
+            rel = (here / name).relative_to(game_dir).as_posix()
+            if is_noise(name):
+                os.unlink(here / name)
+                done.noise.append(rel)
+            else:
+                done.quarantined.append((rel, quarantine.move_out(paths, game_dir, rel, stamp)))
+        if here != folder:
+            os.rmdir(here)
+
+
+def _clean_folders(
+    manifest: Manifest, paths: state.InstancePaths, game_dir: Path, stamp: str, done: Applied, needed: set[str]
+) -> None:
+    for name_rel in list(manifest.dirs):
+        if name_rel in needed or any(rel.startswith(name_rel + "/") for rel in manifest.files):
+            continue
+        folder = game_dir / name_rel
+        blocked = _blocked_above(game_dir, name_rel)
+        found = None if blocked else fsprobe.kind(folder)
+        if blocked or found not in (None, fsprobe.DIR):
+            done.left.append(f"{name_rel}: it is not a plain folder, so it was not touched")
+            continue
+        if found == fsprobe.DIR:
+            try:
+                _empty_folder(folder, game_dir, paths, stamp, done)
+                os.rmdir(folder)
+            except (OSError, quarantine.QuarantineError) as exc:
+                raise DeployError(f"cannot remove the folder {folder}: {exc}") from exc
+            done.folders_removed.append(name_rel)
+        manifest.dirs.remove(name_rel)
+        write_manifest(paths, manifest)
+
+
+def apply_removes(
+    plan: Plan, manifest: Manifest, paths: state.InstancePaths, game_dir, stamp: str | None = None
+) -> Applied:
+    """Take out what the manifest owns and nobody wants.
+
+    A file whose bytes still match the record is deleted. One that differs is
+    moved to the quarantine: the plugin does not delete bytes it cannot
+    vouch for. A plugin folder left with no manifest file goes too.
+    """
+    done, stamp, game_dir = Applied(), stamp or session.now_stamp(), Path(game_dir)
+    for rel in plan.removes:
+        recorded = manifest.files.get(rel)
+        if recorded is None:
+            continue
+        found, digest = on_disk(game_dir, rel)
+        try:
+            if found is None:
+                pass
+            elif found == fsprobe.FILE and digest == recorded.sha256:
+                os.unlink(game_dir / rel)
+            elif found == fsprobe.FILE:
+                done.quarantined.append((rel, quarantine.move_out(paths, game_dir, rel, stamp)))
+            else:
+                done.left.append(f"{rel}: it is not a plain file, so it was not touched")
+                continue
+        except (OSError, quarantine.QuarantineError) as exc:
+            raise DeployError(f"cannot remove {game_dir / rel}: {exc}") from exc
+        del manifest.files[rel]
+        write_manifest(paths, manifest)
+        done.removed.append(rel)
+    # A folder the same sync is about to copy into stays, with the DLL's log in it.
+    needed = {_folder_of(item.rel) for item in plan.copies} | {_folder_of(rel) for rel, _ in plan.adopts}
+    _clean_folders(manifest, paths, game_dir, stamp, done, needed)
+    return done
+
+
+def undeploy_all(paths: state.InstancePaths, game_dir, stamp: str | None = None) -> Applied:
+    """Remove every file the manifest records, and the folders the plugin made."""
+    manifest = read_manifest(paths)
+    return apply_removes(Plan(removes=sorted(manifest.files)), manifest, paths, game_dir, stamp)
+
+
+def sync_removes(
+    organizer, paths: state.InstancePaths, game_dir, running: Callable[[], list] | None = None
+) -> Applied:
+    """Apply only the removals, for the mod-list callbacks.
+
+    A removal never needs the hardened launcher, so a native that was disabled
+    or deleted leaves Game/ as soon as the list says so. Copies, the drift
+    check and the findings stay with the launch and the Sync tool: a mod whose
+    list became invalid wants nothing, so its files leave here exactly as they
+    do in deploy.sync, and the refusal is shown where the user is looking.
+    Nothing is edited under a running game, so while
+    one is up the result says it was skipped.
+    """
+    manifest = read_manifest(paths)
+    if not manifest.files and not manifest.dirs:
+        return Applied()
+    up = (running or procs.game_running)()
+    if up:
+        names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+        return Applied(skipped=f"{names} is running")
+    return apply_removes(plan(desired(organizer), manifest, game_dir), manifest, paths, game_dir)
