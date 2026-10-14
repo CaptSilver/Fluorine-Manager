@@ -220,5 +220,62 @@ class HashCacheTests(ArchivesCase):
         self.assertEqual(archives.archive_sha256(self.paths, one), hashlib.sha256(b"1").hexdigest())
 
 
+class FindBySha(ArchivesCase):
+    def put(self, name: str, data: bytes) -> Path:
+        path = self.downloads / name
+        path.write_bytes(data)
+        return path
+
+    def sha(self, data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def test_a_file_is_found_by_its_bytes_whatever_it_is_called(self) -> None:
+        self.put("one.zip", b"1")
+        wanted = self.put("3_two.zip", b"2")
+        self.assertEqual(archives.find_by_sha(self.downloads, self.sha(b"2"), {}), wanted)
+
+    def test_nothing_with_that_sha_is_none(self) -> None:
+        self.put("one.zip", b"1")
+        self.assertIsNone(archives.find_by_sha(self.downloads, self.sha(b"2"), {}))
+
+    def test_sidecars_and_unfinished_downloads_are_not_candidates(self) -> None:
+        self.put("a.zip.meta", b"2")
+        self.put("a.zip.part", b"2")
+        self.put("a.zip.unfinished", b"2")
+        self.assertIsNone(archives.find_by_sha(self.downloads, self.sha(b"2"), {}))
+
+    def test_a_folder_in_downloads_is_skipped(self) -> None:
+        (self.downloads / "folder.zip").mkdir()
+        self.assertIsNone(archives.find_by_sha(self.downloads, self.sha(b"2"), {}))
+
+    def test_a_missing_downloads_folder_is_none(self) -> None:
+        self.assertIsNone(archives.find_by_sha(self.tmp / "nowhere", self.sha(b"2"), {}))
+
+    def test_a_file_that_cannot_be_read_is_skipped_and_the_rest_still_searched(self) -> None:
+        self.put("a.zip", b"1")
+        wanted = self.put("b.zip", b"2")
+        real = state.cached_sha256
+
+        def refuse_first(cache, path):
+            if Path(path).name == "a.zip":
+                raise PermissionError("denied")
+            return real(cache, path)
+
+        with mock.patch.object(state, "cached_sha256", refuse_first):
+            self.assertEqual(archives.find_by_sha(self.downloads, self.sha(b"2"), {}), wanted)
+
+    def test_a_second_search_reads_nothing_again(self) -> None:
+        self.put("a.zip", b"1")
+        wanted = self.put("b.zip", b"2")
+        cache: dict = {}
+        archives.find_by_sha(self.downloads, self.sha(b"2"), cache)
+        with mock.patch.object(state.github, "sha256_file", side_effect=AssertionError("re-read")):
+            self.assertEqual(archives.find_by_sha(self.downloads, self.sha(b"2"), cache), wanted)
+
+    def test_an_uppercase_pin_matches_too(self) -> None:
+        wanted = self.put("a.zip", b"1")
+        self.assertEqual(archives.find_by_sha(self.downloads, self.sha(b"1").upper(), {}), wanted)
+
+
 if __name__ == "__main__":
     unittest.main()

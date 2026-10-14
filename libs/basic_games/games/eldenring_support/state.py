@@ -34,6 +34,7 @@ class InstancePaths:
         self.save_backups = root / "save-backups"
         self.save_snapshots = root / "save-snapshots"
         self.quarantine_game = root / "quarantine-game"
+        self.stale_downloads = root / "stale-downloads"
         self.archive_hashes = root / "archive-hashes.json"
         self.last_launch = root / "last-launch.json"
 

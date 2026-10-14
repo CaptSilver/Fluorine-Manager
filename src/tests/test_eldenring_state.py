@@ -241,6 +241,7 @@ class InstancePathsTests(TempDirCase):
             "save_backups": "save-backups",
             "save_snapshots": "save-snapshots",
             "quarantine_game": "quarantine-game",
+            "stale_downloads": "stale-downloads",
             "archive_hashes": "archive-hashes.json",
             "last_launch": "last-launch.json",
         }

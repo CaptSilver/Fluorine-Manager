@@ -178,3 +178,33 @@ def archive_sha256(paths: state.InstancePaths, archive) -> str:
     """sha256 of an archive through the instance's hash cache."""
     with hash_cache(paths) as cache:
         return state.cached_sha256(cache, archive)
+
+
+_NOT_ARCHIVES = (".meta", ".part", ".unfinished")
+
+
+def find_by_sha(downloads, sha256: str, cache: dict) -> Path | None:
+    """The file directly in `downloads` whose bytes hash to `sha256`, whatever it is called.
+
+    DownloadManager renames on a collision and a person can pick a different
+    file, so a pinned archive is recognised by its bytes. `cache` is the
+    instance's hash cache (hash_cache), which is what keeps a second search from
+    reading every archive again. A sidecar, an unfinished download, a folder and
+    a file that cannot be read are skipped.
+    """
+    wanted = sha256.lower()
+    folder = Path(downloads)
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return None
+    for name in names:
+        path = folder / name
+        if name.endswith(_NOT_ARCHIVES) or not os.path.isfile(path):
+            continue
+        try:
+            if state.cached_sha256(cache, path) == wanted:
+                return path
+        except OSError:
+            continue
+    return None
