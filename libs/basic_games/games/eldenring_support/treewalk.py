@@ -10,17 +10,23 @@ META_INI = "meta.ini"
 HIDDEN_SUFFIX = ".mohidden"
 
 
-def package_files(root) -> list[tuple[str, Path]]:
+def _raise(error: OSError) -> None:
+    raise error
+
+
+def package_files(root, strict: bool = False) -> list[tuple[str, Path]]:
     """(posix path relative to `root`, absolute path) for every game file, sorted.
 
     Mod Organizer's own meta.ini at the root is not a game file, and a file or
     folder it has hidden (renamed with a .mohidden suffix) is not provided. A
     symlink to a file counts as a file, since a view is a tree of them; a
-    dangling one is skipped.
+    dangling one is skipped. A folder that cannot be listed is skipped too,
+    unless `strict` is set, which raises its OSError: a digest that silently
+    left out a folder would claim two different setups are the same.
     """
     base = Path(root)
     found = []
-    for folder, dirs, names in os.walk(base):
+    for folder, dirs, names in os.walk(base, onerror=_raise if strict else None):
         dirs[:] = sorted(d for d in dirs if not d.endswith(HIDDEN_SUFFIX))
         for name in sorted(names):
             if name.endswith(HIDDEN_SUFFIX):

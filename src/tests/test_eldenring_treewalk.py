@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import eldenring_testsupport as support
 
@@ -83,6 +84,32 @@ class ListingDigestTests(TreewalkCase):
         before = treewalk.listing_digest(self.root)
         self.put("meta.ini", b"[General]\nversion=2\n")
         self.assertEqual(treewalk.listing_digest(self.root), before)
+
+
+class StrictWalkTests(TreewalkCase):
+    def unlistable(self, top, onerror=None):
+        if onerror is not None:
+            onerror(PermissionError(13, "Permission denied", str(top)))
+        return iter(())
+
+    def test_a_folder_that_cannot_be_listed_is_skipped_by_default(self) -> None:
+        with mock.patch.object(treewalk.os, "walk", self.unlistable):
+            self.assertEqual(treewalk.package_files(self.root), [])
+
+    def test_a_strict_walk_raises_instead_of_skipping_it(self) -> None:
+        with mock.patch.object(treewalk.os, "walk", self.unlistable):
+            with self.assertRaises(PermissionError):
+                treewalk.package_files(self.root, strict=True)
+
+    def test_a_strict_walk_of_a_missing_folder_raises_too(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            treewalk.package_files(self.tmp / "nowhere", strict=True)
+        self.assertEqual(treewalk.package_files(self.tmp / "nowhere"), [])
+
+    def test_a_strict_walk_of_a_readable_folder_is_the_same_walk(self) -> None:
+        self.put("a.bin")
+        self.put("msg/b.dcx")
+        self.assertEqual(treewalk.package_files(self.root, strict=True), treewalk.package_files(self.root))
 
 
 if __name__ == "__main__":
