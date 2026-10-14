@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -17,6 +18,8 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_state_tests")
 atomic = support.module(PACKAGE, "atomic")
+fsprobe = support.module(PACKAGE, "fsprobe")
+quarantine = support.module(PACKAGE, "quarantine")
 state = support.module(PACKAGE, "state")
 PACKAGE_GAMEBUILD = support.module(PACKAGE, "ermlib.gamebuild")
 
@@ -72,6 +75,141 @@ class AtomicWriteTests(TempDirCase):
         self.assertTrue(target.is_file())
 
 
+class AtomicMoveTests(TempDirCase):
+    def cross_device(self):
+        return mock.patch.object(atomic.os, "rename", side_effect=OSError(errno.EXDEV, "cross-device link"))
+
+    def test_a_rename_moves_the_file(self) -> None:
+        source, target = self.tmp / "a.bin", self.tmp / "b.bin"
+        source.write_bytes(b"data")
+        atomic.move_durably(source, target)
+        self.assertEqual((target.read_bytes(), source.exists()), (b"data", False))
+
+    def test_a_link_is_moved_as_a_link_and_its_target_is_left_alone(self) -> None:
+        real = self.tmp / "real.bin"
+        real.write_bytes(b"data")
+        link, target = self.tmp / "link", self.tmp / "moved"
+        link.symlink_to(real)
+        atomic.move_durably(link, target)
+        self.assertTrue(target.is_symlink())
+        self.assertEqual(os.readlink(target), str(real))
+        self.assertEqual(real.read_bytes(), b"data")
+
+    def test_a_cross_device_move_writes_through_the_atomic_writer_then_removes_the_source(self) -> None:
+        source, target = self.tmp / "a.bin", self.tmp / "b.bin"
+        source.write_bytes(b"data")
+        with self.cross_device(), mock.patch.object(
+            atomic, "write_bytes_atomic", wraps=atomic.write_bytes_atomic
+        ) as write:
+            atomic.move_durably(source, target)
+        write.assert_called_once()
+        self.assertEqual((target.read_bytes(), source.exists()), (b"data", False))
+
+    def test_a_cross_device_link_is_recreated_not_followed(self) -> None:
+        real = self.tmp / "real.bin"
+        real.write_bytes(b"data")
+        link, target = self.tmp / "link", self.tmp / "moved"
+        link.symlink_to(real)
+        with self.cross_device():
+            atomic.move_durably(link, target)
+        self.assertTrue(target.is_symlink())
+        self.assertFalse(os.path.lexists(link))
+        self.assertEqual(real.read_bytes(), b"data")
+
+    def test_a_copy_that_does_not_read_back_keeps_the_source(self) -> None:
+        source, target = self.tmp / "a.bin", self.tmp / "b.bin"
+        source.write_bytes(b"data")
+        real = atomic.write_bytes_atomic
+        with self.cross_device(), mock.patch.object(
+            atomic, "write_bytes_atomic", side_effect=lambda path, data, *a, **k: real(path, data[:2], *a, **k)
+        ):
+            with self.assertRaises(atomic.MoveError):
+                atomic.move_durably(source, target)
+        self.assertEqual(source.read_bytes(), b"data")
+
+    def test_a_rename_that_fails_for_another_reason_is_not_retried_as_a_copy(self) -> None:
+        source = self.tmp / "a.bin"
+        source.write_bytes(b"data")
+        with mock.patch.object(atomic.os, "rename", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                atomic.move_durably(source, self.tmp / "b.bin")
+        self.assertEqual(source.read_bytes(), b"data")
+        self.assertFalse((self.tmp / "b.bin").exists())
+
+
+class FsProbeTests(TempDirCase):
+    def test_each_kind_of_thing_is_named(self) -> None:
+        (self.tmp / "file").write_bytes(b"x")
+        (self.tmp / "dir").mkdir()
+        (self.tmp / "link").symlink_to(self.tmp / "file")
+        (self.tmp / "dangling").symlink_to(self.tmp / "nowhere")
+        os.mkfifo(self.tmp / "pipe")
+        expected = {
+            "file": fsprobe.FILE, "dir": fsprobe.DIR, "link": fsprobe.LINK,
+            "dangling": fsprobe.LINK, "pipe": fsprobe.OTHER, "missing": None,
+        }
+        for name, kind in expected.items():
+            self.assertEqual(fsprobe.kind(self.tmp / name), kind, name)
+
+    def test_a_link_to_a_directory_is_a_link(self) -> None:
+        (self.tmp / "dir").mkdir()
+        (self.tmp / "alias").symlink_to(self.tmp / "dir")
+        self.assertEqual(fsprobe.kind(self.tmp / "alias"), fsprobe.LINK)
+
+    def test_an_unreadable_parent_or_a_bad_path_is_nothing_there(self) -> None:
+        with mock.patch.object(fsprobe.os, "lstat", side_effect=PermissionError("denied")):
+            self.assertIsNone(fsprobe.kind(self.tmp))
+        self.assertIsNone(fsprobe.kind("bad\0path"))
+
+
+class QuarantineTests(TempDirCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.game = self.tmp / "Game"
+        (self.game / "mods/A").mkdir(parents=True)
+        self.paths = state.InstancePaths(organizer(self.tmp / "instance"))
+
+    def test_a_file_keeps_its_relative_path_under_the_stamp(self) -> None:
+        (self.game / "mods/A/config.ini").write_bytes(b"x")
+        moved = quarantine.move_out(self.paths, self.game, "mods/A/config.ini", "20261014T000000000001Z")
+        self.assertEqual(moved, self.paths.quarantine_game / "20261014T000000000001Z/mods/A/config.ini")
+        self.assertEqual(moved.read_bytes(), b"x")
+        self.assertFalse((self.game / "mods/A/config.ini").exists())
+
+    def test_a_link_moves_as_a_link(self) -> None:
+        target = self.tmp / "elsewhere.bin"
+        target.write_bytes(b"x")
+        (self.game / "mods/A/link").symlink_to(target)
+        moved = quarantine.move_out(self.paths, self.game, "mods/A/link", "s")
+        self.assertTrue(moved.is_symlink())
+        self.assertEqual(target.read_bytes(), b"x")
+
+    def test_a_name_already_in_the_quarantine_is_not_overwritten(self) -> None:
+        for data in (b"first", b"second"):
+            (self.game / "mods/A/config.ini").write_bytes(data)
+            quarantine.move_out(self.paths, self.game, "mods/A/config.ini", "s")
+        folder = self.paths.quarantine_game / "s/mods/A"
+        self.assertEqual(
+            sorted((path.name, path.read_bytes()) for path in folder.iterdir()),
+            [("config.ini", b"first"), ("config.ini.1", b"second")],
+        )
+
+    def test_a_folder_a_missing_path_and_an_escaping_path_are_refused(self) -> None:
+        for rel in ("mods/A", "mods/A/nothing.ini", "../outside", "/etc/passwd", "", "."):
+            with self.subTest(rel), self.assertRaises(quarantine.QuarantineError):
+                quarantine.move_out(self.paths, self.game, rel, "s")
+        self.assertFalse(self.paths.quarantine_game.exists())
+
+    def test_a_move_that_fails_is_reported_with_both_paths(self) -> None:
+        (self.game / "mods/A/config.ini").write_bytes(b"x")
+        with mock.patch.object(quarantine.atomic, "move_durably", side_effect=PermissionError("denied")):
+            with self.assertRaises(quarantine.QuarantineError) as caught:
+                quarantine.move_out(self.paths, self.game, "mods/A/config.ini", "s")
+        self.assertIn("denied", str(caught.exception))
+        self.assertIn("mods/A/config.ini", str(caught.exception))
+        self.assertTrue((self.game / "mods/A/config.ini").exists())
+
+
 class InstancePathsTests(TempDirCase):
     def test_every_file_sits_under_the_instance_eldenring_folder(self) -> None:
         paths = state.InstancePaths(organizer("/inst/My Instance"))
@@ -85,6 +223,7 @@ class InstancePathsTests(TempDirCase):
             "views": "views",
             "generated_state": "generated-state.json",
             "vanilla_inventory": "vanilla-inventory.json",
+            "deploy_manifest": "deploy-manifest.json",
             "me3_host_state": "me3-host-state.json",
             "me3_host_staging": "me3-host-staging",
             "save_backups": "save-backups",
@@ -112,6 +251,21 @@ class InstancePathsTests(TempDirCase):
     def test_building_the_paths_creates_nothing_on_disk(self) -> None:
         state.InstancePaths(organizer(self.tmp))
         self.assertEqual(list(self.tmp.iterdir()), [])
+
+
+class ReadJsonObjectTests(TempDirCase):
+    def test_a_missing_file_is_none_and_an_object_is_returned(self) -> None:
+        self.assertIsNone(state.read_json_object(self.tmp / "absent.json"))
+        (self.tmp / "ok.json").write_text('{"a": 1}')
+        self.assertEqual(state.read_json_object(self.tmp / "ok.json"), {"a": 1})
+
+    def test_damage_of_every_kind_raises_naming_the_file(self) -> None:
+        for text in ("{", "[]", "null"):
+            with self.subTest(text):
+                (self.tmp / "bad.json").write_text(text)
+                with self.assertRaises(state.StateError) as caught:
+                    state.read_json_object(self.tmp / "bad.json")
+                self.assertIn("bad.json", str(caught.exception))
 
 
 class CacheTests(TempDirCase):

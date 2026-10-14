@@ -11,7 +11,6 @@ the same restore, which is why it lives here and not in the gate.
 from __future__ import annotations
 
 import contextlib
-import errno
 import hashlib
 import json
 import os
@@ -387,24 +386,11 @@ def _restore_work(
 
 
 def _move_durably(source: Path, destination: Path) -> None:
-    """Move a save file so the destination is complete before the source goes.
-
-    A plain rename is atomic. Across filesystems (Steam compatdata can sit in a
-    different library than the instance) shutil.move would copy without an
-    fsync or a check and then unlink, so a crash could leave only a torn copy.
-    Here the copy is fsynced and hashed before the source is removed.
-    """
+    """atomic.move_durably, with a copy that does not read back reported as a SnapshotError."""
     try:
-        os.rename(source, destination)
-        return
-    except OSError as exc:
-        if exc.errno != errno.EXDEV:
-            raise
-    data = source.read_bytes()
-    atomic.write_bytes_atomic(destination, data)
-    if github.sha256_file(destination) != hashlib.sha256(data).hexdigest():
-        raise SnapshotError(f"the copy {destination} does not match {source}; the original is kept")
-    source.unlink()
+        atomic.move_durably(source, destination)
+    except atomic.MoveError as exc:
+        raise SnapshotError(str(exc)) from exc
 
 
 def _quarantine_path(paths: state.InstancePaths, name: str, stamp: str) -> Path:

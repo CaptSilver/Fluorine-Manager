@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import errno
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -29,3 +31,37 @@ def write_bytes_atomic(path: Path | str, data: bytes, mode: int = 0o644) -> None
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp_name)
         raise
+
+
+class MoveError(OSError):
+    """A move across filesystems whose copy did not read back as the source."""
+
+
+def move_durably(source: Path | str, destination: Path | str) -> None:
+    """Move a file or a symbolic link so the destination is whole before the source goes.
+
+    A rename is atomic. Across filesystems (a Steam library and the instance
+    folder are often on different ones) shutil.move would copy without an
+    fsync or a check and then unlink, so a crash could leave only a torn copy.
+    Here the copy is fsynced and hashed before the source is removed. A link is
+    moved as a link, never followed. A directory is not handled: callers move
+    the files in it one by one.
+    """
+    source, destination = Path(source), Path(destination)
+    try:
+        os.rename(source, destination)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+    if os.path.islink(source):
+        os.symlink(os.readlink(source), destination)
+        os.unlink(source)
+        return
+    data = source.read_bytes()
+    write_bytes_atomic(destination, data)
+    with open(destination, "rb") as written:
+        copied = hashlib.sha256(written.read()).hexdigest()
+    if copied != hashlib.sha256(data).hexdigest():
+        raise MoveError(f"the copy {destination} does not match {source}; the original is kept")
+    source.unlink()

@@ -28,6 +28,7 @@ class InstancePaths:
         self.views = root / "views"
         self.generated_state = root / "generated-state.json"
         self.vanilla_inventory = root / "vanilla-inventory.json"
+        self.deploy_manifest = root / "deploy-manifest.json"
         self.me3_host_state = root / "me3-host-state.json"
         self.me3_host_staging = root / "me3-host-staging"
         self.save_backups = root / "save-backups"
@@ -107,6 +108,15 @@ def _json_object(path: Path) -> dict | None:
     if not isinstance(data, dict):
         raise StateError(f"{path} does not hold a JSON object")
     return data
+
+
+def read_json_object(path) -> dict | None:
+    """The JSON object in `path`; None when the file is not there.
+
+    For state that has to be right, as opposed to read_cache: a file that
+    exists but cannot be read, parsed or is not an object raises StateError.
+    """
+    return _json_object(Path(path))
 
 
 def read_build_stamp(paths: InstancePaths) -> "gamebuild.BuildId | None":
