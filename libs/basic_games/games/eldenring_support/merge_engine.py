@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 from . import archives, generated, kinds, mods, state, treewalk
-from .ermlib import heal, merge
+from .ermlib import gamebuild, heal, merge
 from .ermlib.errors import ErmError
 from .ermlib.formats import bhd5
 from .ermlib.paths import is_safe_relpath
@@ -298,13 +298,77 @@ def load_game_bases(merges: list[dict], game_dir) -> dict[str, bytes]:
         rel = rule["path"]
         try:
             found[rel] = bhd5.read_file(game_dir, rel)
-        except bhd5.Bhd5Error as exc:
+        except (bhd5.Bhd5Error, OSError) as exc:
             raise ConflictError(
                 f"{rel}: the merge asks for the game's own copy as its base, and it could "
                 f"not be read ({exc}). Refusing rather than merging onto a mod's older "
                 "snapshot of the same file."
             ) from exc
     return found
+
+
+# -- the game's own copy for automatic merges ---------------------------------
+
+
+class AutoResolver(NamedTuple):
+    """What an automatic merge needs from the installed game.
+
+    `game_copy(rel)` is the game's own file, which leads the fold and is the
+    ancestor of every three-way step. `check_inputs` and `check_output` raise
+    ConflictError when merging the providers' files would be unsound.
+    """
+
+    game_copy: Callable[[str], bytes]
+    check_inputs: Callable[[str, list, bytes], None]
+    check_output: Callable[[str, bytes, list, bytes], None]
+
+
+def make_auto_resolver(game_dir, live, paths: state.InstancePaths) -> AutoResolver:
+    """The resolver for the installed game: archives for msg/ and the like, the kept baseline for regulation.bin.
+
+    regulation.bin is a loose file in Game/ and not in the archives; the kept
+    baseline is that file, hashed against the installed build before it is used.
+    Merging a regulation is only sound when every provider branched from the
+    installed build, since the game's copy stands in for the ancestor and a
+    provider's rows from an older build would read as its edits and revert the
+    patch. The layout gate and the row check afterwards are the rebase's own.
+    """
+    copies: dict[str, bytes] = {}
+
+    def game_copy(rel: str) -> bytes:
+        if rel not in copies:
+            try:
+                if rel == REGULATION:
+                    copies[rel] = heal.adopt_baseline(game_dir, live, base=paths.baselines).read_bytes()
+                else:
+                    copies[rel] = bhd5.read_file(game_dir, rel)
+            except (ErmError, OSError) as exc:
+                raise ConflictError(f"the game's own copy of {rel} could not be read: {exc}") from exc
+        return copies[rel]
+
+    def check_inputs(rel: str, blobs: list, game: bytes) -> None:
+        if rel != REGULATION:
+            return
+        for mod, blob in blobs:
+            built = gamebuild.cached_regulation_version(blob, paths.regulation_cache)
+            if built != live.regulation:
+                raise ConflictError(
+                    f"{mod}'s regulation.bin was built for game build {built} and the game is {live.regulation}. "
+                    "Without the file it branched from, its edits cannot be told from the patch's. A [[merges]] "
+                    "entry with a vanilla ancestor rebases it."
+                )
+        problems = heal.layout_gate(game, blobs)
+        if problems:
+            raise ConflictError("the param layout moved: " + "; ".join(problems))
+
+    def check_output(rel: str, merged: bytes, blobs: list, game: bytes) -> None:
+        if rel != REGULATION:
+            return
+        problems = heal.verify_rebase(merged, game, blobs, live)
+        if problems:
+            raise ConflictError("the merged regulation.bin is not a faithful merge onto the game's: " + "; ".join(problems))
+
+    return AutoResolver(game_copy, check_inputs, check_output)
 
 
 # -- planning -----------------------------------------------------------------

@@ -19,6 +19,7 @@ errors = support.module(PACKAGE, "ermlib.errors")
 heal = support.module(PACKAGE, "ermlib.heal")
 merge = support.module(PACKAGE, "ermlib.merge")
 bhd5 = support.module(PACKAGE, "ermlib.formats.bhd5")
+gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 
 CONCAT = {"concat": lambda out, extra, notes=None: out + b"|" + extra}
 RULE = {"path": "msg/x.dcx", "strategy": "concat", "mods": ["a", "b", "c"], "prefer": "a"}
@@ -435,6 +436,88 @@ class GameBaseTests(unittest.TestCase):
             with self.assertRaises(merge_engine.ConflictError) as caught:
                 merge_engine.load_game_bases([{"path": "a", "base": "game"}], "/game")
         self.assertIn("no archive", str(caught.exception))
+
+    def test_a_missing_archive_file_is_fatal_too(self) -> None:
+        with mock.patch.object(bhd5, "read_file", side_effect=FileNotFoundError("Data0.bdt")):
+            with self.assertRaises(merge_engine.ConflictError) as caught:
+                merge_engine.load_game_bases([{"path": "a", "base": "game"}], "/game")
+        self.assertIn("Data0.bdt", str(caught.exception))
+
+
+class ResolverTests(EngineCase):
+    LIVE = types.SimpleNamespace(regulation="11711000", regulation_sha="s" * 64)
+
+    def resolver(self):
+        return merge_engine.make_auto_resolver("/game", self.LIVE, self.paths)
+
+    def test_a_game_copy_is_read_out_of_the_archives_once(self) -> None:
+        with mock.patch.object(bhd5, "read_file", return_value=b"G") as read:
+            resolver = self.resolver()
+            self.assertEqual(resolver.game_copy("msg/engus/x.msgbnd.dcx"), b"G")
+            self.assertEqual(resolver.game_copy("msg/engus/x.msgbnd.dcx"), b"G")
+        read.assert_called_once_with("/game", "msg/engus/x.msgbnd.dcx")
+
+    def test_a_path_no_archive_holds_is_a_conflict_error_with_the_reason(self) -> None:
+        with mock.patch.object(bhd5, "read_file", side_effect=bhd5.Bhd5Error("is not in any of Data0")):
+            with self.assertRaises(merge_engine.ConflictError) as caught:
+                self.resolver().game_copy("msg/engus/x.msgbnd.dcx")
+        self.assertIn("is not in any of Data0", str(caught.exception))
+        self.assertIn("msg/engus/x.msgbnd.dcx", str(caught.exception))
+
+    def test_a_missing_archive_file_is_a_conflict_error_too(self) -> None:
+        with mock.patch.object(bhd5, "read_file", side_effect=FileNotFoundError("Data0.bdt")):
+            with self.assertRaises(merge_engine.ConflictError):
+                self.resolver().game_copy("msg/engus/x.msgbnd.dcx")
+
+    def test_regulation_bin_is_the_kept_baseline_not_an_archive_member(self) -> None:
+        kept = self.tmp / "baseline.bin"
+        kept.write_bytes(b"REG")
+        with mock.patch.object(heal, "adopt_baseline", return_value=kept) as adopt, \
+                mock.patch.object(bhd5, "read_file", side_effect=AssertionError("archive read")):
+            self.assertEqual(self.resolver().game_copy("regulation.bin"), b"REG")
+        adopt.assert_called_once_with("/game", self.LIVE, base=self.paths.baselines)
+
+    def test_a_baseline_that_cannot_be_adopted_is_a_conflict_error(self) -> None:
+        with mock.patch.object(heal, "adopt_baseline", side_effect=heal.HealError("kept baseline differs")):
+            with self.assertRaises(merge_engine.ConflictError) as caught:
+                self.resolver().game_copy("regulation.bin")
+        self.assertIn("kept baseline differs", str(caught.exception))
+
+    def test_a_regulation_built_for_another_build_is_refused_naming_the_mod_and_both_builds(self) -> None:
+        with mock.patch.object(gamebuild, "cached_regulation_version", return_value="11611000"):
+            with self.assertRaises(merge_engine.ConflictError) as caught:
+                self.resolver().check_inputs("regulation.bin", [("old-mod", b"x")], b"G")
+        for text in ("old-mod", "11611000", "11711000"):
+            self.assertIn(text, str(caught.exception))
+
+    def test_the_layout_gate_decides_whether_rows_can_be_transplanted(self) -> None:
+        problems = ("old-mod: EquipParamWeapon.param row stride 12 != baseline 8",)
+        with mock.patch.object(gamebuild, "cached_regulation_version", return_value="11711000"), \
+                mock.patch.object(heal, "layout_gate", return_value=problems) as gate:
+            with self.assertRaises(merge_engine.ConflictError) as caught:
+                self.resolver().check_inputs("regulation.bin", [("old-mod", b"x")], b"G")
+        self.assertIn("row stride 12", str(caught.exception))
+        gate.assert_called_once_with(b"G", [("old-mod", b"x")])
+
+    def test_regulations_on_the_installed_build_with_a_matching_layout_pass(self) -> None:
+        with mock.patch.object(gamebuild, "cached_regulation_version", return_value="11711000"), \
+                mock.patch.object(heal, "layout_gate", return_value=()):
+            self.resolver().check_inputs("regulation.bin", [("a", b"x"), ("b", b"y")], b"G")
+
+    def test_a_merged_regulation_that_loses_rows_is_refused(self) -> None:
+        with mock.patch.object(heal, "verify_rebase", return_value=("a: SpEffectParam row 5 did not survive the rebase",)) as verify:
+            with self.assertRaises(merge_engine.ConflictError) as caught:
+                self.resolver().check_output("regulation.bin", b"M", [("a", b"x")], b"G")
+        self.assertIn("row 5", str(caught.exception))
+        verify.assert_called_once_with(b"M", b"G", [("a", b"x")], self.LIVE)
+
+    def test_other_files_are_not_checked(self) -> None:
+        with mock.patch.object(gamebuild, "cached_regulation_version", side_effect=AssertionError("checked")), \
+                mock.patch.object(heal, "layout_gate", side_effect=AssertionError("checked")), \
+                mock.patch.object(heal, "verify_rebase", side_effect=AssertionError("checked")):
+            resolver = self.resolver()
+            resolver.check_inputs("msg/engus/x.msgbnd.dcx", [("a", b"x")], b"G")
+            resolver.check_output("msg/engus/x.msgbnd.dcx", b"M", [("a", b"x")], b"G")
 
 
 class RebaseTests(EngineCase):
