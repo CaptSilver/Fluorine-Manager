@@ -198,7 +198,12 @@ def adopt_inventory(
                 f"({wanted}). Verify the game files in Steam, then run the import again."
             )
         recorded = inventory.read(paths)
-        if recorded is not None and not inventory.build_changed(recorded, live.steam_buildid):
+        # check() leaves regulation.bin out (it is held to regulation_sha), so compare the pin here.
+        if (
+            recorded is not None
+            and recorded.regulation_sha == live.regulation_sha
+            and not inventory.build_changed(recorded, live.steam_buildid)
+        ):
             if not inventory.check(game_dir, manifest, recorded, live.steam_buildid, cache=cache).blocking():
                 report.ok("Game/ already matches the vanilla inventory recorded earlier")
                 return True

@@ -276,6 +276,17 @@ class AdoptionTests(GameCase):
         self.assertEqual(len(self.script.shown), asked)
         self.assertIn("already matches", self.report.text())
 
+    def test_an_inventory_pinned_to_another_regulation_is_replaced_after_a_new_confirmation(self) -> None:
+        self.assertTrue(self.adopt())
+        asked = len(self.script.shown)
+        new_sha = "b" * 64
+        self.live = LIVE._replace(regulation_sha=new_sha)
+        self.installed["_build"]["regulation_sha"] = new_sha
+        self.assertTrue(self.adopt())
+        self.assertEqual(len(self.script.shown), asked + 1)
+        self.assertNotIn("already matches", self.report.text())
+        self.assertEqual(inventory.read(self.paths).regulation_sha, new_sha)
+
     def test_an_inventory_that_no_longer_matches_is_replaced_after_a_new_confirmation(self) -> None:
         self.assertTrue(self.adopt())
         self.put("added.dll", b"MZ added")
