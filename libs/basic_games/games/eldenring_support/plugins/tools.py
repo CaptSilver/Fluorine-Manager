@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QMessageBox
 import mobase
 
 from .. import (
-    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importer, importsave, kinds, listfile,
+    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importer, importfinish, importsave, kinds, listfile,
     listimport, me3_host, problems, procs, qtui, saves, session, state,
 )
 from ..ermlib.errors import ErmError
@@ -202,6 +202,15 @@ ACTION_LABELS = {
     importsave.MODDED: "Move it to the modded save",
     importsave.KEEP: "Keep it as vanilla",
 }
+
+CONFIRM_IMPORT = (
+    "This will back up your save files, install erm's mods from its vendor/ folder (nothing is downloaded), "
+    "create a Fluorine profile for each ticked erm profile, then move erm's files out of Game/ into this "
+    "instance's quarantine-game folder (nothing is deleted), record what is left as vanilla and check Steam's "
+    "launch option.\n\n"
+    "You are shown each list before anything in Game/ moves. Close Steam if you want ER0000.sl2 quarantined, "
+    "and keep it open when you are asked to clear the launch option."
+)
 
 
 UNCHECKED = (
@@ -909,16 +918,23 @@ class ImportFromErmTool(EldenRingTool):
         return "Elden Ring Import from erm"
 
     def description(self) -> str:
-        return "Install erm's mods as Fluorine mods and create a profile for each erm profile."
+        return (
+            "Install erm's mods as Fluorine mods, create a profile for each erm profile, move erm's files out of "
+            "Game/ and check Steam's launch option."
+        )
 
     def displayName(self) -> str:
         return "Elden Ring: Import from erm…"
 
     def tooltip(self) -> str:
-        return "Copy erm's mods, profiles and records into this instance. Nothing in Game/ is changed."
+        return (
+            "Copy erm's mods, profiles and records into this instance, then move erm's files out of Game/ into "
+            "quarantine and check Steam's launch option. Nothing is deleted."
+        )
 
     def run(self) -> None:
         title = self.displayName()
+        procs.refuse_while_running(None, "run the import")
         folder = qtui.choose_folder(self._parent, title, str(Path.home()))
         if folder is None:
             return
@@ -931,35 +947,74 @@ class ImportFromErmTool(EldenRingTool):
         if not names:
             QMessageBox.information(self._parent, title, "No profile was ticked, so nothing was imported.")
             return
-        answer = QMessageBox.question(
-            self._parent,
-            title,
-            "This will back up your save files, install erm's mods from its vendor/ folder "
-            "(nothing is downloaded) and create a Fluorine profile for each ticked erm profile.\n\n"
-            "It does not change Game/, the Steam launch option or the save files themselves.",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self._parent, title, CONFIRM_IMPORT) != QMessageBox.StandardButton.Yes:
             return
         game = self._organizer.managedGame()
-        save_dir = saves.save_dir(saves.library_root(game.gameDirectory().absolutePath()))
+        library = saves.library_root(game.gameDirectory().absolutePath())
+        save_dir = saves.save_dir(library)
+        stamp = session.now_stamp()
+        report = importer.Report()
+        stopped = None
         busy = Busy(title, self._parent)
         try:
             report = importer.run(
-                self._organizer, folder, save_dir=save_dir, profiles=names,
-                version_info=mobase.VersionInfo,
+                self._organizer, folder, save_dir=save_dir, profiles=names, version_info=mobase.VersionInfo,
+                stamp=stamp, report=report,
             )
         except importer.ImportStopped as exc:
-            if exc.report is not None and exc.report.lines:
-                qtui.show_text(
-                    self._parent, title,
-                    f"The import stopped: {exc}\n\nWhat was done before it stopped:\n{exc.report.text()}",
-                )
-            else:
-                QMessageBox.critical(self._parent, title, str(exc))
-            return
+            stopped = exc
         finally:
             busy.close()
+        if stopped is None:
+            host = importfinish.Host(
+                game_dir=Path(game.dataDirectory().absolutePath()), library=library, save_dir=save_dir
+            )
+            try:
+                importfinish.finish(
+                    self._organizer, folder, report, host=host, ui=self._import_ui(title), stamp=stamp
+                )
+            except importer.ImportStopped as exc:
+                stopped = exc
+        problems.invalidate()
+        if stopped is not None:
+            self._show_stopped(title, stopped, report)
+            return
         qtui.show_text(self._parent, title, report.text())
+
+    def _show_stopped(self, title: str, exc: importer.ImportStopped, report: importer.Report) -> None:
+        done = exc.report if exc.report is not None else report
+        if done.lines:
+            qtui.show_text(
+                self._parent, title,
+                f"The import stopped: {exc}\n\nWhat was done before it stopped:\n{done.text()}",
+            )
+        else:
+            QMessageBox.critical(self._parent, title, str(exc))
+
+    def _import_ui(self, title: str) -> importfinish.Ui:
+        """The dialogs of the second part of the import, built from this tool's message boxes."""
+        parent = self._parent
+
+        def confirm_adoption(text: str) -> str | None:
+            if not qtui.review(parent, title, text, "Continue"):
+                return None
+            picked = _choose(
+                parent, title, "Did you verify the game files in Steam before this?",
+                ["Yes, I verified them", "No, record Game/ as it is"],
+            )
+            return None if picked is None else (importfinish.VERIFIED, importfinish.UNVERIFIED)[picked]
+
+        def launch_option(text: str) -> bool:
+            return _choose(parent, title, text, ["I cleared it, check again"]) == 0
+
+        return importfinish.Ui(
+            ask_answer=lambda text: self._ask_answer(text, title),
+            ask_action=lambda text, preselect: self._ask_action(text, preselect, title),
+            review=lambda heading, text, accept: qtui.review(parent, heading, text, accept),
+            confirm_adoption=confirm_adoption,
+            launch_option=launch_option,
+            busy=lambda heading: Busy(heading, parent),
+        )
 
 
 LIST_FILTER = "Elden Ring lists (*.erlist.json);;All files (*)"

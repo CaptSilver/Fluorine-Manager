@@ -1,11 +1,12 @@
 """Bring an erm checkout's mods, profiles and records into this instance.
 
-What this does: back up the saves; carry erm's build record and baselines;
-install the mods from erm's vendor/ folder without downloading anything; write
-one Fluorine profile per erm profile with its merge rules; carry the co-op
-password. What it does not do: it writes nothing into Game/, does not touch the
-Steam launch option, and does not move or adopt anything in the save folder.
-erm keeps working through Steam until those are done.
+This is the first part of the import. It backs up the saves; flags ER0000.sl2
+for review when there is one; carries erm's build record and baselines;
+installs the mods from erm's vendor/ folder without downloading anything;
+writes one Fluorine profile per erm profile with its merge rules; and carries
+the co-op password. It writes nothing into Game/, does not read the Steam
+launch option and does not move anything in the save folder: importfinish does
+those once this returns, in the same report.
 
 Every step is safe to repeat: an installed mod, an existing profile and an
 identical baseline are left as they are and reported.
@@ -701,8 +702,8 @@ def _run(
         )
     _carry_password(organizer, erm_dir, report)
     report.info(
-        "Not done here: Game/ was not touched, the Steam launch option was not changed and the "
-        "save files were only copied."
+        "The next part of the import moves erm's files out of Game/, records what is left as vanilla and "
+        "checks the Steam launch option."
     )
     return report
 
