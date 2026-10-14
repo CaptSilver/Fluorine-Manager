@@ -7,6 +7,10 @@ folders and chainloads native DLLs, so this plugin opts out of the FUSE mount
 is True). me3 itself picks Steam's compatdata/1245620 prefix to run the game in,
 which is also where the saves are, so the Saves tab is pointed at that folder
 instead of at Fluorine's own prefix.
+
+Every launch goes through the launch gate (eldenring_support/gate.py), which
+refuses what would run the game unmodded against the vanilla save and puts
+the save back after a session that wrote it.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from PyQt6.QtCore import QDir, QFileInfo, qWarning
 import mobase
 
 from ..basic_game import BasicGame
-from .eldenring_support import me3, me3_host, saves, state
+from .eldenring_support import gate, me3, me3_host, qtui, saves, state
 
 ENTRY_TITLE = "Elden Ring (me3)"
 
@@ -44,6 +48,53 @@ class EldenRingGame(BasicGame):
     GameDocumentsDirectory = "%USERPROFILE%/AppData/Roaming/EldenRing"
     GameSavesDirectory = "%USERPROFILE%/AppData/Roaming/EldenRing"
     GameSaveExtension = "sl2"
+
+    # Set by init(). Class attributes so the callbacks can be reached, and
+    # ignore the call, on an instance init() has not finished with.
+    _gate: gate.LaunchGate | None = None
+    _parent_widget = None
+
+    def init(self, organizer) -> bool:
+        if not super().init(organizer):
+            return False
+        self._gate = gate.LaunchGate(
+            organizer,
+            self,
+            show_veto=self._show_critical,
+            show_modal=self._show_critical,
+            busy=lambda title: qtui.Busy(title, self._parent_widget),
+            warn=qWarning,
+        )
+        # pybind11 hands a plain Python callable to the first onAboutToRun
+        # overload, the one with the working directory and arguments.
+        registered = (
+            organizer.onAboutToRun(self._on_about_to_run),
+            organizer.onFinishedRun(self._on_finished_run),
+            organizer.onUserInterfaceInitialized(self._on_user_interface_initialized),
+        )
+        if not all(registered):
+            qWarning("Elden Ring: could not register the launch gate callbacks")
+            return False
+        return True
+
+    def _show_critical(self, title: str, text: str) -> None:
+        qtui.critical(self._parent_widget, title, text)
+
+    def _on_about_to_run(self, binary: str, cwd: QDir, arguments: str) -> bool:
+        if self._gate is None:
+            return True
+        return self._gate.run(binary, cwd, arguments)
+
+    def _on_finished_run(self, binary: str, exit_code: int) -> None:
+        if self._gate is not None:
+            self._gate.finished(binary, exit_code)
+
+    def _on_user_interface_initialized(self, window) -> None:
+        # Connected for every game plugin, active or not.
+        if self._gate is None or not self.isActive():
+            return
+        self._parent_widget = window
+        self._gate.sweep_stale()
 
     def isNativeLinux(self) -> bool:
         return True

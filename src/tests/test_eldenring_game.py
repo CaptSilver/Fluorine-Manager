@@ -48,12 +48,18 @@ class _ExecutableInfo:
 class _BasicGame:
     """Just the parts of BasicGame the plugin leans on."""
 
+    active = True
+    init_result = True
+
     def __init__(self) -> None:
         self._gamePath = ""
 
     def init(self, organizer) -> bool:
         self._organizer = organizer
-        return True
+        return self.init_result
+
+    def isActive(self) -> bool:  # noqa: N802 - mobase spelling
+        return self.active
 
     def isInstalled(self) -> bool:
         return bool(self._gamePath)
@@ -95,6 +101,32 @@ def _load_game() -> types.ModuleType:
 GAME = _load_game()
 
 
+class FakeOrganizer:
+    """Records what the game plugin registers; the real one is the core's."""
+
+    def __init__(self, base) -> None:
+        self.base = base
+        self.about_to_run: list = []
+        self.finished_run: list = []
+        self.ui_initialized: list = []
+        self.accepts = True
+
+    def basePath(self) -> str:  # noqa: N802 - mobase spelling
+        return str(self.base)
+
+    def onAboutToRun(self, callback) -> bool:  # noqa: N802
+        self.about_to_run.append(callback)
+        return self.accepts
+
+    def onFinishedRun(self, callback) -> bool:  # noqa: N802
+        self.finished_run.append(callback)
+        return self.accepts
+
+    def onUserInterfaceInitialized(self, callback) -> bool:  # noqa: N802
+        self.ui_initialized.append(callback)
+        return self.accepts
+
+
 class GameCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -109,7 +141,7 @@ class GameCase(unittest.TestCase):
         self.manifest.parent.mkdir(parents=True)
         self.manifest.write_text('"AppState"\n{\n}\n')
         self.base = self.tmp / "instance"
-        self.organizer = types.SimpleNamespace(basePath=lambda: str(self.base))
+        self.organizer = FakeOrganizer(self.base)
         self.game = GAME.EldenRingGame()
 
     def put_me3(self) -> Path:
@@ -227,6 +259,82 @@ class ExecutablesTests(GameCase):
             self.assertIsInstance(self.game.savesDirectory(), QDir)
         warn.assert_called_once()
         self.assertIn("OSError", warn.call_args.args[0])
+
+
+class GateWiringTests(GameCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.game.setGamePath(self.install)
+        self.game.init(self.organizer)
+
+    def test_each_callback_is_registered_once(self) -> None:
+        self.assertEqual(len(self.organizer.about_to_run), 1)
+        self.assertEqual(len(self.organizer.finished_run), 1)
+        self.assertEqual(len(self.organizer.ui_initialized), 1)
+
+    def test_init_succeeds_when_everything_registers(self) -> None:
+        self.assertIs(self.game.init(FakeOrganizer(self.base)), True)
+
+    def test_init_fails_loudly_when_a_callback_is_refused(self) -> None:
+        refusing = FakeOrganizer(self.base)
+        refusing.accepts = False
+        with mock.patch.object(GAME, "qWarning") as warn:
+            self.assertIs(self.game.init(refusing), False)
+        warn.assert_called_once()
+
+    def test_init_fails_when_the_base_class_does(self) -> None:
+        self.game.init_result = False
+        self.assertIs(self.game.init(FakeOrganizer(self.base)), False)
+        self.game.init_result = True
+
+    def test_about_to_run_hands_the_gate_what_the_core_passed(self) -> None:
+        work = QDir("/work dir")
+        with mock.patch.object(self.game._gate, "run", return_value=False) as run:
+            result = self.organizer.about_to_run[0]("/bin/me3", work, '-p "a b"')
+        self.assertIs(result, False)
+        binary, cwd, arguments = run.call_args.args
+        self.assertEqual((binary, arguments), ("/bin/me3", '-p "a b"'))
+        self.assertIs(cwd, work, "the gate converts the QDir, inside its own guard")
+
+    def test_finished_run_forwards_the_binary_and_exit_code(self) -> None:
+        with mock.patch.object(self.game._gate, "finished") as finished:
+            self.organizer.finished_run[0]("/bin/me3", 3)
+        finished.assert_called_once_with("/bin/me3", 3)
+
+    def test_the_main_window_is_kept_for_dialogs_and_the_startup_check_runs(self) -> None:
+        window = object()
+        with mock.patch.object(self.game._gate, "sweep_stale") as sweep:
+            self.organizer.ui_initialized[0](window)
+        sweep.assert_called_once_with()
+        with mock.patch.object(GAME.qtui, "critical") as critical:
+            self.game._show_critical("Title", "Text")
+        critical.assert_called_once_with(window, "Title", "Text")
+
+    def test_an_inactive_game_ignores_the_startup_callback(self) -> None:
+        self.game.active = False
+        with mock.patch.object(self.game._gate, "sweep_stale") as sweep:
+            self.organizer.ui_initialized[0](object())
+        sweep.assert_not_called()
+        self.assertIsNone(self.game._parent_widget)
+
+    def test_before_init_finishes_every_callback_is_a_no_op(self) -> None:
+        fresh = GAME.EldenRingGame()
+        self.assertIs(fresh._on_about_to_run("/bin/me3", QDir("/x"), ""), True)
+        fresh._on_finished_run("/bin/me3", 0)
+        fresh._on_user_interface_initialized(object())
+
+    def test_the_real_gate_lets_an_unrelated_program_through(self) -> None:
+        self.assertIs(self.organizer.about_to_run[0]("/usr/bin/xterm", QDir("/tmp"), ""), True)
+
+    def test_the_real_gate_vetoes_a_game_exe_and_asks_for_a_dialog(self) -> None:
+        exe = self.install / "Game/eldenring.exe"
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b"MZ")
+        with mock.patch.object(GAME.qtui, "critical") as critical:
+            result = self.organizer.about_to_run[0](str(exe), QDir(str(exe.parent)), "")
+        self.assertIs(result, False)
+        self.assertEqual(critical.call_args.args[1], "Elden Ring launch blocked")
+        self.assertIn("me3", critical.call_args.args[2])
 
 
 if __name__ == "__main__":
