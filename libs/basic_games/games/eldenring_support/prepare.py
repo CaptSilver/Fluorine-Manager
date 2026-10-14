@@ -42,6 +42,7 @@ COOP_SETTINGS = "COOP_SETTINGS"
 COOP_SAVE_EXTENSION = "COOP_SAVE_EXTENSION"
 MERGE_FAILED = "MERGE_FAILED"
 RULES_DAMAGED = "RULES_DAMAGED"
+ACTIVE_LIST_MISMATCH = "ACTIVE_LIST_MISMATCH"
 
 COOP_PASSWORD_SETTING = "coop_password"
 
@@ -58,8 +59,39 @@ class Prepared:
     rebuilt: bool = False
 
 
+def _active_list(organizer) -> dict | None:
+    """The profile's active list, or None. A damaged rules file reads as none here: preparing reports it itself."""
+    try:
+        return state.read_profile_rules(organizer.profilePath())["active_list"]
+    except state.StateError:
+        return None
+
+
+def _check_list_reference(active_list: dict | None, live: gamebuild.BuildId) -> None:
+    """Hold regulation.bin to the active list's hash for the same version.
+
+    Vanilla regulation.bin is depot content, the same file for everyone on a
+    build, so the list's value is the one reference that does not come from
+    this machine. A baseline adopted from a poisoned file would be wrong for
+    good, so this runs before anything can adopt one.
+    """
+    build = active_list.get("game_build") if isinstance(active_list, dict) else None
+    if not isinstance(build, dict) or build.get("regulation") != live.regulation:
+        return
+    pinned = build.get("regulation_sha")
+    if isinstance(pinned, str) and pinned and pinned != live.regulation_sha:
+        raise Veto(
+            "Game build",
+            f"The active list pins regulation.bin of build {live.regulation} as {pinned[:12]}, and Game/regulation.bin "
+            f"here is {live.regulation_sha[:12]}. The vanilla file is the same for everyone on a build, so one of you "
+            "has a modified or damaged one, and a merge would adopt it as the baseline for good.",
+            "Verify the game files in Steam, then try again. If the list's author has changed the file, ask them.",
+            ACTIVE_LIST_MISMATCH,
+        )
+
+
 def _identity(
-    paths: state.InstancePaths, game_dir: Path, library: Path | None
+    paths: state.InstancePaths, game_dir: Path, library: Path | None, active_list: dict | None = None
 ) -> tuple[gamebuild.BuildId, inventory.Inventory]:
     """Which build is installed, what vanilla is recorded to be, and whether regulation.bin is it.
 
@@ -84,6 +116,7 @@ def _identity(
         stamped = state.read_build_stamp(paths)
     except ErmError as exc:
         raise Veto("Game build", str(exc), "Verify the game files in Steam.", GAME_BUILD) from exc
+    _check_list_reference(active_list, live)
     vanilla = _recorded_vanilla(paths)
     if stamped is None and live.regulation_sha != vanilla.regulation_sha:
         raise Veto(
@@ -314,7 +347,7 @@ def prepare(
     game_dir = Path(game.dataDirectory().absolutePath())
     library = saves.library_root(game.gameDirectory().absolutePath())
     notify("Checking the game build")
-    live, vanilla = _identity(paths, game_dir, library)
+    live, vanilla = _identity(paths, game_dir, library, _active_list(organizer))
     notify("Checking the game folder")
     folder_notes = _game_folder(organizer, paths, game_dir, live, vanilla)
 

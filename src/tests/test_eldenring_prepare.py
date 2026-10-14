@@ -684,5 +684,56 @@ class WhatPrepareDoesNotWriteTests(PrepareCase):
         self.assertEqual(prepared.natives, [])
 
 
+class ActiveListReferenceTests(PrepareCase):
+    """The active list's regulation.bin hash is the one outside reference a poisoned baseline cannot fake."""
+
+    def activate(self, regulation: str = "11711000", sha: str = "a" * 64) -> None:
+        rules = state.read_profile_rules(self.organizer.profilePath())
+        rules["active_list"] = {"game_build": {"exe": "2.7.1.0", "app": "1.17.1", "regulation": regulation, "regulation_sha": sha}}
+        state.write_profile_rules(self.organizer.profilePath(), rules)
+
+    def test_the_same_build_with_another_regulation_hash_is_a_veto_before_anything_adopts_a_baseline(self) -> None:
+        self.activate(sha="e" * 64)
+        self.package("a", {"regulation.bin": "RA"})
+        veto = self.veto(prepare.ACTIVE_LIST_MISMATCH)
+        self.assertIn("regulation.bin", veto.text())
+        self.assertIn(("a" * 64)[:12], veto.text())
+        self.assertIn(("e" * 64)[:12], veto.text())
+        self.adopt.assert_not_called()
+        self.prepare_rebase.assert_not_called()
+        self.assertEqual(self.generated_files(), {})
+
+    def test_it_comes_before_the_adoption_of_a_new_baseline_after_a_patch(self) -> None:
+        state.write_build_stamp(
+            self.paths, LIVE._replace(exe="2.7.0.0", regulation="11701000", steam_buildid="1", regulation_sha="c" * 64)
+        )
+        self.activate(sha="e" * 64)
+        self.veto(prepare.ACTIVE_LIST_MISMATCH)
+        self.adopt.assert_not_called()
+
+    def test_the_same_hash_goes_on(self) -> None:
+        self.activate(sha="a" * 64)
+        self.package("a", {"msg/x.dcx": "A"})
+        self.assertEqual(self.run_prepare().live, LIVE)
+
+    def test_a_list_for_another_build_is_not_compared_here(self) -> None:
+        self.activate(regulation="11811000", sha="e" * 64)
+        self.package("a", {"msg/x.dcx": "A"})
+        self.assertEqual(self.run_prepare().live, LIVE)
+
+    def test_a_list_without_a_usable_game_build_is_ignored_here(self) -> None:
+        rules = state.read_profile_rules(self.organizer.profilePath())
+        self.package("a", {"msg/x.dcx": "A"})
+        for broken in ({}, {"game_build": "x"}, {"game_build": {"regulation": "11711000"}}):
+            rules["active_list"] = broken
+            state.write_profile_rules(self.organizer.profilePath(), rules)
+            self.assertEqual(self.run_prepare().live, LIVE)
+
+    def test_damaged_rules_are_still_the_rules_veto_and_not_a_crash_in_the_identity_step(self) -> None:
+        self.package("a", {"msg/x.dcx": "A"})
+        state.profile_rules(self.organizer.profilePath()).write_text("{nope")
+        self.veto(prepare.RULES_DAMAGED)
+
+
 if __name__ == "__main__":
     unittest.main()
