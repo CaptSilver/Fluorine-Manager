@@ -118,6 +118,7 @@ errors = support.module(PACKAGE, "ermlib.errors")
 session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
 saves = support.module(PACKAGE, "saves")
+import test_eldenring_listfile as base  # noqa: E402  (shares the loaded package and its instance helper)
 
 
 class ToolCase(unittest.TestCase):
@@ -143,7 +144,8 @@ class CreatePluginsTests(ToolCase):
             [type(plugin).__name__ for plugin in plugins],
             [
                 "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
-                "HardenTool", "SyncDeployedTool", "EldenRingDiagnose",
+                "HardenTool", "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool",
+                "EldenRingDiagnose",
             ],
         )
 
@@ -1524,6 +1526,406 @@ class SyncDeployedToolTests(HardenToolCase):
         [text] = self.shown("critical")
         self.assertIn("x.dll", text)
         self.assertIn("Set mod kind", text)
+
+
+class ListToolCase(ModToolCase):
+    """The three list tools against a real instance with mods installed from archives."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.partner = base.Instance(self.tmp / "partner")
+        self.pack = self.partner.install(
+            "pack", {"regulation.bin": b"one"}, nexus_id=1928, file_id=49812, version="26.2",
+            archive_files={"Wrapper/regulation.bin": b"one"},
+        )
+        self.me = base.Instance(self.tmp / "me")
+        self.organizer = self.me.organizer
+        self.modlist = self.me.modlist
+        self.organizer.managedGame = lambda: self.game
+        self.modlist.add(generated.NAME, kind="generated")
+        self.prepared = SimpleNamespace(live=base.LIVE)
+        for patcher in (
+            mock.patch.object(tools.EldenRingTool, "_the_gate", lambda tool: SimpleNamespace(rebuild=lambda: self.prepared)),
+            mock.patch.object(tools.listfile.generated, "codecs", return_value=base.CODECS),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def profile_rules(self) -> dict:
+        return state.read_profile_rules(self.organizer.profilePath())
+
+
+class ExportListToolTests(ListToolCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.me.install(
+            "pack", {"regulation.bin": b"one"}, nexus_id=1928, file_id=49812, version="26.2",
+            archive_files={"Wrapper/regulation.bin": b"one"},
+        )
+        self.tool = tools.ExportListTool()
+        self.tool.init(self.organizer)
+        self.target = self.tmp / "out" / "mine.erlist.json"
+        self.target.parent.mkdir()
+
+    def drive(self, name="  my list ", seed="seed-9", target=None, answers=None):
+        target = str(self.target) if target is None else target
+        with mock.patch.object(tools.qtui, "ask_text", side_effect=[name, seed] if answers is None else answers) as ask, \
+                mock.patch.object(tools.qtui, "choose_save_file", return_value=target) as save:
+            self.tool.display()
+        return ask, save
+
+    def test_it_is_named_and_limited_to_the_game(self) -> None:
+        self.assertEqual(self.tool.displayName(), "Elden Ring: Export list…")
+        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
+
+    def test_the_list_is_written_with_the_name_and_seed_typed_and_the_seed_is_written_back_to_the_profile(self) -> None:
+        ask, save = self.drive()
+        doc = json.loads(self.target.read_text())
+        self.assertEqual((doc["name"], doc["randomizer_seed"]), ("my list", "seed-9"))
+        self.assertEqual([m["name"] for m in doc["mods"]], ["pack"])
+        self.assertEqual(self.target.read_text(), tools.listfile.dumps(doc))
+        self.assertEqual(self.profile_rules()["randomizer_seed"], "seed-9")
+        self.assertEqual(ask.call_args_list[0].args[1:3], ("Elden Ring: Export list…", "Name of the list:"))
+        self.assertEqual(save.call_args.args[2].rsplit("/", 1)[1], "my list.erlist.json")
+
+    def test_the_seed_dialog_starts_from_the_profiles_seed(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "randomizer_seed": "old"}
+        )
+        ask, _ = self.drive()
+        self.assertEqual(ask.call_args_list[1].args[3], "old")
+
+    def test_the_active_list_is_set_only_when_asked(self) -> None:
+        ANSWER[0] = "no"
+        self.drive()
+        self.assertIsNone(self.profile_rules()["active_list"])
+        ANSWER[0] = "yes"
+        self.target.unlink()
+        self.drive(answers=["my list", "seed-9"])
+        self.assertEqual(self.profile_rules()["active_list"]["name"], "my list")
+
+    def test_the_suffix_is_added_when_the_chosen_name_lacks_it(self) -> None:
+        self.drive(target=str(self.tmp / "out" / "plain"))
+        self.assertTrue((self.tmp / "out" / "plain.erlist.json").is_file())
+
+    def test_cancelling_a_dialog_writes_nothing(self) -> None:
+        self.drive(answers=[None])
+        self.drive(answers=["name", None])
+        with mock.patch.object(tools.qtui, "ask_text", side_effect=["name", ""]), \
+                mock.patch.object(tools.qtui, "choose_save_file", return_value=None):
+            self.tool.display()
+        self.assertFalse(self.target.exists())
+
+    def test_an_empty_name_is_refused(self) -> None:
+        self.drive(answers=["   "])
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("needs a name", SHOWN[-1][2])
+
+    def test_a_veto_from_preparing_is_shown_and_nothing_is_written(self) -> None:
+        veto = gate.Veto("Generated mod", "it is missing", "make it")
+        with mock.patch.object(
+            tools.EldenRingTool, "_the_gate", lambda tool: SimpleNamespace(rebuild=mock.Mock(side_effect=veto))
+        ):
+            self.drive()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("it is missing", SHOWN[-1][2])
+        self.assertFalse(self.target.exists())
+
+    def test_a_mod_that_cannot_be_pinned_is_shown_by_name_and_nothing_is_written(self) -> None:
+        (self.organizer.downloads / "pack.zip").unlink()
+        self.drive()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("pack", SHOWN[-1][2])
+        self.assertFalse(self.target.exists())
+
+    def test_the_generated_mod_is_made_and_raised_first_on_a_fresh_instance(self) -> None:
+        self.modlist.removeMod(self.modlist.getMod(generated.NAME))
+        self.drive()
+        self.assertFalse(self.target.exists())
+        self.organizer.simulate_refresh()
+        self.assertTrue(self.target.is_file())
+
+    def test_a_placement_that_failed_is_shown_and_nothing_is_written(self) -> None:
+        self.modlist.removeMod(self.modlist.getMod(generated.NAME))
+        self.drive()
+        with mock.patch.object(tools.generated, "_place", side_effect=RuntimeError("cannot place")):
+            with self.assertLogs(level="WARNING"):
+                self.organizer.simulate_refresh()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("cannot place", SHOWN[-1][2])
+        self.assertFalse(self.target.exists())
+
+    def test_the_file_name_suggestion_keeps_only_safe_characters(self) -> None:
+        self.assertEqual(tools.list_file_name("seamless/full: v2"), "seamless_full_ v2.erlist.json")
+        self.assertEqual(tools.list_file_name("  ..  "), "list.erlist.json")
+
+
+class VerifyListToolTests(ListToolCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.me.install(
+            "pack", {"regulation.bin": b"one"}, nexus_id=1928, file_id=49812, version="26.2",
+            archive_files={"Wrapper/regulation.bin": b"one"},
+        )
+        self.doc = self.me.export()
+        self.tool = tools.VerifyListTool()
+        self.tool.init(self.organizer)
+        self.listing = self.tmp / "partner.erlist.json"
+        self.listing.write_text(tools.listfile.dumps(self.doc))
+        host = mock.patch.object(
+            tools.listfile.me3_host, "status", return_value=tools.listfile.me3_host.Status(tools.listfile.me3_host.OK)
+        )
+        host.start()
+        self.addCleanup(host.stop)
+
+    def drive(self, choice, path=None):
+        with mock.patch.object(tools, "_choose", return_value=choice) as menu, \
+                mock.patch.object(tools.qtui, "choose_open_file", return_value=path) as pick, \
+                mock.patch.object(tools.qtui, "show_text") as show:
+            self.tool.display()
+        return menu, pick, show
+
+    def test_it_is_named_and_limited_to_the_game(self) -> None:
+        self.assertEqual(self.tool.displayName(), "Elden Ring: Verify against a list…")
+        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
+
+    def test_without_an_active_list_the_only_choice_is_a_file(self) -> None:
+        menu, _, _ = self.drive(None)
+        self.assertEqual(menu.call_args.args[3], [tools.VerifyListTool.FILE])
+
+    def test_with_an_active_list_all_three_are_offered(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [], "renames": [], "active_list": tools.listfile.check_document(self.doc)},
+        )
+        menu, _, _ = self.drive(None)
+        self.assertEqual(
+            menu.call_args.args[3],
+            [tools.VerifyListTool.ACTIVE, tools.VerifyListTool.FILE, tools.VerifyListTool.STOP],
+        )
+
+    def test_a_matching_file_is_reported_as_matching(self) -> None:
+        _, pick, show = self.drive(0, str(self.listing))
+        text = show.call_args.args[2]
+        self.assertIn("This setup is the one the list describes", text)
+        self.assertIn("seamless-full", text)
+
+    def test_differences_are_listed_and_the_launch_refusal_is_explained(self) -> None:
+        doc = json.loads(json.dumps(self.doc))
+        doc["randomizer_seed"] = "theirs"
+        self.listing.write_text(tools.listfile.dumps(doc))
+        _, _, show = self.drive(0, str(self.listing))
+        text = show.call_args.args[2]
+        self.assertIn("[seed_differs]", text)
+        self.assertIn("refused", text)
+
+    def test_the_active_list_is_what_is_checked_when_chosen(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [], "renames": [], "active_list": tools.listfile.check_document(self.doc)},
+        )
+        _, pick, show = self.drive(0)
+        pick.assert_not_called()
+        self.assertIn("This setup is the one the list describes", show.call_args.args[2])
+
+    def test_stopping_the_active_list_clears_it_and_checks_nothing(self) -> None:
+        state.write_profile_rules(
+            self.organizer.profilePath(),
+            {"merges": [], "prunes": [], "renames": [], "active_list": tools.listfile.check_document(self.doc)},
+        )
+        _, _, show = self.drive(2)
+        self.assertIsNone(self.profile_rules()["active_list"])
+        show.assert_not_called()
+        self.assertEqual(SHOWN[-1][0], "information")
+
+    def test_cancelling_the_menu_or_the_file_dialog_checks_nothing(self) -> None:
+        _, _, show = self.drive(None)
+        show.assert_not_called()
+        _, _, show = self.drive(0, None)
+        show.assert_not_called()
+
+    def test_a_file_that_is_not_a_list_is_shown_as_an_error(self) -> None:
+        self.listing.write_text("{nope")
+        self.drive(0, str(self.listing))
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("not JSON", SHOWN[-1][2])
+
+    def test_a_veto_from_preparing_is_shown_instead_of_a_comparison(self) -> None:
+        veto = gate.Veto("Game build", "tampered", "verify")
+        with mock.patch.object(
+            tools.EldenRingTool, "_the_gate", lambda tool: SimpleNamespace(rebuild=mock.Mock(side_effect=veto))
+        ):
+            _, _, show = self.drive(0, str(self.listing))
+        show.assert_not_called()
+        self.assertIn("tampered", SHOWN[-1][2])
+
+    def test_the_comparison_is_logged_too(self) -> None:
+        self.drive(0, str(self.listing))
+        self.assertTrue(any("Verify against a list" in message for message in WARNINGS))
+
+
+class FakeFetchDialog:
+    """qtui.FetchDialog without a window: exec() plays the part of the event loop."""
+
+    instances: list = []
+
+    def __init__(self, title, parent=None, lines=lambda: []) -> None:
+        self.lines = lines
+        self.finished = False
+        self.continue_callback = lambda: None
+        self.cancel_callback = lambda: None
+        self.script = lambda dialog: None
+        FakeFetchDialog.instances.append(self)
+
+    def on_continue(self, callback) -> None:
+        self.continue_callback = callback
+
+    def on_cancel(self, callback) -> None:
+        self.cancel_callback = callback
+
+    def finish(self) -> None:
+        self.finished = True
+
+    def exec(self) -> int:
+        FakeFetchDialog.on_exec(self)
+        return 1
+
+
+class ImportListToolTests(ListToolCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.tool = tools.ImportListTool()
+        self.tool.init(self.organizer)
+        self.listing = self.tmp / "partner.erlist.json"
+        self.doc = self.partner.export()
+        self.listing.write_text(tools.listfile.dumps(self.doc))
+        self.manager = self.organizer.downloadManager()
+        self.opened: list[str] = []
+        self.later: list = []
+        FakeFetchDialog.instances = []
+        FakeFetchDialog.on_exec = self.event_loop
+        for patcher in (
+            mock.patch.object(tools.qtui, "choose_open_file", return_value=str(self.listing)),
+            mock.patch.object(tools.qtui, "FetchDialog", FakeFetchDialog),
+            mock.patch.object(tools.qtui, "run_later", self.later.append),
+            mock.patch.object(tools.qtui, "open_url", self.opened.append),
+            mock.patch.object(tools.procs, "game_running", return_value=[]),
+            mock.patch.object(tools.generated, "guess_name", side_effect=lambda name: name),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.shown: list[str] = []
+        shown = mock.patch.object(tools.qtui, "show_text", side_effect=lambda parent, title, text: self.shown.append(text))
+        shown.start()
+        self.addCleanup(shown.stop)
+        self.arrive = True
+
+    def event_loop(self, dialog) -> None:
+        """What the dialog's loop does: the person clicks in the browser, then the queued callbacks run."""
+        if self.arrive:
+            for name in ("pack.zip",):
+                self.manager.arrive(name, (self.partner.organizer.downloads / name).read_bytes())
+        queued, self.later[:] = list(self.later), []
+        for callback in queued:
+            callback()
+        self.organizer.simulate_refresh()
+        self.modlist.flush_installed()
+
+    def test_it_is_named_and_limited_to_the_game(self) -> None:
+        self.assertEqual(self.tool.displayName(), "Elden Ring: Import list…")
+        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
+
+    def test_the_confirmation_says_what_is_downloaded_and_not_touched(self) -> None:
+        self.tool.display()
+        question = next(entry for entry in SHOWN if entry[0] == "question")
+        for expected in ('"seamless-full"', "Download with manager", "nothing is deleted", "Game/"):
+            self.assertIn(expected, question[2])
+
+    def test_a_list_is_imported_through_the_dialog_and_the_report_is_shown(self) -> None:
+        self.tool.display()
+        self.assertEqual(self.opened, ["https://www.nexusmods.com/eldenring/mods/1928?tab=files&file_id=49812&nmm=1"])
+        self.assertEqual(self.organizer.install_calls[0]["name"], "pack")
+        self.assertTrue(FakeFetchDialog.instances[0].finished)
+        self.assertIn("pack: installed from pack.zip", self.shown[0])
+        self.assertEqual(self.profile_rules()["active_list"]["name"], "seamless-full")
+
+    def test_the_check_of_the_installed_mods_runs_under_a_busy_dialog_that_is_closed_before_the_wait(self) -> None:
+        self.tool.display()
+        self.assertIn("Checking the installed mods against the list", DIALOGS[0].labels)
+        self.assertTrue(DIALOGS[0].closed)
+
+    def test_the_downloads_signals_are_connected_once_however_often_it_runs(self) -> None:
+        self.tool.display()
+        self.tool.display()
+        self.assertEqual((len(self.manager.complete_callbacks), len(self.manager.failed_callbacks)), (1, 1))
+
+    def test_the_premium_setting_decides_whether_the_manager_starts_nexus_downloads(self) -> None:
+        self.organizer.setPluginSetting(tools.kinds.PLUGIN, tools.fetch.NEXUS_PREMIUM_SETTING, True)
+        self.manager.names[("eldenring", 1928, 49812)] = "pack.zip"
+        self.arrive = False
+        self.tool.display()
+        self.assertEqual(self.opened, [])
+        self.assertEqual(self.manager.started, [("nexus", "eldenring", 1928, 49812)])
+
+    def test_declining_runs_nothing(self) -> None:
+        ANSWER[0] = "no"
+        self.tool.display()
+        self.assertEqual(FakeFetchDialog.instances, [])
+        self.assertEqual(self.organizer.install_calls, [])
+
+    def test_cancelling_the_file_dialog_runs_nothing(self) -> None:
+        with mock.patch.object(tools.qtui, "choose_open_file", return_value=None):
+            self.tool.display()
+        self.assertEqual(SHOWN, [])
+        self.assertEqual(FakeFetchDialog.instances, [])
+
+    def test_a_game_that_is_running_refuses_before_anything_is_asked(self) -> None:
+        with mock.patch.object(tools.procs, "game_running", return_value=[(42, "eldenring.exe")]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("eldenring.exe pid 42", SHOWN[-1][2])
+        self.assertEqual(FakeFetchDialog.instances, [])
+
+    def test_a_file_that_is_not_a_list_is_shown_as_an_error(self) -> None:
+        self.listing.write_text("{nope")
+        self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("not JSON", SHOWN[-1][2])
+
+    def test_cancel_in_the_dialog_installs_nothing_and_shows_what_arrived(self) -> None:
+        def cancel(dialog) -> None:
+            dialog.cancel_callback()
+
+        FakeFetchDialog.on_exec = cancel
+        self.tool.display()
+        self.assertEqual(self.organizer.install_calls, [])
+        self.assertIn("Nothing was installed", self.shown[0])
+
+    def test_continue_with_what_arrived_goes_on_without_the_rest(self) -> None:
+        self.arrive = False
+
+        def go_on(dialog) -> None:
+            dialog.continue_callback()
+            self.event_loop(dialog)
+
+        FakeFetchDialog.on_exec = go_on
+        self.tool.display()
+        self.assertIn("pack: not installed", self.shown[0])
+
+    def test_the_fetcher_is_switched_off_when_the_dialog_returns_so_a_late_download_is_ignored(self) -> None:
+        self.arrive = False
+        self.tool.display()
+        row_count = len(self.tool._fetcher.rows)
+        self.manager.arrive("pack.zip", (self.partner.organizer.downloads / "pack.zip").read_bytes())
+        self.assertEqual(self.later, [])
+        self.assertEqual(len(self.tool._fetcher.rows), row_count)
+
+    def test_a_failure_while_starting_is_shown_and_the_fetcher_switched_off(self) -> None:
+        with mock.patch.object(tools.listimport.ImportRun, "start", side_effect=RuntimeError("boom")):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("boom", SHOWN[-1][2])
+        self.assertFalse(self.tool._fetcher._active)
 
 
 if __name__ == "__main__":

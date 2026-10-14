@@ -292,7 +292,8 @@ class CreatePluginsTests(unittest.TestCase):
             [type(plugin).__name__ for plugin in plugins],
             [
                 "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
-                "HardenTool", "SyncDeployedTool", "EldenRingDiagnose",
+                "HardenTool", "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool",
+                "EldenRingDiagnose",
             ],
         )
         opened = plugins[-1]._tools

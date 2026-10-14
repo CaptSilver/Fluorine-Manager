@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PyQt6.QtCore import qWarning
@@ -13,8 +15,8 @@ from PyQt6.QtWidgets import QMessageBox
 import mobase
 
 from .. import (
-    archives, deploy, fsprobe, gate, generated, hardening, importer, kinds, me3_host, problems, procs, qtui,
-    saves, session, state,
+    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importer, kinds, listfile, listimport,
+    me3_host, problems, procs, qtui, saves, session, state,
 )
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
@@ -62,6 +64,41 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
 
     def display(self) -> None:
         self._shielded(self.run)
+
+    def _the_gate(self):
+        return gate.LaunchGate(
+            self._organizer,
+            self._organizer.managedGame(),
+            show_veto=lambda title, text: QMessageBox.critical(self._parent, title, text),
+            show_modal=lambda title, text: QMessageBox.critical(self._parent, title, text),
+            busy=lambda title: Busy(title, self._parent),
+        )
+
+    def _prepared_then(self, action) -> None:
+        """Put the generated mod in place, prepare the mods as a launch does, then call `action(prepared)`.
+
+        A veto is shown instead. On a fresh instance the generated mod is placed
+        from the directory refresh, so everything after it runs from there; the
+        whole continuation is shielded for that reason.
+        """
+        def go(error=None) -> None:
+            self._shielded(lambda: self._prepared_action(error, action))
+
+        generated.ensure_mod(self._organizer, then=go)
+
+    def _prepared_action(self, error, action) -> None:
+        if error is not None:
+            QMessageBox.critical(
+                self._parent, self.displayName(),
+                f"The {generated.NAME} mod could not be enabled and raised to the top: {error}\n\nNothing was done.",
+            )
+            return
+        try:
+            prepared = self._the_gate().rebuild()
+        except gate.Veto as veto:
+            QMessageBox.critical(self._parent, self.displayName(), veto.text())
+            return
+        action(prepared)
 
     def _shielded(self, action) -> None:
         """Run `action`, turning any failure into a dialog; a tool must not take the UI down."""
@@ -669,15 +706,6 @@ class RebuildTool(EldenRingTool):
     def tooltip(self) -> str:
         return "Run the same checks and merges a launch runs, and stop there."
 
-    def _the_gate(self):
-        return gate.LaunchGate(
-            self._organizer,
-            self._organizer.managedGame(),
-            show_veto=lambda title, text: QMessageBox.critical(self._parent, title, text),
-            show_modal=lambda title, text: QMessageBox.critical(self._parent, title, text),
-            busy=lambda title: Busy(title, self._parent),
-        )
-
     def _rebuild(self, error=None) -> None:
         # Also the continuation of ensure_mod, which on a fresh instance runs
         # from the directory refresh and not from display(); a placement that
@@ -884,3 +912,202 @@ class ImportFromErmTool(EldenRingTool):
         finally:
             busy.close()
         qtui.show_text(self._parent, title, report.text())
+
+
+LIST_FILTER = "Elden Ring lists (*.erlist.json);;All files (*)"
+_NOT_FILE_SAFE = re.compile(r"[^A-Za-z0-9._ -]+")
+
+
+def list_file_name(name: str) -> str:
+    """A file name for the list called `name`: letters, digits and a few marks, with the list suffix."""
+    stem = _NOT_FILE_SAFE.sub("_", name.strip()).strip(" .") or "list"
+    return stem + listfile.SUFFIX
+
+
+def describe_comparison(doc: dict, findings: list[listfile.Finding]) -> str:
+    head = f"List: {doc['name']} (made {doc['exported']})"
+    if not findings:
+        return f"{head}\n\nThis setup is the one the list describes."
+    lines = [head, "", listfile.describe(findings)]
+    if listfile.blocking(findings):
+        lines += ["", "A launch with this list active is refused while any line without (info) stands."]
+    return "\n".join(lines)
+
+
+class ExportListTool(EldenRingTool):
+    def name(self) -> str:
+        return "Elden Ring Export list"
+
+    def description(self) -> str:
+        return "Write this profile's mods, order, merge rules and pins to a file a partner can check against."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Export list…"
+
+    def tooltip(self) -> str:
+        return "Prepare the mods as a launch does, then save them as a shareable list."
+
+    def run(self) -> None:
+        title = self.displayName()
+        rules = state.read_profile_rules(self._organizer.profilePath())
+        name = qtui.ask_text(self._parent, title, "Name of the list:", self._organizer.profileName())
+        if name is None:
+            return
+        if not name.strip():
+            QMessageBox.critical(self._parent, title, "The list needs a name.")
+            return
+        seed = qtui.ask_text(
+            self._parent, title, "Randomizer seed (leave empty when the setup has none):", rules["randomizer_seed"]
+        )
+        if seed is None:
+            return
+        target = qtui.choose_save_file(self._parent, title, str(Path.home() / list_file_name(name)), LIST_FILTER)
+        if target is None:
+            return
+        if not target.endswith(listfile.SUFFIX):
+            target += listfile.SUFFIX
+        self._prepared_then(lambda prepared: self._write(title, name.strip(), seed, target, prepared))
+
+    def _write(self, title: str, name: str, seed: str, target: str, prepared) -> None:
+        paths = state.InstancePaths(self._organizer)
+        with Busy(title, self._parent) as busy:
+            busy.update("Writing the list")
+            with archives.hash_cache(paths) as cache:
+                doc = listfile.export(self._organizer, name=name, seed=seed, live=prepared.live, cache=cache)
+            atomic.write_bytes_atomic(target, listfile.dumps(doc).encode("utf-8"))
+        profile = self._organizer.profilePath()
+        rules = state.read_profile_rules(profile)
+        # The profile and the list must never disagree about the seed.
+        rules["randomizer_seed"] = seed
+        answer = QMessageBox.question(
+            self._parent, title,
+            f"Wrote {target}.\n\nMake it this profile's active list? A launch is then refused unless this setup "
+            "matches it.",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            rules["active_list"] = listfile.check_document(doc)
+        state.write_profile_rules(profile, rules)
+        problems.invalidate()
+
+
+class VerifyListTool(EldenRingTool):
+    ACTIVE = "Check against the profile's active list"
+    FILE = "Check against a list file…"
+    STOP = "Stop using the active list"
+
+    def name(self) -> str:
+        return "Elden Ring Verify list"
+
+    def description(self) -> str:
+        return "Compare this setup with a shareable list and show every difference."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Verify against a list…"
+
+    def tooltip(self) -> str:
+        return "Prepare the mods as a launch does, then list what differs from the chosen list."
+
+    def run(self) -> None:
+        title = self.displayName()
+        profile = self._organizer.profilePath()
+        rules = state.read_profile_rules(profile)
+        active = rules["active_list"]
+        labels = ([self.ACTIVE] if active is not None else []) + [self.FILE] + ([self.STOP] if active is not None else [])
+        picked = _choose(self._parent, title, "Which list?", labels)
+        if picked is None:
+            return
+        chosen = labels[picked]
+        if chosen == self.STOP:
+            rules["active_list"] = None
+            state.write_profile_rules(profile, rules)
+            problems.invalidate()
+            QMessageBox.information(self._parent, title, "This profile no longer checks its launches against a list.")
+            return
+        if chosen == self.FILE:
+            path = qtui.choose_open_file(self._parent, title, str(Path.home()), LIST_FILTER)
+            if path is None:
+                return
+            doc = listfile.load(path)
+        else:
+            doc = listfile.check_document(active)
+        self._prepared_then(lambda prepared: self._compare(title, doc, prepared))
+
+    def _compare(self, title: str, doc: dict, prepared) -> None:
+        paths = state.InstancePaths(self._organizer)
+        with Busy(title, self._parent) as busy:
+            busy.update("Comparing this setup with the list")
+            with archives.hash_cache(paths) as cache:
+                findings = listfile.verify(self._organizer, doc, live=prepared.live, cache=cache)
+        text = describe_comparison(doc, findings)
+        qWarning(f"Elden Ring: {self.displayName()}: {text}")
+        qtui.show_text(self._parent, title, text)
+
+
+class ImportListTool(EldenRingTool):
+    def __init__(self) -> None:
+        super().__init__()
+        self._fetcher: fetch.Fetcher | None = None
+
+    def name(self) -> str:
+        return "Elden Ring Import list"
+
+    def description(self) -> str:
+        return "Install and arrange the mods a shareable list names, downloading what is missing."
+
+    def displayName(self) -> str:
+        return "Elden Ring: Import list…"
+
+    def tooltip(self) -> str:
+        return "Fetch, check and install the listed mods, then make the list this profile's active list."
+
+    def _the_fetcher(self) -> fetch.Fetcher:
+        organizer = self._organizer
+        if self._fetcher is None:
+            self._fetcher = fetch.Fetcher(
+                organizer, state.InstancePaths(organizer), schedule=qtui.run_later, open_url=qtui.open_url,
+                critical=lambda text: QMessageBox.critical(self._parent, self.displayName(), text),
+            )
+            # Connected once for the life of the plugin: the manager cannot disconnect.
+            self._fetcher.attach(organizer.downloadManager())
+        self._fetcher.premium = bool(organizer.pluginSetting(kinds.PLUGIN, fetch.NEXUS_PREMIUM_SETTING))
+        return self._fetcher
+
+    def run(self) -> None:
+        title = self.displayName()
+        procs.refuse_while_running(None, "import the list")
+        path = qtui.choose_open_file(self._parent, title, str(Path.home()), LIST_FILTER)
+        if path is None:
+            return
+        doc = listfile.load(path)
+        answer = QMessageBox.question(
+            self._parent, title,
+            f'Import the list "{doc["name"]}"?\n\nIt installs the listed mods that are missing or different, '
+            "downloading them: Nexus files open in your browser, where you click \"Download with manager\", unless "
+            "the plugin's Nexus Premium setting is on. A different copy of a mod is kept, disabled, under a new name; "
+            "nothing is deleted. Nothing is written to Game/ or to the save files.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        fetcher = self._the_fetcher()
+        paths = state.InstancePaths(self._organizer)
+        with Busy(title, self._parent) as busy:
+            busy.update("Checking the installed mods against the list")
+            with archives.hash_cache(paths) as cache:
+                findings = listimport.findings_for_install(self._organizer, doc, cache)
+        reports: list[importer.Report] = []
+        dialog = qtui.FetchDialog(title, self._parent, fetcher.summary)
+        run = listimport.ImportRun(
+            self._organizer, doc, findings, fetcher=fetcher, version_info=mobase.VersionInfo,
+            stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+            done=lambda report: (reports.append(report), dialog.finish()),
+        )
+        dialog.on_continue(fetcher.continue_with_arrived)
+        dialog.on_cancel(run.cancel)
+        try:
+            run.start()
+            dialog.exec()
+        finally:
+            fetcher.cancel()
+            problems.invalidate()
+        if reports:
+            qtui.show_text(self._parent, title, reports[0].text())
