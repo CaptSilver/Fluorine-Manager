@@ -16,12 +16,15 @@ import fcntl
 import logging
 import os
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
-from . import fsprobe
+from . import fsprobe, procs, quarantine, session
 from . import state as instance_state
 from .ermlib import github
+from .ermlib import harden as ermharden
+from .ermlib.errors import ErmError
 
 log = logging.getLogger(__name__)
 
@@ -211,3 +214,153 @@ def launcher_problems(
         )
         found += steam_update_problems(appmanifest or {})
     return found
+
+
+# -- the actions --------------------------------------------------------------
+
+
+class HardenError(ErmError):
+    """An action the launcher's state, or a running game, does not allow."""
+
+
+class DeployedFilesError(HardenError):
+    """Unharden was asked while config files are still deployed."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(
+            f"{count} deployed config file(s) in Game/mods/ would be left under a launcher that "
+            "starts Easy Anti-Cheat. Undeploy them first."
+        )
+        self.count = count
+
+
+@dataclass
+class Outcome:
+    state: str
+    lines: list[str] = field(default_factory=list)
+
+
+_NOT_LOCKED = (
+    "The swap blocks an accidental Easy Anti-Cheat launch until the next Steam verify or update "
+    "writes the real launcher back; the lock is what survives those. Run this tool again to "
+    "lock it."
+)
+
+
+def _refuse_while_running(running: Callable[[], list] | None) -> None:
+    # Looked up at call time, so a test (or a caller) that patches procs.game_running is heard.
+    up = (running or procs.game_running)()
+    if up:
+        names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+        raise HardenError(
+            f"{names} is running. The launcher is not swapped under a running game; quit it and try again."
+        )
+
+
+def _lock(game_dir: Path, lines: list[str]) -> None:
+    """Set the flag. A refused prompt is reported and leaves the swap in place."""
+    try:
+        ermharden.set_immutable(game_dir / LAUNCHER, True)
+    except ErmError as exc:
+        lines += [f"The launcher is swapped but not locked: {exc}", _NOT_LOCKED]
+    else:
+        lines.append("Locked start_protected_game.exe with chattr +i.")
+
+
+def _unlock(game_dir: Path, lines: list[str]) -> None:
+    """Clear the flag when it is set. A failure raises with nothing changed yet."""
+    if is_immutable(game_dir / LAUNCHER):
+        ermharden.set_immutable(game_dir / LAUNCHER, False)
+        lines.append("Unlocked start_protected_game.exe.")
+
+
+def _keep_launcher(game_dir: Path, paths, stamp: str | None, lines: list[str]) -> None:
+    """Move a launcher nobody can vouch for into the quarantine.
+
+    A stale one may be a newer real launcher Steam wrote, or an old copy of
+    the game; the plugin does not guess, and the quarantine keeps the bytes
+    either way.
+    """
+    kept = quarantine.move_out(paths, game_dir, LAUNCHER, stamp or session.now_stamp())
+    lines.append(f"Kept the old start_protected_game.exe at {kept}.")
+
+
+def harden(game_dir, paths, *, running: Callable[[], list] | None = None, cache: dict | None = None) -> Outcome:
+    """The first hardening: back the real launcher up once, swap in the game, lock it.
+
+    Only from `vanilla`. The backup is written here and nowhere else, so an
+    unrecognised launcher is never mistaken for the real one and copied over it.
+    """
+    game_dir = Path(game_dir)
+    _refuse_while_running(running)
+    current = state(game_dir, cache)
+    if current != VANILLA:
+        if current == HARDENED:
+            raise HardenError("The launcher is already hardened.")
+        if current == ABSENT:
+            raise HardenError("start_protected_game.exe is missing from Game/. Verify the game files in Steam.")
+        raise HardenError(
+            f"The launcher is already swapped ({current}): this tool's Re-harden puts it right "
+            "without touching the backup of the real launcher."
+        )
+    ermharden.harden_swap(game_dir)
+    lines = [
+        "Backed up start_protected_game.exe as start_protected_game.exe.erm-backup and "
+        "replaced it with a copy of eldenring.exe."
+    ]
+    _lock(game_dir, lines)
+    return Outcome(state(game_dir, cache), lines)
+
+
+def reharden(
+    game_dir, paths, *, running: Callable[[], list] | None = None, cache: dict | None = None,
+    stamp: str | None = None,
+) -> Outcome:
+    """Put a swapped-unlocked, restored or stale launcher right again.
+
+    Never restores the real launcher and never writes the backup: unlock,
+    set a stale launcher aside, copy the game over it, lock. Between the
+    prompts the real launcher is never in place, so deployed files can stay.
+    """
+    game_dir = Path(game_dir)
+    _refuse_while_running(running)
+    current = state(game_dir, cache)
+    if current not in (SWAPPED_UNLOCKED, STALE, RESTORED):
+        raise HardenError(
+            "Re-harden fixes a launcher that is swapped but unlocked, restored by Steam or stale. "
+            f"This one is {current}."
+        )
+    lines: list[str] = []
+    _unlock(game_dir, lines)
+    if current == STALE:
+        _keep_launcher(game_dir, paths, stamp, lines)
+    ermharden.harden_swap(game_dir)
+    lines.append("Copied eldenring.exe over start_protected_game.exe. The backup was not touched.")
+    _lock(game_dir, lines)
+    return Outcome(state(game_dir, cache), lines)
+
+
+def unharden(
+    game_dir, paths, *, deployed: int = 0, running: Callable[[], list] | None = None,
+    cache: dict | None = None, stamp: str | None = None,
+) -> Outcome:
+    """Unlock, then put the real launcher back from the backup.
+
+    The lock goes first because an immutable file cannot be removed. It
+    refuses while `deployed` config files remain (DeployedFilesError): they
+    would be left under the launcher that starts Easy Anti-Cheat.
+    """
+    game_dir = Path(game_dir)
+    _refuse_while_running(running)
+    if fsprobe.kind(game_dir / BACKUP) is None:
+        raise HardenError("The launcher is not hardened: there is no backup of the real one to restore.")
+    current = state(game_dir, cache)
+    if deployed:
+        raise DeployedFilesError(deployed)
+    lines: list[str] = []
+    _unlock(game_dir, lines)
+    if current == STALE:
+        _keep_launcher(game_dir, paths, stamp, lines)
+    ermharden.unharden_restore(game_dir)
+    lines.append("Restored the real start_protected_game.exe from the backup.")
+    return Outcome(state(game_dir, cache), lines)
