@@ -139,6 +139,15 @@ def _choose(parent, title: str, text: str, labels: list[str]) -> int | None:
 
 RESTORE = "Restore the pre-session snapshot"
 KEEP = "Keep the session's save"
+GIVE_UP = "Stop restoring and leave the folder as it is"
+MORE = "Other save tools…"
+
+BACKUP = "Back up the save files"
+RESTORE_BACKUP = "Restore a backup…"
+QUARANTINE = "Quarantine ER0000.sl2…"
+TO_MODDED = "Move a save to the modded name…"
+AUDIT = "Audit a save…"
+REVIEWED = "Mark the session's save as reviewed"
 
 
 def describe_pending(pending: dict) -> str:
@@ -159,6 +168,18 @@ def describe_pending(pending: dict) -> str:
         what = (
             f"A modded session changed {names} while the game was still running, so "
             "the pre-session copy was not put back."
+        )
+    kept = session.kept_text(pending)
+    if kept:
+        # A restore got partway. Keeping "the session's save" would now mean a
+        # folder that no longer holds it, so the choice is worded for what is true.
+        return (
+            f"{what}\n\n{kept}\n\n"
+            f"{RESTORE}: tries to put the pre-session copy back again.\n\n"
+            f"{GIVE_UP}: stops trying. The save folder stays as it is now, which may have no "
+            "ER0000.sl2 or ER0000.sl2.bak. The pre-session copy moves to the instance's "
+            'save-backups/ folder, and "Restore a backup…" can put it back from there. What '
+            "the session wrote stays where it is listed above."
         )
     return (
         f"{what}\n\n"
@@ -185,40 +206,244 @@ def describe_restored(result: session.Restored) -> str:
     return "\n".join(lines)
 
 
+def describe_failed(exc: session.SnapshotError) -> str:
+    """The error, and where the session's files went when a restore moved some before it stopped."""
+    text = str(exc)
+    missing = [str(path) for path in exc.quarantined if str(path) not in text]
+    if missing:
+        text += "\n\n" + session.kept_text({"quarantined": missing})
+    return text
+
+
+def describe_kept(moved: Path | None, pending: dict) -> str:
+    if pending.get("quarantined"):
+        where = f"The pre-session copy was moved to {moved}.\n\n" if moved else ""
+        return (
+            f"The restore was left unfinished. {where}"
+            '"Restore a backup…" can put the pre-session copy back from there.\n\n'
+            + session.kept_text(pending)
+        )
+    where = f"The pre-session copy was moved to {moved}.\n\n" if moved else ""
+    return (
+        f"The save in the Steam folder was kept. {where}If a modded session wrote "
+        "it, it must not go online."
+    )
+
+
 class SaveToolsTool(EldenRingTool):
     def name(self) -> str:
         return "Elden Ring Save tools"
 
     def description(self) -> str:
-        return "Put back the vanilla save a modded Elden Ring session changed, or keep it."
+        return "Back up, restore, quarantine and audit Elden Ring saves, and settle a save restore that is pending."
 
     def displayName(self) -> str:
         return "Elden Ring: Save tools…"
 
     def tooltip(self) -> str:
-        return "Settle a pending restore of ER0000.sl2 after a modded session."
+        return "Back up or restore a save, take ER0000.sl2 out of Steam's reach, audit a save, or settle a pending restore."
 
     def run(self) -> None:
+        title = self.displayName()
         paths = state.InstancePaths(self._organizer)
-        pending = session.load_last_launch(paths).get("pending_restore")
-        if not pending:
-            QMessageBox.information(
-                self._parent, self.displayName(), "No save restore is pending. Nothing to do."
-            )
+        try:
+            record, damaged = session.load_last_launch(paths), None
+        except session.LaunchStateError as exc:
+            record, damaged = {}, str(exc)
+        try:
+            if damaged:
+                # The record is why a restore is not offered, not a reason to lock
+                # the user out of a backup: it is the first thing they will want
+                # before they delete that file.
+                QMessageBox.critical(
+                    self._parent,
+                    title,
+                    f"{damaged}\n\nThe actions that depend on that file are not offered here. Backing up, "
+                    "restoring a backup and the audit still work.",
+                )
+            pending = record.get("pending_restore")
+            if pending and self._settle(paths, pending) != MORE:
+                return
+            self._menu(paths, record, bool(damaged))
+        finally:
+            problems.invalidate()
+
+    # -- a restore that is owed ---------------------------------------------------
+
+    def _settle(self, paths: state.InstancePaths, pending: dict) -> str | None:
+        """Ask what to do about the pending restore. MORE when the user wants the other tools."""
+        title = self.displayName()
+        # A record whose write was lost has no list of moved files; they are still on disk.
+        pending = session.with_moved(paths, pending)
+        partial = bool(pending["quarantined"])
+        choice = _choose(
+            self._parent, title, describe_pending(pending), [RESTORE, GIVE_UP if partial else KEEP, MORE]
+        )
+        if choice is None:
+            return None
+        if choice == 2:
+            return MORE
+        try:
+            if choice == 0:
+                text = describe_restored(session.restore_pending(paths))
+            else:
+                text = describe_kept(session.keep_session_save(paths), pending)
+        except session.SnapshotError as exc:
+            QMessageBox.critical(self._parent, title, describe_failed(exc))
+            return None
+        QMessageBox.information(self._parent, title, text)
+        return None
+
+    # -- the rest ------------------------------------------------------------------
+
+    def _menu(self, paths: state.InstancePaths, record: dict, damaged: bool) -> None:
+        pending = record.get("pending_restore")
+        actions = {
+            BACKUP: lambda: self._backup(paths, pending),
+            RESTORE_BACKUP: lambda: self._restore_backup(paths, pending),
+        }
+        if not damaged:
+            # These end by clearing a note kept in last-launch.json.
+            actions[QUARANTINE] = lambda: self._quarantine(paths, pending)
+            actions[TO_MODDED] = lambda: self._to_modded(paths)
+        actions[AUDIT] = lambda: self._audit(paths)
+        if "sentinel_tripped" in record:
+            actions[REVIEWED] = lambda: self._reviewed(paths)
+        picked = qtui.pick_item(self._parent, self.displayName(), "Save tool:", list(actions))
+        if picked is not None:
+            actions[picked]()
+
+    def _info(self, text: str) -> None:
+        QMessageBox.information(self._parent, self.displayName(), text)
+
+    def _yes(self, text: str) -> bool:
+        return QMessageBox.question(self._parent, self.displayName(), text) == QMessageBox.StandardButton.Yes
+
+    @staticmethod
+    def _listed(found: list) -> str:
+        return "\n".join(f"  {path}" for path in found)
+
+    def _cleared(self, paths: state.InstancePaths) -> str:
+        """The sentence to add after an action that settles the note about a session's save, or ''."""
+        try:
+            if session.clear_tripped(paths):
+                return "\n\nThe note that a modded session wrote the vanilla save is cleared."
+        except (OSError, ErmError) as exc:
+            return f"\n\nFluorine could not clear the note that a modded session wrote the vanilla save: {exc}"
+        return ""
+
+    def _backup(self, paths: state.InstancePaths, pending: dict | None) -> None:
+        folder, files = saves.save_files(self._organizer)
+        if not files:
+            self._info(f"There are no save files in {folder}.")
             return
-        choice = _choose(self._parent, self.displayName(), describe_pending(pending), [RESTORE, KEEP])
-        if choice == 0:
-            result = session.restore_pending(paths)
-            QMessageBox.information(self._parent, self.displayName(), describe_restored(result))
-        elif choice == 1:
-            moved = session.keep_session_save(paths)
-            kept = f"The pre-session copy was moved to {moved}.\n\n" if moved else ""
-            QMessageBox.information(
-                self._parent,
-                self.displayName(),
-                f"The save in the Steam folder was kept. {kept}If a modded session wrote "
-                "it, it must not go online.",
+        # While a restore is pending these two hold what the session wrote. A copy
+        # named for the session cannot be restored into Steam's save; "manual" could.
+        wrote = set(pending.get("changed") or saves.GUARDED[:1]) & set(saves.GUARDED) if pending else set()
+        made = saves.backup_all(
+            files, paths.save_backups, "manual", session.now_stamp(), session_files=wrote
+        )
+        named = sorted(wrote & {path.name for path in files})
+        note = (
+            f"\n\nA restore is pending, so the copy of {', '.join(named)} is named {saves.SESSION_LABEL}: "
+            "it can be moved to the modded name but not restored into Steam's save."
+            if named
+            else ""
+        )
+        self._info(f"Backed up {len(made)} file(s):\n{self._listed(made)}{note}")
+
+    def _restore_backup(self, paths: state.InstancePaths, pending: dict | None) -> None:
+        everything = saves.restorable_backups(paths.save_backups)
+        # What a session wrote to Steam's save is modded progress and restore_backup
+        # refuses it, so the picker does not offer it.
+        found = [b for b in everything if not (b.base in saves.GUARDED and b.modded_session)]
+        if not found:
+            hint = (
+                ' Copies of what a modded session wrote to ER0000.sl2 are played on with "Move a save to the modded name…".'
+                if everything
+                else ""
             )
+            self._info(f"There are no backups of a save to put back in {paths.save_backups}.{hint}")
+            return
+        names = {f"{b.path.relative_to(paths.save_backups)}  (to {b.base})": b for b in found}
+        picked = qtui.pick_item(self._parent, self.displayName(), "Backup to restore:", list(names))
+        if picked is None:
+            return
+        backup = names[picked]
+        if pending and backup.base in saves.GUARDED:
+            raise ErmError(
+                "A restore of the pre-session snapshot is pending, so ER0000.sl2 and ER0000.sl2.bak still hold "
+                "what the session wrote. Settle the pending restore first, then restore a backup."
+            )
+        folder, _ = saves.save_files(self._organizer)
+        if not self._yes(
+            f"Put {backup.path.name} back as {backup.base} in {folder}?\n\n"
+            "What is there now is copied to save-backups/ first."
+        ):
+            return
+        placed = saves.restore_backup(backup, folder, paths.save_backups, session.now_stamp())
+        aside = f"\n\nThe file that was there is kept at {placed.safety_copy}." if placed.safety_copy else ""
+        self._info(f"Restored {placed.destination}.{aside}")
+
+    def _quarantine(self, paths: state.InstancePaths, pending: dict | None) -> None:
+        if pending:
+            raise ErmError(
+                "A restore of the pre-session snapshot is pending, so ER0000.sl2 may hold what the session wrote. "
+                "Settle the pending restore first."
+            )
+        folder, _ = saves.save_files(self._organizer)
+        if not self._yes(
+            "Move ER0000.sl2 out of the Steam folder?\n\nSteam must be closed. A copy is kept in "
+            "save-backups/, and nothing is deleted. Steam Cloud may still hold the old file; the "
+            "result says what to purge."
+        ):
+            return
+        lines = saves.quarantine_vanilla(folder, paths.save_backups, session.now_stamp())
+        self._info("\n".join(lines) + self._cleared(paths))
+
+    def _to_modded(self, paths: state.InstancePaths) -> None:
+        folder, _ = saves.save_files(self._organizer)
+        options: dict[str, Path] = {}
+        if os.path.isfile(folder / saves.VANILLA):
+            options["ER0000.sl2 in the Steam folder"] = folder / saves.VANILLA
+        for backup in saves.restorable_backups(paths.save_backups):
+            if backup.base == saves.VANILLA and backup.modded_session:
+                options[f"{backup.path.relative_to(paths.save_backups)}  (what a modded session wrote)"] = backup.path
+        if not options:
+            self._info("There is no ER0000.sl2, and no copy of what a modded session wrote to it, to move.")
+            return
+        picked = qtui.pick_item(self._parent, self.displayName(), "Save to make the modded save:", list(options))
+        if picked is None:
+            return
+        if not self._yes(
+            f"Make {options[picked].name} the modded save ({saves.MODDED}) in {folder}?\n\n"
+            "Playing it through me3 keeps it out of Steam Play. An existing modded save is copied to "
+            "save-backups/ first."
+        ):
+            return
+        placed = saves.move_to_modded(options[picked], folder, paths.save_backups, session.now_stamp())
+        aside = f"\n\nThe modded save that was there is kept at {placed.safety_copy}." if placed.safety_copy else ""
+        self._info(f"{placed.destination} is now that save.{aside}{self._cleared(paths)}")
+
+    def _audit(self, paths: state.InstancePaths) -> None:
+        _, files = saves.save_files(self._organizer)
+        options = {path.name: path for path in files}
+        for backup in saves.restorable_backups(paths.save_backups):
+            options[f"backup: {backup.path.relative_to(paths.save_backups)}"] = backup.path
+        if not options:
+            self._info("There are no saves to audit.")
+            return
+        picked = qtui.pick_item(self._parent, self.displayName(), "Save to audit:", list(options))
+        if picked is not None:
+            qtui.show_text(self._parent, self.displayName(), saves.audit_text(options[picked]))
+
+    def _reviewed(self, paths: state.InstancePaths) -> None:
+        if self._yes(
+            "Mark the note about the session that wrote the vanilla save as reviewed?\n\n"
+            "It only clears the note. Nothing in the save folder changes."
+        ):
+            session.clear_tripped(paths)
+            self._info("The note is cleared.")
 
 
 HARDEN = "Harden"

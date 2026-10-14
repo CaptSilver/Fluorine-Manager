@@ -117,6 +117,7 @@ kinds = support.module(PACKAGE, "kinds")
 errors = support.module(PACKAGE, "ermlib.errors")
 session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
+saves = support.module(PACKAGE, "saves")
 
 
 class ToolCase(unittest.TestCase):
@@ -260,6 +261,17 @@ class SaveToolsCase(ToolCase):
         (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b"modded")
         self.tool = tools.SaveToolsTool()
         self.tool.init(self.organizer)
+        # No test here reads the host's /proc: whether a game is running on the
+        # machine running the tests must not decide whether they pass.
+        idle = mock.patch.object(session.procs, "game_running", return_value=[])
+        idle.start()
+        self.addCleanup(idle.stop)
+
+    def menu(self, answer):
+        """The pick of one of the other save tools, or of an item inside one."""
+        if isinstance(answer, (list, tuple)):
+            return mock.patch.object(tools.qtui, "pick_item", side_effect=list(answer))
+        return mock.patch.object(tools.qtui, "pick_item", return_value=answer)
 
     def pend(self, reason: str = "game-running", **extra) -> None:
         session.save_last_launch(
@@ -278,12 +290,15 @@ class SaveToolsTests(SaveToolsCase):
         self.assertEqual(self.tool.displayName(), "Elden Ring: Save tools…")
         self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
 
-    def test_nothing_pending_says_so_and_asks_nothing(self) -> None:
-        with self.choose(0) as choose:
+    def test_nothing_pending_opens_the_other_tools_without_the_snapshot_choice(self) -> None:
+        with self.choose(0) as choose, self.menu(None) as menu:
             self.tool.display()
         choose.assert_not_called()
-        self.assertEqual(SHOWN[-1][0], "information")
-        self.assertIn("No save restore is pending", SHOWN[-1][2])
+        self.assertEqual(
+            menu.call_args.args[3],
+            [tools.BACKUP, tools.RESTORE_BACKUP, tools.QUARANTINE, tools.TO_MODDED, tools.AUDIT],
+        )
+        self.assertEqual(SHOWN, [])
 
     def test_restore_puts_the_snapshot_back_and_says_where_the_session_save_went(self) -> None:
         self.pend()
@@ -294,7 +309,7 @@ class SaveToolsTests(SaveToolsCase):
         self.assertEqual((kind, title), ("information", "Elden Ring: Save tools…"))
         self.assertIn("quarantine", text)
         self.assertIn("Do not press Play in Steam", text)
-        self.assertEqual(choose.call_args.args[3], [tools.RESTORE, tools.KEEP])
+        self.assertEqual(choose.call_args.args[3], [tools.RESTORE, tools.KEEP, tools.MORE])
         self.assertNotIn("pending_restore", session.load_last_launch(self.paths))
 
     def test_restore_while_the_game_runs_is_refused_with_the_pids_and_changes_nothing(self) -> None:
@@ -323,12 +338,17 @@ class SaveToolsTests(SaveToolsCase):
         self.assertEqual(SHOWN, [])
         self.assertEqual(self.paths.last_launch.read_bytes(), before)
 
-    def test_a_damaged_record_is_shown_not_raised(self) -> None:
+    def test_a_damaged_record_is_shown_and_does_not_lock_the_user_out_of_a_backup(self) -> None:
         self.paths.last_launch.parent.mkdir(parents=True, exist_ok=True)
         self.paths.last_launch.write_text("{")
-        self.tool.display()
+        with self.menu(None) as menu:
+            self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
         self.assertIn("damaged", SHOWN[-1][2])
+        self.assertIn("Backing up", SHOWN[-1][2])
+        # Quarantine and move-to-modded clear a note kept in the damaged file, so they are not offered.
+        self.assertEqual(menu.call_args.args[3], [tools.BACKUP, tools.RESTORE_BACKUP, tools.AUDIT])
+        self.assertEqual(self.paths.last_launch.read_text(), "{")
 
     def test_a_snapshot_that_no_longer_matches_is_shown_and_keeps_the_flag(self) -> None:
         self.pend()
@@ -337,6 +357,388 @@ class SaveToolsTests(SaveToolsCase):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
         self.assertIn("pending_restore", session.load_last_launch(self.paths))
+
+
+    def test_the_problems_list_is_told_after_every_run(self) -> None:
+        heard = []
+        self.addCleanup(problems.subscribe(lambda: heard.append(1)))
+        with self.menu(None):
+            self.tool.display()
+        self.assertEqual(heard, [1])
+
+    def test_other_save_tools_from_the_pending_dialog_opens_the_menu_and_changes_nothing_else(self) -> None:
+        self.pend()
+        before = self.paths.last_launch.read_bytes()
+        with self.choose(2), self.menu(None) as menu:
+            self.tool.display()
+        menu.assert_called_once()
+        self.assertEqual(self.paths.last_launch.read_bytes(), before)
+        self.assertEqual(SHOWN, [])
+
+    def test_after_a_partial_restore_keep_is_not_offered_and_the_folder_is_described_as_it_is(self) -> None:
+        kept = str(self.paths.save_backups / "quarantine" / "ER0000.sl2.x-modded-session")
+        self.pend("restore-failed", error="disk full", quarantined=[kept])
+        with self.choose(None) as choose:
+            self.tool.display()
+        self.assertEqual(choose.call_args.args[3], [tools.RESTORE, tools.GIVE_UP, tools.MORE])
+        text = choose.call_args.args[2]
+        self.assertIn(f"  {kept}", text)
+        self.assertIn("may have no ER0000.sl2", text)
+        self.assertNotIn(tools.KEEP, text)
+        self.assertNotIn("leaves the save as it is", text)
+
+    def test_giving_up_after_a_partial_restore_says_where_the_pre_session_copy_and_the_session_files_are(self) -> None:
+        kept = str(self.paths.save_backups / "quarantine" / "ER0000.sl2.20261014T000000000000Z-modded-session")
+        self.pend("restore-failed", error="disk full", quarantined=[kept])
+        with self.choose(1):
+            self.tool.display()
+        kind, _, text = SHOWN[-1]
+        self.assertEqual(kind, "information")
+        self.assertIn("left unfinished", text)
+        self.assertIn(str(self.paths.save_backups / STAMP), text)
+        self.assertIn(f"  {kept}", text)
+        # Every changed file has a moved copy, so nothing the session wrote is left in the folder.
+        self.assertNotIn("must not go online", text)
+        record = session.load_last_launch(self.paths)
+        self.assertNotIn("pending_restore", record)
+        self.assertEqual(record["sentinel_tripped"]["quarantined"], [kept])
+
+    def test_giving_up_when_a_changed_file_was_never_reached_keeps_the_warning_not_to_go_online(self) -> None:
+        # The restore stopped at ER0000.sl2; a changed ER0000.sl2.bak is still what the session wrote,
+        # and with no ER0000.sl2 the game falls back to it.
+        kept = str(self.paths.save_backups / "quarantine" / "ER0000.sl2.20261014T000000000000Z-modded-session")
+        self.pend(
+            "restore-failed", error="disk full", quarantined=[kept], changed=["ER0000.sl2", "ER0000.sl2.bak"]
+        )
+        with self.choose(1):
+            self.tool.display()
+        text = SHOWN[-1][2]
+        self.assertIn("may still hold what the session wrote to ER0000.sl2.bak", text)
+        self.assertIn("must not go online", text)
+        self.assertIn("do not press Play in Steam", text)
+
+    def test_a_restore_that_stops_partway_shows_the_error_and_where_the_session_file_went(self) -> None:
+        self.pend()
+        real = session.atomic.write_bytes_atomic
+
+        def write(path, data, *args, **kwargs):
+            if Path(path).name == "ER0000.sl2":
+                raise OSError(28, "disk full")
+            return real(path, data, *args, **kwargs)
+
+        with self.choose(0), mock.patch.object(session.atomic, "write_bytes_atomic", side_effect=write):
+            self.tool.display()
+        kind, _, text = SHOWN[-1]
+        [kept] = list((self.paths.save_backups / "quarantine").iterdir())
+        self.assertEqual(kind, "critical")
+        self.assertIn("disk full", text)
+        self.assertIn(str(kept), text)
+        self.assertEqual(session.load_last_launch(self.paths)["pending_restore"]["quarantined"], [str(kept)])
+
+    def test_a_record_that_lost_its_moved_files_still_reads_as_a_partial_restore(self) -> None:
+        kept = self.paths.save_backups / "quarantine" / "ER0000.sl2.20261014T000000000000Z-modded-session"
+        kept.parent.mkdir(parents=True)
+        kept.write_bytes(b"x")
+        self.pend("restore-failed", error="disk full")  # no "quarantined" on the record
+        with self.choose(None) as choose:
+            self.tool.display()
+        self.assertEqual(choose.call_args.args[3], [tools.RESTORE, tools.GIVE_UP, tools.MORE])
+        self.assertIn(f"  {kept}", choose.call_args.args[2])
+
+    def test_a_record_that_lost_its_moved_files_is_still_closed_with_them_when_giving_up(self) -> None:
+        kept = self.paths.save_backups / "quarantine" / "ER0000.sl2.20261014T000000000000Z-modded-session"
+        kept.parent.mkdir(parents=True)
+        kept.write_bytes(b"x")
+        self.pend("restore-failed", error="disk full")
+        with self.choose(1):
+            self.tool.display()
+        self.assertEqual(session.load_last_launch(self.paths)["sentinel_tripped"]["quarantined"], [str(kept)])
+
+    def test_the_restore_does_not_wait_for_steam(self) -> None:
+        # Steam is up whenever me3 was, so only the game check applies to the snapshot restore.
+        self.pend()
+        with self.choose(0), mock.patch.object(tools.saves.steam, "steam_running", return_value=True) as steam_up:
+            self.tool.display()
+        steam_up.assert_not_called()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
+        self.assertNotIn("pending_restore", session.load_last_launch(self.paths))
+
+
+class SaveToolsMenuCase(SaveToolsCase):
+    """The tools other than settling a pending restore, on real files in a temporary directory."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.addCleanup(ANSWER.__setitem__, 0, "yes")
+        ANSWER[0] = "yes"
+        self.steam = self.tmp / "steam"
+        (self.steam / "userdata").mkdir(parents=True)
+        (self.save_dir / "ER0000.co2").write_bytes(b"co-op save")
+        (self.save_dir / "ER0000_modded").write_bytes(b"modded save")
+        for patcher in (
+            mock.patch.object(
+                tools.saves, "save_files", side_effect=lambda organizer: (self.save_dir, saves.files_in(self.save_dir))
+            ),
+            mock.patch.object(tools.saves.steam, "steam_running", return_value=False),
+            mock.patch.object(tools.saves, "steam_install_root", return_value=self.steam),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def put_backup(self, relative: str, data: bytes) -> Path:
+        path = self.paths.save_backups / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def note_a_tripped_session(self) -> None:
+        session.save_last_launch(self.paths, {"sentinel_tripped": {"restored": ["ER0000.sl2"], "quarantined": []}})
+
+
+class BackupToolTests(SaveToolsMenuCase):
+    def test_every_save_file_is_copied_and_the_copies_are_listed(self) -> None:
+        with self.menu(tools.BACKUP):
+            self.tool.display()
+        made = sorted(p.name for p in self.paths.save_backups.iterdir())
+        self.assertEqual(len(made), 3)
+        self.assertTrue(all(name.endswith("-manual") for name in made))
+        self.assertEqual({n.split(".20")[0] for n in made}, {"ER0000.sl2", "ER0000.co2", "ER0000_modded"})
+        self.assertIn("Backed up 3 file(s)", SHOWN[-1][2])
+        for name in made:
+            self.assertIn(name, SHOWN[-1][2])
+
+    def test_a_folder_with_no_saves_says_so(self) -> None:
+        for path in self.save_dir.iterdir():
+            path.unlink()
+        with self.menu(tools.BACKUP):
+            self.tool.display()
+        self.assertIn("There are no save files", SHOWN[-1][2])
+        self.assertFalse(self.paths.save_backups.exists())
+
+    def test_while_a_restore_is_pending_the_copy_of_the_sessions_save_is_named_for_the_session(self) -> None:
+        self.pend()
+        with self.choose(2), self.menu(tools.BACKUP):
+            self.tool.display()
+        by_base = {b.base: b for b in saves.restorable_backups(self.paths.save_backups)}
+        self.assertTrue(by_base["ER0000.sl2"].modded_session)
+        self.assertEqual(by_base["ER0000.co2"].label, "manual")
+        self.assertEqual(by_base["ER0000_modded"].label, "manual")
+        self.assertIn("modded-session", SHOWN[-1][2])
+        # So the copy cannot be put back into Steam's save later.
+        with self.assertRaises(errors.ErmError):
+            saves.restore_backup(by_base["ER0000.sl2"], self.save_dir, self.paths.save_backups, "20261013T120000000009Z")
+
+    def test_a_running_game_is_refused_and_nothing_is_copied(self) -> None:
+        with self.menu(tools.BACKUP), mock.patch.object(session.procs, "game_running", return_value=[(4, "me3")]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("me3 pid 4", SHOWN[-1][2])
+        self.assertFalse(self.paths.save_backups.exists())
+
+
+class RestoreBackupToolTests(SaveToolsMenuCase):
+    def label(self, relative: str, base: str) -> str:
+        return f"{relative}  (to {base})"
+
+    def test_the_chosen_backup_is_copied_back_and_what_it_replaced_is_kept(self) -> None:
+        self.put_backup(f"ER0000.co2.{STAMP}-manual", b"older co-op")
+        with self.menu([tools.RESTORE_BACKUP, self.label(f"ER0000.co2.{STAMP}-manual", "ER0000.co2")]):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000.co2").read_bytes(), b"older co-op")
+        [aside] = [p for p in self.paths.save_backups.iterdir() if p.name.endswith("-pre-restore")]
+        self.assertEqual(aside.read_bytes(), b"co-op save")
+        self.assertIn(str(aside), SHOWN[-1][2])
+
+    def test_declining_the_question_changes_nothing(self) -> None:
+        ANSWER[0] = "no"
+        self.put_backup(f"ER0000.co2.{STAMP}-manual", b"older co-op")
+        with self.menu([tools.RESTORE_BACKUP, self.label(f"ER0000.co2.{STAMP}-manual", "ER0000.co2")]):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000.co2").read_bytes(), b"co-op save")
+
+    def test_what_a_modded_session_wrote_to_steams_save_is_not_offered(self) -> None:
+        self.put_backup(f"quarantine/ER0000.sl2.{STAMP}-modded-session", b"modded progress")
+        self.put_backup(f"quarantine/ER0000.sl2.bak.{STAMP}-modded-session", b"modded backup")
+        self.put_backup(f"ER0000.co2.{STAMP}-manual", b"older co-op")
+        with self.menu([tools.RESTORE_BACKUP, None]) as menu:
+            self.tool.display()
+        self.assertEqual(menu.call_args_list[1].args[3], [self.label(f"ER0000.co2.{STAMP}-manual", "ER0000.co2")])
+        self.assertEqual(SHOWN, [])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+
+    def test_when_only_those_copies_exist_the_message_says_where_they_go(self) -> None:
+        self.put_backup(f"quarantine/ER0000.sl2.{STAMP}-modded-session", b"modded progress")
+        with self.menu(tools.RESTORE_BACKUP) as menu:
+            self.tool.display()
+        self.assertEqual(menu.call_count, 1)
+        self.assertIn("There are no backups", SHOWN[-1][2])
+        self.assertIn("Move a save to the modded name", SHOWN[-1][2])
+
+    def test_while_a_restore_is_pending_nothing_is_put_into_steams_save(self) -> None:
+        self.pend()
+        name = f"ER0000.sl2.{STAMP}-manual"
+        self.put_backup(name, b"an older vanilla save")
+        with self.choose(2), self.menu([tools.RESTORE_BACKUP, self.label(name, "ER0000.sl2")]):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("Settle the pending restore first", SHOWN[-1][2])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertIn("pending_restore", session.load_last_launch(self.paths))
+
+    def test_while_a_restore_is_pending_the_other_saves_can_still_be_restored(self) -> None:
+        self.pend()
+        name = f"ER0000.co2.{STAMP}-manual"
+        self.put_backup(name, b"older co-op")
+        with self.choose(2), self.menu([tools.RESTORE_BACKUP, self.label(name, "ER0000.co2")]):
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000.co2").read_bytes(), b"older co-op")
+
+    def test_no_backups_says_so_and_cancelling_the_pick_does_nothing(self) -> None:
+        with self.menu(tools.RESTORE_BACKUP):
+            self.tool.display()
+        self.assertIn("There are no backups", SHOWN[-1][2])
+        SHOWN.clear()
+        self.put_backup(f"ER0000.co2.{STAMP}-manual", b"older co-op")
+        with self.menu([tools.RESTORE_BACKUP, None]):
+            self.tool.display()
+        self.assertEqual(SHOWN, [])
+
+
+class QuarantineToolTests(SaveToolsMenuCase):
+    def test_steams_save_is_moved_aside_and_the_note_about_the_session_is_cleared(self) -> None:
+        self.note_a_tripped_session()
+        with self.menu(tools.QUARANTINE):
+            self.tool.display()
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+        self.assertEqual(len(list((self.paths.save_backups / "quarantine").iterdir())), 1)
+        self.assertIn("moved ER0000.sl2", SHOWN[-1][2])
+        self.assertIn("note that a modded session wrote the vanilla save is cleared", SHOWN[-1][2])
+        self.assertNotIn("sentinel_tripped", session.load_last_launch(self.paths))
+        self.assertTrue((self.save_dir / "ER0000.co2").exists())
+
+    def test_while_a_restore_is_pending_it_refuses_and_nothing_moves(self) -> None:
+        self.pend()
+        with self.choose(2), self.menu(tools.QUARANTINE):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("Settle the pending restore first", SHOWN[-1][2])
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertFalse((self.paths.save_backups / "quarantine").exists())
+
+    def test_steam_being_open_refuses_and_leaves_the_save_and_the_note(self) -> None:
+        self.note_a_tripped_session()
+        with self.menu(tools.QUARANTINE), mock.patch.object(tools.saves.steam, "steam_running", return_value=True):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertTrue((self.save_dir / "ER0000.sl2").exists())
+        self.assertIn("sentinel_tripped", session.load_last_launch(self.paths))
+
+    def test_declining_the_question_changes_nothing(self) -> None:
+        ANSWER[0] = "no"
+        with self.menu(tools.QUARANTINE):
+            self.tool.display()
+        self.assertTrue((self.save_dir / "ER0000.sl2").exists())
+        self.assertEqual(SHOWN[-1][0], "question")
+
+    def test_a_note_that_cannot_be_cleared_does_not_hide_that_the_save_was_moved(self) -> None:
+        with self.menu(tools.QUARANTINE), mock.patch.object(
+            tools.session, "clear_tripped", side_effect=OSError(13, "read-only")
+        ):
+            self.tool.display()
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+        self.assertEqual(SHOWN[-1][0], "information")
+        self.assertIn("moved ER0000.sl2", SHOWN[-1][2])
+        self.assertIn("could not clear the note", SHOWN[-1][2])
+
+
+class MoveToModdedToolTests(SaveToolsMenuCase):
+    def test_steams_save_becomes_the_modded_save_and_the_old_modded_one_is_kept(self) -> None:
+        self.note_a_tripped_session()
+        with self.menu([tools.TO_MODDED, "ER0000.sl2 in the Steam folder"]):
+            self.tool.display()
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+        self.assertEqual((self.save_dir / "ER0000_modded").read_bytes(), SL2 + b"modded")
+        [aside] = list(self.paths.save_backups.iterdir())
+        self.assertTrue(aside.name.endswith("-pre-move-to-modded"))
+        self.assertEqual(aside.read_bytes(), b"modded save")
+        self.assertIn(str(aside), SHOWN[-1][2])
+        self.assertNotIn("sentinel_tripped", session.load_last_launch(self.paths))
+
+    def test_what_a_modded_session_wrote_is_offered_and_played_on(self) -> None:
+        name = f"quarantine/ER0000.sl2.{STAMP}-modded-session"
+        kept = self.put_backup(name, b"the session's character")
+        with self.menu([tools.TO_MODDED, f"{name}  (what a modded session wrote)"]) as menu:
+            self.tool.display()
+        self.assertEqual((self.save_dir / "ER0000_modded").read_bytes(), b"the session's character")
+        self.assertFalse(kept.exists())
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
+        self.assertIn(f"{name}  (what a modded session wrote)", menu.call_args_list[1].args[3])
+
+    def test_with_nothing_to_move_it_says_so(self) -> None:
+        (self.save_dir / "ER0000.sl2").unlink()
+        with self.menu(tools.TO_MODDED):
+            self.tool.display()
+        self.assertIn("There is no ER0000.sl2", SHOWN[-1][2])
+
+    def test_steam_being_open_refuses_to_take_its_save_away(self) -> None:
+        with self.menu([tools.TO_MODDED, "ER0000.sl2 in the Steam folder"]), mock.patch.object(
+            tools.saves.steam, "steam_running", return_value=True
+        ):
+            self.tool.display()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertTrue((self.save_dir / "ER0000.sl2").exists())
+
+
+class AuditToolTests(SaveToolsMenuCase):
+    def test_the_chosen_save_is_audited_and_the_text_is_shown(self) -> None:
+        with self.menu([tools.AUDIT, "ER0000.co2"]) as menu, mock.patch.object(
+            tools.saves, "audit_text", return_value="the findings"
+        ) as audit, mock.patch.object(tools.qtui, "show_text") as show:
+            self.tool.display()
+        audit.assert_called_once_with(self.save_dir / "ER0000.co2")
+        self.assertEqual(show.call_args.args[2], "the findings")
+        self.assertIn("ER0000.co2", menu.call_args_list[1].args[3])
+
+    def test_backups_can_be_audited_too(self) -> None:
+        self.put_backup(f"ER0000.co2.{STAMP}-manual", b"x")
+        with self.menu([tools.AUDIT, f"backup: ER0000.co2.{STAMP}-manual"]), mock.patch.object(
+            tools.saves, "audit_text", return_value="t"
+        ) as audit, mock.patch.object(tools.qtui, "show_text"):
+            self.tool.display()
+        audit.assert_called_once_with(self.paths.save_backups / f"ER0000.co2.{STAMP}-manual")
+
+    def test_a_file_that_is_not_a_save_is_explained_not_raised(self) -> None:
+        with self.menu([tools.AUDIT, "ER0000.co2"]), mock.patch.object(tools.qtui, "show_text") as show:
+            self.tool.display()
+        show.assert_not_called()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("not a BND4", SHOWN[-1][2])
+
+
+class MarkReviewedToolTests(SaveToolsMenuCase):
+    def test_the_choice_is_there_only_while_the_note_is(self) -> None:
+        with self.menu(None) as menu:
+            self.tool.display()
+        self.assertNotIn(tools.REVIEWED, menu.call_args.args[3])
+        self.note_a_tripped_session()
+        with self.menu(None) as menu:
+            self.tool.display()
+        self.assertEqual(menu.call_args.args[3][-1], tools.REVIEWED)
+
+    def test_confirming_clears_the_note_and_nothing_in_the_save_folder_changes(self) -> None:
+        self.note_a_tripped_session()
+        before = sorted((p.name, p.read_bytes()) for p in self.save_dir.iterdir())
+        with self.menu(tools.REVIEWED):
+            self.tool.display()
+        self.assertNotIn("sentinel_tripped", session.load_last_launch(self.paths))
+        self.assertEqual(sorted((p.name, p.read_bytes()) for p in self.save_dir.iterdir()), before)
+
+    def test_declining_keeps_the_note(self) -> None:
+        ANSWER[0] = "no"
+        self.note_a_tripped_session()
+        with self.menu(tools.REVIEWED):
+            self.tool.display()
+        self.assertIn("sentinel_tripped", session.load_last_launch(self.paths))
 
 
 class DescribePendingTests(unittest.TestCase):
@@ -352,6 +754,38 @@ class DescribePendingTests(unittest.TestCase):
             self.assertIn(tools.RESTORE, text)
             self.assertIn(tools.KEEP, text)
             self.assertIn("must not go online", text)
+
+    def test_after_a_partial_restore_the_text_names_the_moved_files_and_offers_to_stop_not_to_keep(self) -> None:
+        text = tools.describe_pending(
+            {"reason": "restore-failed", "changed": ["ER0000.sl2"], "error": "disk full",
+             "quarantined": ["/q/ER0000.sl2.x-modded-session"]}
+        )
+        self.assertIn("  /q/ER0000.sl2.x-modded-session", text)
+        self.assertIn(tools.RESTORE, text)
+        self.assertIn(tools.GIVE_UP, text)
+        self.assertNotIn(tools.KEEP, text)
+
+    def test_a_changed_file_the_restore_never_reached_keeps_the_online_warning(self) -> None:
+        text = tools.describe_pending(
+            {"reason": "restore-failed", "changed": ["ER0000.sl2", "ER0000.sl2.bak"], "error": "disk full",
+             "quarantined": ["/q/ER0000.sl2.20261014T000000000000Z-modded-session"]}
+        )
+        self.assertIn("may still hold what the session wrote to ER0000.sl2.bak", text)
+        self.assertIn("must not go online", text)
+
+    def test_a_failed_restore_that_moved_nothing_still_offers_to_keep(self) -> None:
+        text = tools.describe_pending({"reason": "restore-failed", "changed": ["ER0000.sl2"], "error": "x", "quarantined": []})
+        self.assertIn(tools.KEEP, text)
+        self.assertNotIn(tools.GIVE_UP, text)
+
+    def test_a_failure_lists_the_moved_files_its_own_message_leaves_out(self) -> None:
+        kept = [Path("/q/a"), Path("/q/b")]
+        exc = session.SnapshotError("cannot restore /s/ER0000.sl2 (see /q/a)", quarantined=kept)
+        text = tools.describe_failed(exc)
+        self.assertEqual(text.count("/q/a"), 1)  # already in the message, not repeated
+        self.assertIn("  /q/b", text)
+        self.assertIn("moved out of the save folder", text)
+        self.assertEqual(tools.describe_failed(session.SnapshotError("plain")), "plain")
 
     def test_a_restore_that_found_nothing_to_do_says_so(self) -> None:
         text = tools.describe_restored(session.Restored(restored=[], quarantined=[]))
