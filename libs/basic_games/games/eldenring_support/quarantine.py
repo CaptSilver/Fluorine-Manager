@@ -25,7 +25,7 @@ def move_out(paths: state.InstancePaths, game_dir, rel: str, stamp: str) -> Path
 
     A file or a link: a link moves as a link and its target is left alone. A
     directory is refused, because the callers walk a folder and move what is
-    in it one file at a time. A name already taken in the quarantine gets a
+    in it one file at a time. A FIFO, socket or device is refused too. A name already taken in the quarantine gets a
     numeric suffix, so one stamp can hold two moves of the same path.
     """
     if not isinstance(rel, str) or not rel or not is_safe_relpath(rel) or PurePosixPath(rel).name in ("", "."):
@@ -36,6 +36,9 @@ def move_out(paths: state.InstancePaths, game_dir, rel: str, stamp: str) -> Path
         raise QuarantineError(f"{source} is not there to move")
     if found == fsprobe.DIR:
         raise QuarantineError(f"{source} is a folder; its files are moved one by one")
+    if found not in (fsprobe.FILE, fsprobe.LINK):
+        # Reading a FIFO to copy it across devices would block forever.
+        raise QuarantineError(f"{source} is not a file or a link and is left where it is")
     destination = paths.quarantine_game / stamp / rel
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)

@@ -200,6 +200,18 @@ class QuarantineTests(TempDirCase):
                 quarantine.move_out(self.paths, self.game, rel, "s")
         self.assertFalse(self.paths.quarantine_game.exists())
 
+    def test_a_fifo_is_refused_even_when_the_rename_would_cross_devices(self) -> None:
+        fifo = self.game / "mods/A/pipe"
+        os.mkfifo(fifo)
+        cross_device = mock.patch.object(
+            atomic.os, "rename", side_effect=OSError(errno.EXDEV, "cross-device link"))
+        with cross_device, mock.patch.object(
+                Path, "read_bytes", side_effect=AssertionError("a FIFO must never be read")):
+            with self.assertRaises(quarantine.QuarantineError):
+                quarantine.move_out(self.paths, self.game, "mods/A/pipe", "s")
+        self.assertTrue(stat.S_ISFIFO(os.lstat(fifo).st_mode))
+        self.assertFalse(self.paths.quarantine_game.exists())
+
     def test_a_move_that_fails_is_reported_with_both_paths(self) -> None:
         (self.game / "mods/A/config.ini").write_bytes(b"x")
         with mock.patch.object(quarantine.atomic, "move_durably", side_effect=PermissionError("denied")):
