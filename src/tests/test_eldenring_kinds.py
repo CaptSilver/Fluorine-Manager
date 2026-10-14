@@ -64,6 +64,13 @@ class ClassifyTests(TreeCase):
                 self.assertEqual((kind, dll), (kinds.UNKNOWN, None))
                 self.assertIn("proxy", reason)
 
+    def test_a_proxy_dll_inside_a_wrapper_folder_is_not_native(self) -> None:
+        for path in ("EldenModLoader/dinput8.dll", "a/b/DXGI.DLL"):
+            with self.subTest(path):
+                kind, dll, reason = self.classify({path: b"x", "EldenModLoader/mod_loader_config.ini": b"x"})
+                self.assertEqual((kind, dll), (kinds.UNKNOWN, None))
+                self.assertIn("proxy", reason)
+
     def test_a_single_dll_is_a_native_wherever_it_sits(self) -> None:
         self.assertEqual(self.classify({"mods/erdyes.dll": b"x", "mods/erdyes.ini": b"x"})[:2], (kinds.NATIVE, "mods/erdyes.dll"))
         self.assertEqual(self.classify({"RadialMenu/RadialMenu.dll": b"x"}, "radialmenu")[:2], (kinds.NATIVE, "RadialMenu/RadialMenu.dll"))

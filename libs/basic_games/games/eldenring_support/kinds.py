@@ -129,7 +129,9 @@ def classify(root: Listing, mod_name: str | None = None) -> Classified:
             None,
             "Root/ layout is not supported; move its Game/ contents to the mod root",
         )
-    if any(name in PROXY_NAMES for name in lowered if not root.is_dir(lowered[name])):
+    if any(name in PROXY_NAMES for name in lowered if not root.is_dir(lowered[name])) or any(
+        PurePosixPath(rel.lower()).name in PROXY_NAMES for rel in files
+    ):
         return Classified(
             UNKNOWN,
             None,
@@ -378,29 +380,7 @@ def _record(mod, kind: str, native_dll: str | None, deploy_config: list[str]) ->
     _put(mod, KEY_INSTALL_FILES, json.dumps(install_files(mod.absolutePath())))
 
 
-def record_on_install(mod) -> bool:
-    """Record what the classifier makes of a freshly installed mod; first one wins.
-
-    onModInstalled fires late (after installMod has returned, during the next
-    archive's extraction or after an import loop), so an importer that already
-    wrote a kind must not be overwritten.
-    """
-    if recorded_kind(mod) is not None:
-        return False
-    listing = PathListing(mod.absolutePath())
-    classified = classify(listing, mod.name())
-    proposal = (
-        propose_deploy_config(listing, classified.native_dll)
-        if classified.kind == NATIVE and classified.native_dll
-        else []
-    )
-    _record(mod, classified.kind, classified.native_dll, proposal)
-    return True
-
-
-def reclassify(mod) -> Classified:
-    """Record the classifier's current answer, install list included."""
-    _refuse_generated(mod)
+def _classify_and_record(mod) -> Classified:
     listing = PathListing(mod.absolutePath())
     classified = classify(listing, mod.name())
     proposal = (
@@ -410,6 +390,25 @@ def reclassify(mod) -> Classified:
     )
     _record(mod, classified.kind, classified.native_dll, proposal)
     return classified
+
+
+def record_on_install(mod) -> bool:
+    """Record what the classifier makes of a freshly installed mod; first one wins.
+
+    onModInstalled fires late (after installMod has returned, during the next
+    archive's extraction or after an import loop), so an importer that already
+    wrote a kind must not be overwritten.
+    """
+    if recorded_kind(mod) is not None:
+        return False
+    _classify_and_record(mod)
+    return True
+
+
+def reclassify(mod) -> Classified:
+    """Record the classifier's current answer, install list included."""
+    _refuse_generated(mod)
+    return _classify_and_record(mod)
 
 
 def _refuse_generated(mod) -> None:
