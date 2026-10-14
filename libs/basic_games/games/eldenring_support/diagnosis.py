@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import archives, deploy, inventory, prepare, saves, state
+from . import archives, deploy, gate, hardening, inventory, prepare, procs, saves, session, state
 from .ermlib import gamebuild, steam
 from .ermlib import paths as ermpaths
 from .ermlib.errors import ErmError
@@ -36,6 +36,24 @@ KEYS: tuple[str, ...] = (
     "GAME_PATCHED",
     "GAME_TAMPERED",
     "DIAGNOSE_FAILED",
+    "SAVE_RESTORE_PENDING",
+    "GAME_RUNNING",
+    "LAST_LAUNCH_VETOED",
+    "LAST_LAUNCH_DAMAGED",
+    "ME3_INSTALL_FAILED",
+    "DEPLOY_DRIFT",
+    "DEPLOY_COLLISION",
+    "DEPLOY_RESERVED",
+    "DEPLOY_CONFIG_INVALID",
+    "DEPLOY_MANIFEST_DAMAGED",
+    "HARDEN_REQUIRED",
+    "HARDEN_PARTIAL",
+    "HARDEN_STALE",
+    "HARDEN_RESTORED",
+    "LAUNCHER_HARDENED",
+    "STEAM_UPDATE_PENDING",
+    "STEAM_UPDATE_FAILED",
+    "SAVE_SENTINEL_TRIPPED",
 )
 
 TITLES: dict[str, str] = {
@@ -48,12 +66,33 @@ TITLES: dict[str, str] = {
     "GAME_PATCHED": "The game was patched since the last launch",
     "GAME_TAMPERED": "regulation.bin changed but the game was not patched",
     "DIAGNOSE_FAILED": "A check of the Elden Ring setup failed",
+    "SAVE_RESTORE_PENDING": "A save file is waiting to be restored",
+    "GAME_RUNNING": "Elden Ring or me3 is running",
+    "LAST_LAUNCH_VETOED": "The last launch was blocked",
+    "LAST_LAUNCH_DAMAGED": "The record of the last launch is damaged",
+    "ME3_INSTALL_FAILED": "me3 could not be installed",
+    "DEPLOY_DRIFT": "Deployed config files differ from the mod list",
+    "DEPLOY_COLLISION": "Two mods deploy the same config file",
+    "DEPLOY_RESERVED": "A mod asks to deploy a path that is never deployed",
+    "DEPLOY_CONFIG_INVALID": "A mod lists config files that cannot be deployed",
+    "DEPLOY_MANIFEST_DAMAGED": "The record of deployed files is damaged",
+    "HARDEN_REQUIRED": "The launcher has to be hardened before config files are deployed",
+    "HARDEN_PARTIAL": "The launcher is swapped but not locked",
+    "HARDEN_STALE": "The launcher swap is out of date",
+    "HARDEN_RESTORED": "Steam put the real launcher back",
+    "LAUNCHER_HARDENED": "The launcher is hardened",
+    "STEAM_UPDATE_PENDING": "Steam has an update waiting",
+    "STEAM_UPDATE_FAILED": "Steam's last update failed",
+    "SAVE_SENTINEL_TRIPPED": "A modded session wrote the vanilla save",
 }
 
 # The guided fixes that need no tool of the plugin's own. The diagnose plugin
 # maps each name to the code that runs it; a name that starts with "tool:" opens
 # the Tools-menu entry of that name.
 ADOPT, QUARANTINE, READOPT, ACCEPT_UPDATE, REPIN = "adopt", "quarantine", "re-adopt", "accept-update", "re-pin"
+TOOL_HARDEN, TOOL_SYNC, TOOL_SAVES, TOOL_KIND, TOOL_REBUILD, TOOL_ME3 = (
+    "tool:harden", "tool:sync", "tool:saves", "tool:kind", "tool:rebuild", "tool:me3",
+)
 
 
 def number(key: str) -> int:
@@ -125,7 +164,7 @@ class Diagnosis:
         found: list[Problem] = []
         with archives.hash_cache(paths) as cache:
             context = self._context(paths, cache)
-            for group in (self._folder_rows,):
+            for group in (self._folder_rows, self._deploy_rows, self._session_rows):
                 try:
                     found += group(context)
                 except Exception as exc:  # a broken check must not take the others down
@@ -270,3 +309,98 @@ class Diagnosis:
                 )
             ]
         return []
+
+    # -- deployed config files and the launcher -------------------------------
+
+    def _deploy_rows(self, context: Context) -> list[Problem]:
+        rows: list[Problem] = []
+        try:
+            deploy.read_manifest(context.paths)
+        except state.StateError as exc:
+            rows.append(
+                Problem(
+                    "DEPLOY_MANIFEST_DAMAGED",
+                    f"{exc}\nLook at the file. Deleting it forgets which files in Game/mods/ the plugin placed, "
+                    "and they then show up as strays.",
+                )
+            )
+        findings: dict[str, list[str]] = {}
+        for finding in context.desired.findings:
+            findings.setdefault(finding.key, []).append(finding.text)
+        for key, texts in findings.items():
+            fix = TOOL_KIND if key == "DEPLOY_CONFIG_INVALID" else None
+            rows.append(Problem(key, "\n".join(texts), fix))
+        plan = deploy.plan(context.desired, context.manifest, context.game_dir)
+        drift = deploy.verify(context.manifest, context.game_dir)
+        if plan.copies or plan.removes or plan.adopts or drift:
+            lines = [f"  {item.rel}: {item.why}" for item in drift]
+            lines += [f"  {copy.rel}: to be copied" for copy in plan.copies]
+            lines += [f"  {rel}: no longer wanted" for rel in plan.removes]
+            lines += [f"  {rel}: in place, to be recorded" for rel, _ in plan.adopts]
+            rows.append(
+                Problem(
+                    "DEPLOY_DRIFT",
+                    "The config files in Game/mods/ are not what the enabled mods ask for:\n" + "\n".join(lines),
+                    TOOL_SYNC,
+                )
+            )
+        launcher = hardening.state(context.game_dir, context.cache)
+        fixes = {
+            "HARDEN_REQUIRED": TOOL_HARDEN, "HARDEN_PARTIAL": TOOL_HARDEN, "HARDEN_STALE": TOOL_HARDEN,
+            "HARDEN_RESTORED": TOOL_HARDEN, "STEAM_UPDATE_PENDING": TOOL_HARDEN,
+        }
+        for item in hardening.launcher_problems(
+            launcher, bool(context.manifest.files), bool(plan.copies or plan.adopts), context.appmanifest
+        ):
+            rows.append(Problem(item.key, item.text, fixes.get(item.key), item.informational))
+        return rows
+
+    # -- the last launch and the save ------------------------------------------
+
+    def _session_rows(self, context: Context) -> list[Problem]:
+        rows: list[Problem] = []
+        up = procs.game_running()
+        if up:
+            rows.append(
+                Problem(
+                    "GAME_RUNNING",
+                    "Elden Ring or me3 is running: " + ", ".join(f"{name} (pid {pid})" for pid, name in up)
+                    + ". A launch waits for it to exit, and nothing edits Game/ under it.",
+                    informational=True,
+                )
+            )
+        try:
+            last = session.load_last_launch(context.paths)
+        except session.LaunchStateError as exc:
+            rows.append(
+                Problem(
+                    "LAST_LAUNCH_DAMAGED",
+                    f"{exc}\nThis file remembers whether the last modded session changed your vanilla save, so "
+                    "it is not guessed at. Compare ER0000.sl2 with a backup, then delete the file.",
+                )
+            )
+            return rows
+        pending = last.get("pending_restore")
+        if pending:
+            veto = gate.LaunchGate.pending_veto(pending)
+            rows.append(Problem("SAVE_RESTORE_PENDING", f"{veto.reason}\n\n{veto.fix}", TOOL_SAVES))
+        tripped = last.get("sentinel_tripped")
+        if isinstance(tripped, dict):
+            kept = tripped.get("quarantined")
+            where = "\n".join(f"  {path}" for path in kept) if isinstance(kept, list) else "  (not recorded)"
+            rows.append(
+                Problem(
+                    "SAVE_SENTINEL_TRIPPED",
+                    "A modded session wrote to your vanilla save, usually because a mod failed to load and took the "
+                    "save redirect with it. The pre-session save was put back, and what the session wrote is kept "
+                    f"at:\n{where}\nNothing was deleted.",
+                    informational=True,
+                )
+            )
+        report = last.get("report")
+        if isinstance(report, dict) and report.get("outcome") == "vetoed":
+            text = f"{report.get('step', '')}\n\n{report.get('text', '')}".strip()
+            if report.get("key") == "ME3_INSTALL_FAILED":
+                rows.append(Problem("ME3_INSTALL_FAILED", text, TOOL_ME3))
+            rows.append(Problem("LAST_LAUNCH_VETOED", text))
+        return rows

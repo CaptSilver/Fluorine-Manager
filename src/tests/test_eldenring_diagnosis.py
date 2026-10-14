@@ -13,7 +13,11 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_diagnosis_tests")
 deploy = support.module(PACKAGE, "deploy")
 diagnosis = support.module(PACKAGE, "diagnosis")
+hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
+kinds = support.module(PACKAGE, "kinds")
+procs = support.module(PACKAGE, "procs")
+session = support.module(PACKAGE, "session")
 state = support.module(PACKAGE, "state")
 gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 
@@ -57,6 +61,7 @@ class DiagnosisCase(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_DATA_HOME": "", "XDG_CONFIG_HOME": ""})
         env.start()
         self.addCleanup(env.stop)
+        mock.patch.object(procs, "game_running", return_value=[]).start()  # not this machine's /proc
         self.library = self.tmp / "lib"
         self.install = self.library / "steamapps/common/ELDEN RING"
         self.game_dir = self.install / "Game"
@@ -85,8 +90,22 @@ class DiagnosisCase(unittest.TestCase):
         path.write_bytes(data)
         return path
 
+    def native(self, name: str = "thing", config=("mods/Thing/config.ini",), dll: str = "mods/Thing.dll"):
+        """An enabled native mod that asks for its config file to be deployed."""
+        stem = Path(dll).stem
+        mod = self.organizer.mod_list.add(
+            name, files={dll: b"MZ", f"mods/{stem}/config.ini": "a=1\n", f"mods/{stem}/x.ini": "b=2\n"}
+        )
+        kinds.set_kind(mod, kinds.NATIVE, native_dll=dll, deploy_config=list(config))
+        return mod
+
     def adopt(self, *rels: str):
         return inventory.adopt(self.paths, self.game_dir, deploy.Manifest(), LIVE, list(rels))
+
+    def launcher(self, value: str):
+        patcher = mock.patch.object(diagnosis.hardening, "state", return_value=value)
+        patcher.start()
+        return patcher
 
     def keys(self) -> list[str]:
         return [problem.key for problem in self.diagnosis.problems()]
@@ -292,6 +311,190 @@ class UpdateRowTests(DiagnosisCase):
         before = self.paths.vanilla_inventory.read_bytes()
         self.assertEqual(self.one("GAME_DIR_STRAYS").fix, "quarantine")
         self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+
+
+class DeployRowTests(DiagnosisCase):
+    def test_no_native_asking_for_anything_means_no_deploy_rows(self) -> None:
+        self.put("start_protected_game.exe", b"MZ eac")
+        self.assertEqual(self.diagnosis.problems(), [])
+
+    def test_a_wanted_file_that_is_not_there_is_drift_with_the_sync_tool_and_the_launcher_must_be_hardened(self) -> None:
+        self.put("start_protected_game.exe", b"MZ eac")
+        self.native()
+        drift = self.one("DEPLOY_DRIFT")
+        self.assertEqual(drift.fix, "tool:sync")
+        self.assertIn("mods/Thing/config.ini: to be copied", drift.text)
+        required = self.one("HARDEN_REQUIRED")
+        self.assertEqual((required.fix, required.informational), ("tool:harden", False))
+
+    def test_a_deploy_under_a_hardened_launcher_is_quiet_apart_from_the_hardened_note(self) -> None:
+        self.native()
+        patcher = self.launcher(hardening.HARDENED)
+        self.addCleanup(patcher.stop)
+        deploy.sync(deploy.desired(self.organizer), self.paths, self.game_dir, launcher=lambda: hardening.HARDENED)
+        (note,) = self.diagnosis.problems()
+        self.assertEqual((note.key, note.informational), ("LAUNCHER_HARDENED", True))
+        self.assertIn("Unharden before a Steam update", note.text)
+
+    def test_a_file_the_dll_rewrote_is_drift_naming_the_file(self) -> None:
+        self.native()
+        patcher = self.launcher(hardening.HARDENED)
+        self.addCleanup(patcher.stop)
+        deploy.sync(deploy.desired(self.organizer), self.paths, self.game_dir, launcher=lambda: hardening.HARDENED)
+        self.put("mods/Thing/config.ini", b"rewritten by the dll\n")
+        # The plan would copy it again, and verify says why.
+        self.assertIn("mods/Thing/config.ini: its bytes changed", self.one("DEPLOY_DRIFT").text)
+
+    def test_a_disabled_native_leaves_a_file_that_is_no_longer_wanted(self) -> None:
+        mod = self.native()
+        patcher = self.launcher(hardening.HARDENED)
+        self.addCleanup(patcher.stop)
+        deploy.sync(deploy.desired(self.organizer), self.paths, self.game_dir, launcher=lambda: hardening.HARDENED)
+        self.organizer.mod_list.active.discard(mod.name())
+        text = self.one("DEPLOY_DRIFT").text
+        self.assertIn("mods/Thing/config.ini: no longer wanted", text)
+        self.assertIn("LAUNCHER_HARDENED", self.keys())
+
+    def test_two_natives_for_one_path_are_one_row_naming_both_with_no_fix(self) -> None:
+        self.native("first")
+        self.native("second")
+        collision = self.one("DEPLOY_COLLISION")
+        self.assertIsNone(collision.fix)
+        self.assertIn("first", collision.text)
+        self.assertIn("second", collision.text)
+
+    def test_a_config_file_that_cannot_be_deployed_points_at_set_mod_kind(self) -> None:
+        mod = self.native()
+        mod.setPluginSetting(kinds.PLUGIN, "deploy_config", '["mods/Thing/missing.ini"]')
+        problem = self.one("DEPLOY_CONFIG_INVALID")
+        self.assertEqual(problem.fix, "tool:kind")
+
+    def test_a_reserved_shape_is_its_own_row(self) -> None:
+        mod = self.native()
+        mod.setPluginSetting(kinds.PLUGIN, "deploy_config", '["mods/Thing/log.txt"]')
+        self.assertIn("DEPLOY_RESERVED", self.keys())
+
+    def test_a_damaged_manifest_is_a_row_and_the_rest_reads_as_nothing_deployed(self) -> None:
+        self.paths.deploy_manifest.write_text("{nope")
+        problem = self.one("DEPLOY_MANIFEST_DAMAGED")
+        self.assertIn("deploy-manifest.json", problem.text)
+
+    def test_the_pass_does_not_touch_the_manifest_or_game(self) -> None:
+        self.native()
+        self.put("start_protected_game.exe", b"MZ eac")
+        before = tree(self.install)
+        self.diagnosis.problems()
+        self.assertEqual(tree(self.install), before)
+        self.assertFalse(self.paths.deploy_manifest.exists())
+
+
+class LauncherRowTests(DiagnosisCase):
+    def test_each_state_that_is_not_hardened_has_its_row_and_the_harden_tool(self) -> None:
+        for value, key in (
+            (hardening.SWAPPED_UNLOCKED, "HARDEN_PARTIAL"),
+            (hardening.STALE, "HARDEN_STALE"),
+            (hardening.RESTORED, "HARDEN_RESTORED"),
+        ):
+            with self.subTest(value):
+                patcher = self.launcher(value)
+                try:
+                    problem = self.one(key)
+                finally:
+                    patcher.stop()
+                self.assertEqual((problem.fix, problem.informational), ("tool:harden", False))
+
+    def test_a_vanilla_or_absent_launcher_with_nothing_deployed_is_nothing(self) -> None:
+        for value in (hardening.VANILLA, hardening.ABSENT):
+            patcher = self.launcher(value)
+            try:
+                self.assertEqual(self.diagnosis.problems(), [])
+            finally:
+                patcher.stop()
+
+    def test_steam_update_rows_come_from_the_app_manifest_only_while_hardened(self) -> None:
+        acf = self.library / "steamapps/appmanifest_1245620.acf"
+        acf.write_text(
+            '"AppState"\n{\n\t"buildid"\t\t"25080141"\n\t"StateFlags"\t\t"1030"\n\t"UpdateResult"\t\t"8"\n}\n'
+        )
+        patcher = self.launcher(hardening.HARDENED)
+        self.addCleanup(patcher.stop)
+        pending, failed = self.one("STEAM_UPDATE_PENDING"), self.one("STEAM_UPDATE_FAILED")
+        self.assertEqual((pending.fix, failed.fix), ("tool:harden", None))
+        patcher.stop()
+        patcher = self.launcher(hardening.VANILLA)
+        self.addCleanup(patcher.stop)
+        self.assertNotIn("STEAM_UPDATE_PENDING", self.keys())
+
+
+class SessionRowTests(DiagnosisCase):
+    def pending(self) -> dict:
+        names = {"ER0000.sl2": None, "ER0000.sl2.bak": None}
+        return {
+            "reason": "game-running", "changed": ["ER0000.sl2"],
+            "sentinel": {
+                "stamp": "20261013T120000000001Z", "save_dir": str(self.tmp / "save"),
+                "snapshot_dir": str(self.paths.save_snapshots / "20261013T120000000001Z"), "files": names,
+                "swept": None,
+            },
+        }
+
+    def test_a_game_that_is_up_is_listed_informationally(self) -> None:
+        with mock.patch.object(diagnosis.procs, "game_running", return_value=[(7, "me3"), (9, "eldenring.exe")]):
+            problem = self.one("GAME_RUNNING")
+        self.assertTrue(problem.informational)
+        self.assertIn("me3 (pid 7)", problem.text)
+
+    def test_a_restore_that_is_owed_points_at_the_save_tools_with_the_gates_wording(self) -> None:
+        session.save_last_launch(self.paths, {"pending_restore": self.pending()})
+        problem = self.one("SAVE_RESTORE_PENDING")
+        self.assertEqual((problem.fix, problem.informational), ("tool:saves", False))
+        self.assertIn("ER0000.sl2", problem.text)
+        self.assertIn("Save tools", problem.text)
+
+    def test_a_session_that_wrote_the_vanilla_save_is_an_informational_row_naming_where_it_went(self) -> None:
+        session.save_last_launch(
+            self.paths,
+            {"sentinel_tripped": {"time": "t", "restored": ["ER0000.sl2"], "quarantined": ["/q/ER0000.sl2.x-modded-session"]}},
+        )
+        problem = self.one("SAVE_SENTINEL_TRIPPED")
+        self.assertEqual((problem.informational, problem.fix), (True, None))
+        self.assertIn("  /q/ER0000.sl2.x-modded-session", problem.text)
+
+    def test_a_tripped_record_of_the_wrong_shape_is_not_a_row_and_does_not_raise(self) -> None:
+        for odd in ("x", None, ["a"]):
+            session.save_last_launch(self.paths, {"sentinel_tripped": odd})
+            self.assertEqual(self.diagnosis.problems(), [])
+        session.save_last_launch(self.paths, {"sentinel_tripped": {"quarantined": "x"}})
+        self.assertIn("(not recorded)", self.one("SAVE_SENTINEL_TRIPPED").text)
+
+    def test_a_blocked_launch_is_shown_with_the_reason_it_recorded(self) -> None:
+        session.save_last_launch(
+            self.paths, {"report": {"outcome": "vetoed", "key": "NATIVE_DLL_INVALID", "step": "me3 profile", "text": "x.dll is empty"}}
+        )
+        problem = self.one("LAST_LAUNCH_VETOED")
+        self.assertIn("me3 profile", problem.text)
+        self.assertIn("x.dll is empty", problem.text)
+
+    def test_a_failed_me3_install_is_its_own_row_with_the_install_tool(self) -> None:
+        session.save_last_launch(
+            self.paths, {"report": {"outcome": "vetoed", "key": "ME3_INSTALL_FAILED", "step": "me3 host", "text": "no network"}}
+        )
+        problem = self.one("ME3_INSTALL_FAILED")
+        self.assertEqual(problem.fix, "tool:me3")
+        self.assertIn("no network", problem.text)
+        self.assertIn("LAST_LAUNCH_VETOED", self.keys())
+
+    def test_a_launch_that_went_ahead_is_nothing(self) -> None:
+        session.save_last_launch(self.paths, {"report": {"outcome": "launched", "warnings": ["x"]}})
+        self.assertEqual(self.diagnosis.problems(), [])
+
+    def test_a_damaged_record_is_a_row_and_hides_nothing_else(self) -> None:
+        self.paths.last_launch.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.last_launch.write_text("{nope")
+        self.put("bink2w64.dll")
+        keys = self.keys()
+        self.assertIn("LAST_LAUNCH_DAMAGED", keys)
+        self.assertIn("GAME_DIR_STRAYS", keys)
 
 
 class FailureTests(DiagnosisCase):

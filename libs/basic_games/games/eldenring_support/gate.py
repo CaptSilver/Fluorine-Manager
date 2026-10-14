@@ -335,12 +335,12 @@ class LaunchGate:
             )
         pending = data.get("pending_restore")
         if pending:
-            raise self._pending_veto(pending)
+            raise self.pending_veto(pending)
         if self._sweep_unseen(paths, data) == "pending":
-            raise self._pending_veto(data["pending_restore"])
+            raise self.pending_veto(data["pending_restore"])
 
     @staticmethod
-    def _pending_veto(pending: dict) -> _Veto:
+    def pending_veto(pending: dict) -> _Veto:
         names = ", ".join(pending.get("changed") or saves.GUARDED[:1])
         reason = pending.get("reason")
         if reason == "unseen-session":

@@ -330,7 +330,7 @@ class SessionCheckTests(GateCase):
     def test_each_pending_reason_has_its_own_wording(self) -> None:
         texts = {}
         for reason in ("game-running", "unseen-session", "restore-failed"):
-            veto = gate.LaunchGate._pending_veto(
+            veto = gate.LaunchGate.pending_veto(
                 {"reason": reason, "changed": ["ER0000.sl2"], "error": "disk full"}
             )
             texts[reason] = veto.text()
