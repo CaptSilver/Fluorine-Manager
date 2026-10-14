@@ -221,6 +221,56 @@ class QuarantineTests(TempDirCase):
         self.assertIn("mods/A/config.ini", str(caught.exception))
         self.assertTrue((self.game / "mods/A/config.ini").exists())
 
+    def test_a_stamp_that_is_not_one_folder_name_is_refused_and_nothing_moves(self) -> None:
+        (self.game / "mods/A/config.ini").write_bytes(b"x")
+        for stamp in ("", ".", "..", "../x", "a/b", "/abs", "a\\b", "a\0b", None, 7):
+            with self.subTest(stamp), self.assertRaises(quarantine.QuarantineError):
+                quarantine.move_out(self.paths, self.game, "mods/A/config.ini", stamp)
+        self.assertTrue((self.game / "mods/A/config.ini").exists())
+        self.assertFalse(self.paths.quarantine_game.exists())
+
+    def test_a_composed_stamp_is_one_folder_name_and_is_accepted(self) -> None:
+        (self.game / "mods/A/config.ini").write_bytes(b"x")
+        moved = quarantine.move_out(self.paths, self.game, "mods/A/config.ini", "erm-import-20261014T000000000001Z")
+        self.assertEqual(
+            moved, self.paths.quarantine_game / "erm-import-20261014T000000000001Z/mods/A/config.ini"
+        )
+        self.assertEqual(moved.read_bytes(), b"x")
+
+    def test_a_link_above_the_file_is_refused_and_the_file_behind_it_stays(self) -> None:
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "x.dll").write_bytes(b"x")
+        shutil.rmtree(self.game / "mods")
+        (self.game / "mods").symlink_to(elsewhere)
+        with self.assertRaises(quarantine.QuarantineError) as caught:
+            quarantine.move_out(self.paths, self.game, "mods/x.dll", "s")
+        self.assertIn("mods", str(caught.exception))
+        self.assertEqual((elsewhere / "x.dll").read_bytes(), b"x")
+        self.assertFalse(self.paths.quarantine_game.exists())
+
+    def test_a_file_where_a_folder_should_be_is_refused(self) -> None:
+        shutil.rmtree(self.game / "mods/A")
+        (self.game / "mods/A").write_bytes(b"not a folder")
+        with self.assertRaises(quarantine.QuarantineError) as caught:
+            quarantine.move_out(self.paths, self.game, "mods/A/config.ini", "s")
+        self.assertIn("mods/A", str(caught.exception))
+
+    def test_link_above_names_the_first_folder_that_is_not_one(self) -> None:
+        (self.tmp / "elsewhere").mkdir()
+        (self.game / "mods/B").symlink_to(self.tmp / "elsewhere")
+        self.assertEqual(quarantine.link_above(self.game, "mods/B/deep/x.dll"), "mods/B")
+        self.assertIsNone(quarantine.link_above(self.game, "mods/A/config.ini"))
+        self.assertIsNone(quarantine.link_above(self.game, "nothing/here/x.dll"))
+        self.assertIsNone(quarantine.link_above(self.game, "top.dll"))
+
+    def test_a_game_folder_reached_through_a_link_is_fine(self) -> None:
+        alias = self.tmp / "alias"
+        alias.symlink_to(self.game)
+        (self.game / "mods/A/config.ini").write_bytes(b"x")
+        moved = quarantine.move_out(self.paths, alias, "mods/A/config.ini", "s")
+        self.assertEqual(moved.read_bytes(), b"x")
+
 
 class InstancePathsTests(TempDirCase):
     def test_every_file_sits_under_the_instance_eldenring_folder(self) -> None:
