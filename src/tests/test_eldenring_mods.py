@@ -58,5 +58,30 @@ class PlacementTests(ModsCase):
         self.assertEqual(mods.placement(self.organizer, name), mods.PLACED)
 
 
+class ListedModsTests(ModsCase):
+    def test_every_real_mod_comes_with_its_state_lowest_priority_first(self) -> None:
+        self.modlist.add("low")
+        self.modlist.add("off", enabled=False)
+        self.modlist.add("high")
+        listed = mods.listed_mods(self.organizer)
+        self.assertEqual([(name, enabled) for name, _mod, enabled in listed], [("low", True), ("off", False), ("high", True)])
+        self.assertIs(listed[0][1], self.modlist.getMod("low"))
+
+    def test_separators_backups_and_the_excluded_names_are_left_out(self) -> None:
+        sep = self.modlist.add("---sep---")
+        sep.isSeparator = lambda: True
+        backup = self.modlist.add("old")
+        backup.isBackup = lambda: True
+        self.modlist.add("Elden Ring Generated")
+        self.modlist.add("real")
+        listed = mods.listed_mods(self.organizer, exclude=("Elden Ring Generated",))
+        self.assertEqual([name for name, _mod, _enabled in listed], ["real"])
+
+    def test_a_name_the_index_does_not_resolve_is_skipped(self) -> None:
+        self.modlist.add("a")
+        self.modlist.order.append("ghost")
+        self.assertEqual([name for name, _m, _e in mods.listed_mods(self.organizer)], ["a"])
+
+
 if __name__ == "__main__":
     unittest.main()

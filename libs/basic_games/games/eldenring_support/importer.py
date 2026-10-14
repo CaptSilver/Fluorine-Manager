@@ -454,8 +454,8 @@ def _install_one(
     if lock_entry.get("version"):
         mod.setVersion(version_info(str(lock_entry["version"])))
     if entry.repo_id:
-        mod.setPluginSetting(kinds.PLUGIN, "github_repo_id", entry.repo_id)
-        mod.setPluginSetting(kinds.PLUGIN, "github_tag", str(lock_entry.get("version", "")))
+        mod.setPluginSetting(kinds.PLUGIN, kinds.KEY_GITHUB_REPO, entry.repo_id)
+        mod.setPluginSetting(kinds.PLUGIN, kinds.KEY_GITHUB_TAG, str(lock_entry.get("version", "")))
     report.ok(f"{entry.id}: installed as {kinds.mod_kind(mod)}")
     return True
 

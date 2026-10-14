@@ -568,5 +568,21 @@ class InstallContextTests(TreeCase):
         self.assertEqual(self.settings(), (False, True, True))
 
 
+class RecordedKeyTests(unittest.TestCase):
+    def test_the_names_mod_settings_are_stored_under_never_change(self) -> None:
+        # They are written to every user's meta.ini and read back by later versions.
+        self.assertEqual(
+            (
+                kinds.KEY_KIND, kinds.KEY_NATIVE_DLL, kinds.KEY_DEPLOY_CONFIG, kinds.KEY_INSTALL_FILES,
+                kinds.KEY_INSTALL_SUBDIR, kinds.KEY_GITHUB_REPO, kinds.KEY_GITHUB_TAG, kinds.KEY_GITHUB_ASSET,
+                kinds.KEY_IMPORT_ARCHIVE,
+            ),
+            (
+                "kind", "native_dll", "deploy_config", "install_files", "install_subdir", "github_repo_id",
+                "github_tag", "github_asset", "import_archive_sha256",
+            ),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

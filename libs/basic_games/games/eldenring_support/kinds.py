@@ -345,6 +345,10 @@ KEY_NATIVE_DLL = "native_dll"
 KEY_DEPLOY_CONFIG = "deploy_config"
 KEY_INSTALL_FILES = "install_files"
 KEY_INSTALL_SUBDIR = "install_subdir"
+KEY_GITHUB_REPO = "github_repo_id"
+KEY_GITHUB_TAG = "github_tag"
+KEY_GITHUB_ASSET = "github_asset"
+KEY_IMPORT_ARCHIVE = "import_archive_sha256"
 
 
 def _get(mod, key):

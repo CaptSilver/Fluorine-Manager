@@ -49,6 +49,23 @@ def enabled_mods(organizer) -> list[ModRef]:
     return found
 
 
+def listed_mods(organizer, exclude=()) -> list[tuple[str, object, bool]]:
+    """Every real mod as (name, mod, enabled), lowest priority first, disabled ones included.
+
+    A shareable list describes the whole mod list, not just what is switched on.
+    `exclude` names mods to leave out (the generated mod, which is never listed;
+    it is passed in because generated.py imports this module).
+    """
+    modlist = organizer.modList()
+    found = []
+    for name in modlist.allModsByProfilePriority():
+        mod = modlist.getMod(name)
+        if mod is None or name in exclude or not _is_real_mod(mod):
+            continue
+        found.append((name, mod, is_enabled(organizer, name)))
+    return found
+
+
 def placement(organizer, name: str) -> str:
     """Whether the mod called `name` exists, is enabled and has no enabled mod above it."""
     modlist = organizer.modList()
