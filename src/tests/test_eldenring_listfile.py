@@ -120,7 +120,8 @@ class CheckDocumentTests(unittest.TestCase):
         self.rejects(document(game_build=build), "game_build, regulation_sha")
 
     def test_a_mod_name_that_cannot_be_a_folder_is_refused(self) -> None:
-        for bad in ("", " lead", "trail ", "a/b", "a\\b", "..", ".", "a\nb", "a\x7fb", "x" * 201, generated.NAME, 5, None):
+        for bad in ("", " lead", "trail ", "a/b", "a\\b", "..", ".", "a\nb", "a\x7fb", "x" * 201, generated.NAME,
+                    generated.NAME.lower(), generated.NAME.upper(), 5, None):
             with self.subTest(name=bad):
                 self.rejects(document(mods=[package_entry(name=bad)]), "mods[0]")
 

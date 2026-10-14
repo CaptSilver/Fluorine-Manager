@@ -142,7 +142,7 @@ def mod_name_ok(name) -> bool:
         and name not in (".", "..")
         and not any(char in name for char in "/\\")
         and not any(ord(char) < 0x20 or ord(char) == 0x7F for char in name)
-        and name != generated.NAME
+        and name.casefold() != generated.NAME.casefold()
     )
 
 
