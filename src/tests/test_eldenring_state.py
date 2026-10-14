@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -17,6 +18,7 @@ import eldenring_testsupport as support
 PACKAGE = support.load_support("_eldenring_state_tests")
 atomic = support.module(PACKAGE, "atomic")
 state = support.module(PACKAGE, "state")
+PACKAGE_GAMEBUILD = support.module(PACKAGE, "ermlib.gamebuild")
 
 
 def organizer(base) -> types.SimpleNamespace:
@@ -245,6 +247,88 @@ class LoaderTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
+
+
+class BuildStampTests(TempDirCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.paths = state.InstancePaths(organizer(self.tmp / "instance"))
+        self.live = PACKAGE_GAMEBUILD.BuildId(
+            exe="2.7.1.0", app="1.17.1", regulation="11711000", steam_buildid="25080141", regulation_sha="a" * 64
+        )
+
+    def test_no_stamp_is_none(self) -> None:
+        self.assertIsNone(state.read_build_stamp(self.paths))
+
+    def test_a_written_stamp_reads_back_as_the_same_build(self) -> None:
+        state.write_build_stamp(self.paths, self.live)
+        self.assertEqual(state.read_build_stamp(self.paths), self.live)
+
+    def test_a_stamp_that_is_damaged_in_any_way_raises_and_is_not_none(self) -> None:
+        good = self.live._asdict()
+        bad = {
+            "not json": "{nope",
+            "a list": "[]",
+            "a missing field": json.dumps({k: v for k, v in good.items() if k != "exe"}),
+            "an extra field": json.dumps({**good, "extra": "x"}),
+            "an empty field": json.dumps({**good, "app": ""}),
+            "a number": json.dumps({**good, "exe": 5}),
+        }
+        for label, text in bad.items():
+            with self.subTest(label):
+                self.paths.build_stamp.parent.mkdir(parents=True, exist_ok=True)
+                self.paths.build_stamp.write_text(text)
+                with self.assertRaises(state.StateError):
+                    state.read_build_stamp(self.paths)
+
+    def test_a_stamp_that_cannot_be_read_raises(self) -> None:
+        self.paths.build_stamp.mkdir(parents=True)
+        with self.assertRaises(state.StateError):
+            state.read_build_stamp(self.paths)
+
+
+class ProfileRulesTests(TempDirCase):
+    def write(self, data) -> Path:
+        path = self.tmp / "eldenring.json"
+        path.write_text(data if isinstance(data, str) else json.dumps(data))
+        return path
+
+    def test_a_missing_file_is_the_empty_rule_set(self) -> None:
+        self.assertEqual(
+            state.read_profile_rules(self.tmp),
+            {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {},
+             "randomizer_seed": "", "active_list": None},
+        )
+
+    def test_written_rules_read_back_with_every_key_present(self) -> None:
+        merge = {"path": "regulation.bin", "strategy": "param-rows", "mods": ["a", "b"], "prefer": "a",
+                 "vanilla": {"mod": "anc", "member": "r.bin"}}
+        state.write_profile_rules(self.tmp, {"merges": [merge], "randomizer_seed": "s"})
+        rules = state.read_profile_rules(self.tmp)
+        self.assertEqual(rules["merges"], [merge])
+        self.assertEqual(rules["randomizer_seed"], "s")
+        self.assertEqual(rules["prunes"], [])
+
+    def test_damage_of_every_kind_raises_naming_the_file(self) -> None:
+        cases = {
+            "not json": "{nope",
+            "not an object": "[]",
+            "merges not a list": {"merges": {}},
+            "a merge not an object": {"merges": ["x"]},
+            "a merge without mods": {"merges": [{"path": "p", "strategy": "s", "prefer": "a"}]},
+            "mods not names": {"merges": [{"path": "p", "strategy": "s", "prefer": "a", "mods": [1]}]},
+            "a prune without paths": {"prunes": [{"mod": "a"}]},
+            "a rename with a list": {"renames": [{"mod": "a", "paths": ["x"]}]},
+            "vanilla_sources not tables": {"vanilla_sources": {"a": "x"}},
+            "seed not text": {"randomizer_seed": 5},
+            "active_list a string": {"active_list": "x"},
+        }
+        for label, data in cases.items():
+            with self.subTest(label):
+                path = self.write(data)
+                with self.assertRaises(state.StateError) as caught:
+                    state.read_profile_rules(self.tmp)
+                self.assertIn(str(path), str(caught.exception))
 
 
 if __name__ == "__main__":
