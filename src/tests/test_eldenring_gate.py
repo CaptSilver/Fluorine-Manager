@@ -1344,8 +1344,10 @@ class PreparedLaunchTests(GateCase):
         with mock.patch.object(state, "write_build_stamp", side_effect=OSError("disk full")):
             self.assertFalse(self.launch())
         self.assert_vetoed(None, "disk full")
+        self.assertIsNone(self.gate._session_stamp)
         self.gate.finished(str(self.binary), 0)
         self.assertEqual(self.modals, [])
+        self.assertIsNone(self.last_launch()["sentinel"]["swept"])
 
     def test_after_a_stamp_failure_the_next_launch_settles_the_unswept_session_and_goes_on(self) -> None:
         with mock.patch.object(state, "write_build_stamp", side_effect=OSError("disk full")):

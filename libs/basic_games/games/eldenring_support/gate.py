@@ -178,6 +178,8 @@ class LaunchGate:
         try:
             state.write_build_stamp(paths, prepared.live)
         except OSError as exc:
+            # The snapshot is on disk but the launch is not happening.
+            self._session_stamp = None
             raise _Veto(
                 "Build stamp",
                 f"cannot write {paths.build_stamp}: {exc}",
