@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -64,12 +65,10 @@ class ScanGameDirTests(DoctorCase):
         self.put("start_protected_game.exe.erm-backup")
         self.assertEqual(self.names(), [])
 
-    def test_directories_the_plugin_owns_are_not_looked_into(self) -> None:
+    def test_a_dll_below_a_mods_subfolder_is_not_one_eml_loads(self) -> None:
         self.put("mods/AdjustTheFov/config.ini")
-        self.put("mods/AdjustTheFov/inner.dll")
         self.put("mods/Other/inner.dll")
-        self.assertEqual(self.names(owned=["mods/AdjustTheFov"]), [])
-        self.assertEqual(self.names(), [])  # a dll below mods/<dir>/ is not one EML loads
+        self.assertEqual(self.names(), [])
 
     def test_a_modengine_regulation_is_found(self) -> None:
         self.put("mod/regulation.bin")
@@ -97,6 +96,18 @@ class ScanGameDirTests(DoctorCase):
 
     def test_an_unreadable_folder_is_clean_not_an_error(self) -> None:
         self.assertEqual(doctor.scan_game_dir(self.tmp / "missing"), [])
+
+    def test_a_game_folder_that_cannot_be_searched_does_not_raise_from_the_reshade_check(self) -> None:
+        self.put("dxgi.dll")
+        real = os.stat
+
+        def deny(path, *args, **kwargs):
+            if Path(path).name == "dxgi.dll":
+                raise PermissionError(13, "denied", str(path))
+            return real(path, *args, **kwargs)
+
+        with mock.patch.object(os, "stat", deny):
+            self.assertEqual(self.names(), ["dxgi.dll"])
 
     def test_an_unreadable_mods_folder_is_a_stray_naming_its_path_and_not_an_exception(self) -> None:
         self.put("mods/Foo.dll")

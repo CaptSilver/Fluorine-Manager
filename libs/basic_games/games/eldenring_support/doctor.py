@@ -59,22 +59,24 @@ def _children(folder: Path) -> list[Path] | None:
         return None
 
 
-def scan_game_dir(game_dir, owned: Iterable[str] = ()) -> list[Path]:
+def scan_game_dir(game_dir) -> list[Path]:
     """The paths in Game/ that load code or content behind me3's back.
 
-    `owned` holds the Game/ -relative directories some other part of the plugin
-    owns (mods/<Name>/), which are not looked into. Returns the names as they
-    are on disk, so a quarantine move gets the real ones. ReShade's dxgi.dll is
-    its own, and is not reported while ReShade is the one that placed it. A
+    Returns the names as they are on disk, so a quarantine move gets the real
+    ones. ReShade's dxgi.dll is its own, and is not reported while ReShade is
+    the one that placed it; if that cannot be told (the folder cannot be
+    searched), dxgi.dll stays reportable. A
     mods/, mod/ or SeamlessCoop/ folder that cannot be read is reported as a
     stray itself: this runs on every Run, and an exception here would reach the
     user as an unexpected failure instead of the path to fix.
     """
     game_dir = Path(game_dir)
-    owned = {PurePosixPath(rel).as_posix() for rel in owned}
     blocklist = set(BLOCKLIST_FILES)
-    if ermpaths.reshade_active(game_dir):
-        blocklist.discard("dxgi.dll")
+    try:
+        if ermpaths.reshade_active(game_dir):
+            blocklist.discard("dxgi.dll")
+    except OSError:
+        pass
     try:
         entries = sorted(game_dir.iterdir())
     except OSError:
@@ -102,8 +104,6 @@ def scan_game_dir(game_dir, owned: Iterable[str] = ()) -> list[Path]:
                 found.append(entry)
                 continue
             for child in children:
-                if f"mods/{child.name}" in owned:
-                    continue
                 if os.path.isfile(child) and child.suffix.lower() == ".dll":
                     found.append(child)
     return found
