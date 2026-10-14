@@ -236,8 +236,8 @@ def desired(organizer) -> Desired:
 
     The mod folder's copy is the one the user edits and the list pins; the
     copy in Game/ is derived from it. The same path wanted by two mods is a
-    finding for both, never a last-wins: a deployed file cannot be taken back
-    by priority alone. Names are compared without regard to case, because
+    finding for both and neither mod deploys any file, never a last-wins:
+    a deployed file cannot be taken back by priority alone. Names are compared without regard to case, because
     Wine resolves them that way.
     """
     result = Desired()
@@ -263,10 +263,9 @@ def desired(organizer) -> Desired:
         result.findings += findings
         for rel, wanted in found.items():
             claims.setdefault(rel.lower(), []).append((rel, wanted))
+    refused: set[str] = set()
     for entries in claims.values():
         if len(entries) == 1:
-            rel, wanted = entries[0]
-            result.files[rel] = wanted
             continue
         names = sorted({wanted.mod for _, wanted in entries})
         where = sorted({rel for rel, _ in entries})
@@ -277,6 +276,13 @@ def desired(organizer) -> Desired:
                 f"{' and '.join(names)} both want {' / '.join(where)} in Game/. Disable one of them.",
             )
         )
+        refused.update(names)
+    # A mod named in a collision wants nothing, not only the colliding path:
+    # its other files would otherwise stay in Game/ behind the veto.
+    for entries in claims.values():
+        for rel, wanted in entries:
+            if wanted.mod not in refused:
+                result.files[rel] = wanted
     return result
 
 
@@ -662,8 +668,8 @@ def sync(
     removals, because undeploying needs no lock and a veto would only leave
     files in Game/ longer; then the findings, strays and harden vetoes; then
     the copies. A mod with a finding wants nothing, so its files go in the
-    removals. Nothing is copied unless the launcher is hardened, and that is
-    asked of `launcher()` only when a file is, or is about to be, deployed:
+    removals (desired() leaves none of a colliding mod's files in `wanted`).
+    Nothing is copied unless the launcher is hardened, and that is asked of `launcher()` only when a file is, or is about to be, deployed:
     the hardened launcher has to be in place before the first file exists.
     `launcher` returns hardening.state(...).
     """

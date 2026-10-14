@@ -245,11 +245,12 @@ class DesiredTests(ModListCase):
         for word in ("First", "Second", "mods/Thing/config.ini", "mods/thing/config.ini"):
             self.assertIn(word, finding.text)
 
-    def test_a_collision_leaves_the_other_files_of_both_mods_unwanted_only_for_that_path(self) -> None:
+    def test_a_collision_leaves_every_file_of_both_mods_unwanted(self) -> None:
         self.native("First", config=("mods/Thing/config.ini", "mods/Thing/own.ini"))
         self.native("Second", dll="mods/Thing.dll", config=("mods/Thing/config.ini",))
+        self.native("Third", dll="mods/Third.dll", config=("mods/Third/config.ini",))
         result = deploy.desired(self.organizer)
-        self.assertEqual(sorted(result.files), ["mods/Thing/own.ini"])
+        self.assertEqual(sorted(result.files), ["mods/Third/config.ini"])
         self.assertEqual([f.key for f in result.findings], [deploy.DEPLOY_COLLISION])
 
     def test_a_source_that_cannot_be_read_is_config_invalid(self) -> None:
@@ -836,6 +837,16 @@ class SyncTests(ModListCase):
         self.assertEqual(refusal.key, deploy.DEPLOY_COLLISION)
         self.assertIn("Disable one of those mods", refusal.text())
         self.assertFalse(self.deployed_game_file().exists())
+        self.assertEqual(deploy.read_manifest(self.paths).files, {})
+
+    def test_a_collision_takes_the_other_deployed_files_of_the_mod_out_of_game(self) -> None:
+        self.organizer.mod_list.active.discard("Thing mod")
+        self.native("A mod", config=("mods/Thing/config.ini", "mods/Thing/other.ini"))
+        self.sync()
+        self.assertTrue((self.game / "mods/Thing/other.ini").exists())
+        self.native("B mod", dll="mods/thing.dll", config=("mods/thing/config.ini",))
+        self.assertEqual(self.refused().key, deploy.DEPLOY_COLLISION)
+        self.assertFalse((self.game / "mods/Thing/other.ini").exists())
         self.assertEqual(deploy.read_manifest(self.paths).files, {})
 
     def test_a_reserved_or_invalid_list_refuses_with_the_set_mod_kind_tool_named(self) -> None:
