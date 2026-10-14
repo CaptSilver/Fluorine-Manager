@@ -1538,3 +1538,8 @@ add_test(
     NAME test_eldenring_diagnose
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_diagnose.py
 )
+
+add_test(
+    NAME test_eldenring_listfile
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_listfile.py
+)
