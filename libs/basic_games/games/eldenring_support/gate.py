@@ -311,7 +311,12 @@ class LaunchGate:
                 fix,
             )
         game_dir = Path(self._game.dataDirectory().absolutePath())
-        wanted = me3.split_command(" ".join(me3.entry_args(paths, game_dir)))
+        try:
+            wanted = me3.split_command(" ".join(me3.entry_args(paths, game_dir)))
+        except ValueError as exc:
+            # entry_args refuses a path it cannot quote, such as one with a
+            # double quote in it.
+            raise _Veto(step, f"The entry cannot be checked: {exc}", fix) from exc
         given = me3.split_command(args)
         if not self._same_arguments(given, wanted):
             raise _Veto(
@@ -338,7 +343,9 @@ class LaunchGate:
             return False
         for index, (have, want) in enumerate(zip(given, wanted)):
             if index and wanted[index - 1] in _PATH_OPTIONS:
-                if os.path.realpath(have) != os.path.realpath(want):
+                # A relative path would be resolved against whatever directory
+                # the process happens to be in, which realpath would then match.
+                if not os.path.isabs(have) or os.path.realpath(have) != os.path.realpath(want):
                     return False
             elif have != want:
                 return False

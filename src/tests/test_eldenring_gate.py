@@ -663,6 +663,31 @@ class EntryTests(GateCase):
         alias.symlink_to(self.tmp)
         self.assertTrue(self.launch(args=self.args.replace(str(self.tmp), str(alias))))
 
+    def test_a_path_after_a_path_option_must_be_absolute(self) -> None:
+        # Spelled relative, each of these resolves to the right file from the
+        # right directory, so a realpath comparison alone would accept them.
+        tokens = me3.split_command(self.args)
+        start = os.getcwd()
+        self.addCleanup(os.chdir, start)
+        for option in ("--windows-binaries-dir", "-p", "-e"):
+            with self.subTest(option):
+                self.vetoes.clear()
+                absolute = tokens[tokens.index(option) + 1]
+                folder = absolute if option == "--windows-binaries-dir" else os.path.dirname(absolute)
+                os.makedirs(folder, exist_ok=True)
+                os.chdir(folder)
+                relative = "." if option == "--windows-binaries-dir" else os.path.basename(absolute)
+                self.refused(self.args.replace(f'"{absolute}"', f'"{relative}"'))
+
+    def test_an_entry_the_plugin_cannot_spell_is_a_worded_veto_not_a_traceback(self) -> None:
+        args = self.args
+        with mock.patch.object(
+            gate.me3, "entry_args", side_effect=ValueError("a double quote in a path")
+        ):
+            self.assertFalse(self.launch(args=args))
+        self.assert_vetoed(None, "Elden Ring (me3) entry", "a double quote in a path")
+        self.assertNotIn("Traceback", self.last_veto())
+
     def test_a_working_folder_other_than_the_instance_one_is_refused(self) -> None:
         self.refused(cwd=self.tmp)
 
