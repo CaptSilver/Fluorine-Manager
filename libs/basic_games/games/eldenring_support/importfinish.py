@@ -328,8 +328,12 @@ def mark_done(organizer, stamp: str, report: importer.Report, blockers: list[str
 
 def clean_game(
     organizer, installed: dict, paths: state.InstancePaths, host: Host, ui: Ui, report: importer.Report, stamp: str
-) -> bool:
-    """Move erm's files out of Game/ after the user accepts the list. False when it was declined or a move failed.
+) -> tuple[bool, bool]:
+    """Move erm's files out of Game/ after the user accepts the list. Returns (ok, moved).
+
+    `ok` is False when the list was declined or a move failed. `moved` is True
+    when at least one file left Game/, including in a run where a later move
+    failed: Game/ is then part-way between erm's and vanilla.
 
     Refuses, moving nothing, while the deploy manifest holds files or
     folders: on a re-run after a gated launch, installed.json still names the
@@ -346,7 +350,7 @@ def clean_game(
             "files that are gone. Undeploy them first (Sync deployed files), then run the import again. Nothing "
             "was moved."
         )
-        return False
+        return False, False
     found = importgame.survey(organizer, installed, host.game_dir)
     for line in found.left:
         report.warn(line)
@@ -354,13 +358,13 @@ def clean_game(
         report.info(f"{len(found.gone)} of the files erm recorded were already gone from Game/")
     if not found.moves() and not found.carries:
         report.ok("none of erm's files are in Game/")
-        return True
+        return True, False
     where = paths.quarantine_game / importgame.folder_name(stamp)
     if not ui.review(TITLE, importgame.review_text(found, where), "Move them to quarantine"):
         report.warn(
             "Game/ was not touched: the list of files to move was not accepted. Run the import again to be asked."
         )
-        return False
+        return False, False
     with ui.busy("Elden Ring: moving erm's files out of Game/"):
         done = importgame.execute(found, paths, host.game_dir, stamp)
     for carry, aside in done.carried:
@@ -379,7 +383,7 @@ def clean_game(
         report.info("removed the folders that were left empty: " + ", ".join(done.removed))
     for text in done.failed:
         report.fail(text)
-    return not done.failed
+    return not done.failed, bool(done.moved)
 
 
 # -- the whole of it ------------------------------------------------------------
@@ -420,9 +424,9 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
         running=host.running, steam_running=host.steam_running, install_root=host.steam_root,
     )
     if saved:
-        cleaned = clean_game(organizer, installed, paths, host, ui, report, stamp)
+        cleaned, moved = clean_game(organizer, installed, paths, host, ui, report, stamp)
     else:
-        cleaned = False
+        cleaned = moved = False
         report.warn(
             "erm's files stay in Game/ until ER0000.sl2 is settled, so erm keeps working through Steam meanwhile. "
             "Moving them first would leave Steam's launch option starting me3 with erm's mods but without "
@@ -443,7 +447,7 @@ def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: U
             "recorded as vanilla. Clearing it lets a Steam Play start the game under Easy Anti-Cheat, which must "
             "not happen with erm's files still in Game/."
         )
-    if cleaned and not option:
+    if (cleaned or moved) and not option:
         report.warn(
             "Do not press Play in Steam until the launch option is cleared: it starts me3 with erm's mods and "
             "without Seamless Co-op, into ER0000.sl2."

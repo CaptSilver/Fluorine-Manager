@@ -685,6 +685,33 @@ class LaunchOptionOrderTests(FinishCase):
         self.assertIn("Steam still carries a launch option", report.text())
         self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
 
+    def test_a_partial_move_still_warns_against_steams_play_while_the_option_is_set(self) -> None:
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        real = importfinish.importgame.quarantine.move_out
+
+        def flaky(paths, game_dir, rel, stamp):
+            if rel == "SeamlessCoop/ersc_settings.ini":
+                raise importfinish.importgame.quarantine.QuarantineError("denied")
+            return real(paths, game_dir, rel, stamp)
+
+        with mock.patch.object(importfinish.importgame.quarantine, "move_out", flaky):
+            report = self.finish()
+        self.assertFalse(os.path.lexists(self.game / "SeamlessCoop/ersc.dll"))
+        self.assertTrue(os.path.lexists(self.game / "SeamlessCoop/ersc_settings.ini"))
+        self.assertIn("Do not press Play in Steam until the launch option is cleared", report.text())
+        self.assertIsNone(self.done())
+
+    def test_no_play_warning_when_nothing_was_moved(self) -> None:
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        with mock.patch.object(
+            importfinish.importgame.quarantine, "move_out",
+            side_effect=importfinish.importgame.quarantine.QuarantineError("denied"),
+        ):
+            report = self.finish()
+        self.assertNotIn("Do not press Play", report.text())
+
     def test_no_play_warning_when_the_option_is_cleared(self) -> None:
         self.run_import()
         self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
