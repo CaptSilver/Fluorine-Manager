@@ -8,8 +8,11 @@ the co-op password. It writes nothing into Game/, does not read the Steam
 launch option and does not move anything in the save folder: importfinish does
 those once this returns, in the same report.
 
-Every step is safe to repeat: an installed mod, an existing profile and an
-identical baseline are left as they are and reported.
+Every step is safe to repeat: an installed mod and an identical baseline are
+left as they are and reported. A Fluorine profile that already has the name of
+an erm profile is kept (the mods it lacks are installed again and put back in
+its order), replaced (the old folder is moved to profile-backups/ first) or
+skipped, as the caller says; each choice is recorded by importoverrides.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import archives, atomic, generated, importsave, kinds, session, state
+from . import archives, atomic, generated, importoverrides, importsave, kinds, session, state
 from .ermlib import gamebuild, manifest, me3pkg
 from .ermlib import paths as ermpaths
 from .ermlib import saves as ermsaves
@@ -33,6 +36,10 @@ from .ermlib.errors import ErmError
 # The install modes of an erm [[mods]] entry that become Fluorine mods.
 INSTALLABLE = ("game", "mods", "me3-package", "me3-native")
 GAME_NAME = "eldenring"
+BACKUP_LABEL = "pre-erm-import"
+# What to do with a Fluorine profile that has the name of an erm profile.
+KEEP_PROFILE, REPLACE_PROFILE, SKIP_PROFILE = "keep", "replace", "skip"
+PROFILE_CHOICES = (KEEP_PROFILE, REPLACE_PROFILE, SKIP_PROFILE)
 _PROFILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
 
 
@@ -163,6 +170,11 @@ def _sha256_file(path: Path) -> str:
 # -- the saves ----------------------------------------------------------------
 
 
+def backup_copy(paths: state.InstancePaths, save_name: str, stamp: str) -> Path:
+    """Where this import's copy of `save_name` is: the file _backup_saves makes under the same stamp."""
+    return paths.save_backups / f"{save_name}.{stamp}-{BACKUP_LABEL}"
+
+
 def _backup_saves(paths: state.InstancePaths, save_dir: Path, stamp: str, report: Report) -> None:
     """Copy every save file aside, each checked against its source.
 
@@ -177,7 +189,7 @@ def _backup_saves(paths: state.InstancePaths, save_dir: Path, stamp: str, report
         report.info(f"no save files in {save_dir}; nothing to back up")
         return
     for source in present:
-        copy = ermsaves.backup_save(source, paths.save_backups, label="pre-erm-import", stamp=stamp)
+        copy = ermsaves.backup_save(source, paths.save_backups, label=BACKUP_LABEL, stamp=stamp)
         if _sha256_file(copy) != _sha256_file(source):
             raise ImportStopped(f"the backup {copy} does not match {source}; stopping before anything else is done")
         report.ok(f"backed up {source.name} to {copy}")
@@ -498,6 +510,147 @@ def _modlist_text(recipe: list[str], present: set[str], others: list[str]) -> st
     return "\r\n".join(lines) + "\r\n"
 
 
+_MARKS = ("+", "-", "*")
+
+
+def _entry_name(line: str) -> str | None:
+    """The mod a modlist.txt line is about; None for the header and blank lines."""
+    return line[1:] if len(line) > 1 and line[0] in _MARKS else None
+
+
+def _slot(lines: list[str], recipe: list[str], mod_id: str) -> int:
+    """Where `mod_id` goes among the modlist.txt `lines`: just below the nearest recipe mod above it that is listed.
+
+    Failing that, just above the nearest one below it; failing that, just
+    below the generated mod; failing that, first.
+    """
+    names = [_entry_name(line) for line in lines]
+    rank = recipe.index(mod_id)
+    for above in reversed(recipe[:rank]):
+        if above in names:
+            return names.index(above) + 1
+    for below in recipe[rank + 1:]:
+        if below in names:
+            return names.index(below)
+    if generated.NAME in names:
+        return names.index(generated.NAME) + 1
+    return next((index for index, name in enumerate(names) if name is not None), len(lines))
+
+
+def reapply_modlist(text: str, recipe: list[str], placed: list[str]) -> str:
+    """`text`, a modlist.txt, with the mods in `placed` enabled and put back where the recipe has them.
+
+    `recipe` is the erm profile's mods, highest priority first. A line the
+    file already has for a placed mod is dropped first, so a mod that was
+    listed disabled, or in the wrong place, ends up enabled in its place. Every
+    other line is kept as it is, including the ones for mods the recipe does not name.
+    """
+    newline = "\n" if "\n" in text and "\r\n" not in text else "\r\n"
+    wanted = set(placed)
+    lines = [line for line in text.splitlines() if _entry_name(line) not in wanted]
+    for mod_id in recipe:
+        if mod_id in wanted:
+            lines.insert(_slot(lines, recipe, mod_id), "+" + mod_id)
+    return newline.join(lines) + newline
+
+
+def profiles_folder(organizer) -> Path:
+    """The folder that holds the Fluorine profiles; the open one is a folder in it."""
+    return Path(organizer.profilePath()).parent
+
+
+def existing_profiles(organizer, names: list[str]) -> list[str]:
+    """The names among `names` that a Fluorine profile already has, for the caller to ask about before run()."""
+    folder = profiles_folder(organizer)
+    return [name for name in names if _PROFILE_NAME.match(name) and os.path.lexists(folder / name)]
+
+
+def _is_open_profile(organizer, folder: Path) -> bool:
+    return os.path.realpath(folder) == os.path.realpath(organizer.profilePath())
+
+
+def _reapply_open(modlist, recipe: list[str], placed: list[str]) -> None:
+    """Enable the placed mods in the open profile and move each below the recipe mod above it.
+
+    Fluorine writes the open profile's modlist.txt from memory, so the
+    importer goes through IModList and never edits that file.
+    """
+    for mod_id in placed:
+        modlist.setActive(mod_id, True)
+    for mod_id in placed:
+        order = [name for name in modlist.allModsByProfilePriority() if name != mod_id]  # lowest priority first
+        rank = recipe.index(mod_id)
+        at = next((order.index(above) for above in reversed(recipe[:rank]) if above in order), None)
+        if at is None:
+            at = next((order.index(below) + 1 for below in recipe[rank + 1:] if below in order), None)
+        if at is None and generated.NAME in order:
+            at = order.index(generated.NAME)
+        if at is not None:
+            modlist.setPriority(mod_id, at)
+
+
+def _keep_profile(organizer, folder: Path, name: str, recipe: list[str], placed: list[str], report: Report) -> None:
+    """Leave the Fluorine profile as it is, except for the mods this run had to reinstall.
+
+    Those are enabled again and put back in the order the erm profile gives
+    them. Its merge rules, settings and every other line are not touched.
+    """
+    if not placed:
+        report.info(f"profile {name}: kept as it is; none of its mods was missing")
+        return
+    if _is_open_profile(organizer, folder):
+        _reapply_open(organizer.modList(), recipe, placed)
+        where = "the open profile, changed through the mod list"
+    else:
+        target = folder / "modlist.txt"
+        try:
+            old = target.read_bytes().decode("utf-8")
+        except FileNotFoundError:
+            raise ErmError(f"{folder} has no modlist.txt, so it is not a profile to keep; replace it or skip it") from None
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ErmError(f"cannot read {target}: {exc}") from exc
+        new = reapply_modlist(old, recipe, placed)
+        if new != old:
+            atomic.write_bytes_atomic(target, new.encode("utf-8"))
+        where = "modlist.txt rewritten for those mods only"
+    report.ok(f"profile {name}: kept; reinstalled {', '.join(placed)} and put them back in order, enabled ({where})")
+
+
+def _set_aside(paths: state.InstancePaths, folder: Path, name: str, stamp: str, log) -> Path:
+    """Move the old profile folder to profile-backups/<name>-<stamp>, after recording that it will be replaced."""
+    backup = paths.profile_backups / f"{name}-{stamp}"
+    if os.path.lexists(backup):
+        raise ErmError(f"{backup} already exists, so the old profile was not moved")
+    log.add(importoverrides.PROFILE, name, REPLACE_PROFILE, f"the old profile folder moves to {backup}")
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(folder), str(backup))
+    except OSError as exc:
+        raise ErmError(
+            f"the old profile could not be moved to {backup} ({exc}); check both folders before running the import again"
+        ) from exc
+    return backup
+
+
+def _replace_profile(
+    organizer, paths: state.InstancePaths, folder: Path, name: str, data: dict, recipe: list[str],
+    vanilla_sources: dict, present: set[str], stamp: str, log, report: Report,
+) -> None:
+    backup = _set_aside(paths, folder, name, stamp, log)
+    try:
+        _write_profile(organizer, folder, name, data, recipe, vanilla_sources, present, report)
+    except (ErmError, OSError) as exc:
+        outcome = f"The old profile is at {backup}."
+        if not os.path.lexists(folder):
+            try:
+                shutil.move(str(backup), str(folder))
+                outcome = "The old profile was put back."
+            except OSError:
+                pass
+        raise ErmError(f"{exc}. {outcome}") from exc
+    report.info(f"profile {name}: the old profile folder is saved at {backup}")
+
+
 def _write_profile(
     organizer, profile_dir: Path, name: str, data: dict, recipe: list[str], vanilla_sources: dict,
     present: set[str], report: Report,
@@ -514,7 +667,7 @@ def _write_profile(
     )
     # Built beside the profile under a hidden name and renamed into place: a
     # crash must not leave a profile folder without its eldenring.json, which a
-    # repeated run would skip as "exists". Fluorine does not list a hidden
+    # repeated run would then keep as it is. Fluorine does not list a hidden
     # folder, and the next run clears a leftover one.
     staging = profile_dir.with_name(f".{profile_dir.name}.importing")
     if os.path.islink(staging) or os.path.isfile(staging):
@@ -569,11 +722,15 @@ def run(
     version_info: Callable[[str], object] = lambda text: text,
     stamp: str | None = None,
     report: Report | None = None,
+    profile_choices: dict[str, str] | None = None,
 ) -> Report:
     """Import the erm checkout at `erm_dir`; the Report says what happened.
 
     `profiles` are the erm profile names to import, in order; the default is
-    all of them. `save_dir` is the folder holding the save files. `report` is
+    all of them. `profile_choices` says, for a name that a Fluorine profile
+    already has, KEEP_PROFILE, REPLACE_PROFILE or SKIP_PROFILE; a name it does
+    not mention is kept, which changes nothing but the mods that were missing.
+    `save_dir` is the folder holding the save files. `report` is
     filled and returned when the caller has one already, so the second part of
     the import can carry on in the same report. Raises ImportStopped when it
     cannot go on, with everything done up to there kept and the Report of it on
@@ -583,9 +740,12 @@ def run(
     """
     report = report if report is not None else Report()
     try:
+        unknown = sorted(set((profile_choices or {}).values()) - set(PROFILE_CHOICES))
+        if unknown:
+            raise ImportStopped(f"{unknown[0]!r} is not one of {', '.join(PROFILE_CHOICES)}; nothing was done")
         return _run(
             organizer, Path(erm_dir), report, save_dir=save_dir, profiles=profiles, guessed=guessed,
-            version_info=version_info, stamp=stamp,
+            version_info=version_info, stamp=stamp, profile_choices=profile_choices or {},
         )
     except ImportStopped as exc:
         exc.report = report
@@ -599,13 +759,14 @@ def run(
 
 
 def _run(
-    organizer, erm_dir: Path, report: Report, *, save_dir, profiles, guessed, version_info, stamp,
+    organizer, erm_dir: Path, report: Report, *, save_dir, profiles, guessed, version_info, stamp, profile_choices,
 ) -> Report:
     installed = read_installed(erm_dir)
     paths = state.InstancePaths(organizer)
     stamp = stamp or session.now_stamp()
 
     _backup_saves(paths, Path(save_dir), stamp, report)
+    log = importoverrides.OverrideLog.open(paths, report, stamp)
     if importsave.flag(organizer, Path(save_dir), stamp):
         report.info(
             "ER0000.sl2 is held for review: the import asks about it and is not marked done until that is settled"
@@ -617,19 +778,38 @@ def _run(
     except ErmError as exc:
         raise ImportStopped(str(exc)) from exc
     names = profiles if profiles is not None else erm_profile_names(erm_dir)
-    profiles_dir = Path(organizer.profilePath()).parent
+    profiles_dir = profiles_folder(organizer)
     loaded: dict[str, dict] = {}
+    existing: dict[str, str] = {}
     for name in names:
         if not _PROFILE_NAME.match(name):
             report.fail(f"profile {name!r}: the name cannot be a Fluorine profile folder")
             continue
         if os.path.lexists(profiles_dir / name):
-            report.warn(f"profile {name}: skipped, a Fluorine profile of that name exists (rename it in erm or delete the Fluorine one)")
-            continue
+            choice = profile_choices.get(name, KEEP_PROFILE)
+            if choice == SKIP_PROFILE:
+                log.add(importoverrides.PROFILE, name, SKIP_PROFILE, "the Fluorine profile of that name was left alone")
+                continue
+            if os.path.islink(profiles_dir / name) or not os.path.isdir(profiles_dir / name):
+                report.fail(f"profile {name}: a Fluorine profile of that name exists but is not a folder, so it was skipped")
+                continue
+            if choice == REPLACE_PROFILE and _is_open_profile(organizer, profiles_dir / name):
+                report.fail(
+                    f"profile {name}: it is the profile open in Fluorine, so it cannot be replaced. Open another "
+                    "profile and run the import again, or keep it"
+                )
+                continue
+            existing[name] = choice
         try:
             loaded[name] = manifest.load_profile(name, base=erm_dir / "profiles")
         except (ErmError, OSError) as exc:
             report.fail(f"profile {name}: cannot be read ({exc})")
+            continue
+        if existing.get(name) == KEEP_PROFILE:
+            log.add(
+                importoverrides.PROFILE, name, KEEP_PROFILE,
+                "the Fluorine profile of that name was kept; its missing mods are reinstalled and put back in order",
+            )
     if not loaded:
         report.warn("no profile to import")
 
@@ -652,6 +832,7 @@ def _run(
                 vanilla_ids.append(mod_id)
 
     present: set[str] = set()
+    fresh: set[str] = set()  # installed by this run, because mods/ did not have them
     for entry in order:
         if entry.install == "me3-host":
             report.info(f"{entry.id}: me3 is installed or adopted silently at the first launch")
@@ -671,8 +852,13 @@ def _run(
         if nexus_id is None and lock_entry.get("source") == "nexus":
             nexus_id = raw_ids.get(entry.id) or nexus_id_from_filename(str(lock_entry.get("asset", "")))
         try:
+            missing = organizer.modList().getMod(entry.id) is None and not os.path.lexists(
+                Path(organizer.modsPath()) / entry.id
+            )
             if _install_one(organizer, paths, erm_dir, entry, lock_entry, files, nexus_id, report, version_info):
                 present.add(entry.id)
+                if missing:
+                    fresh.add(entry.id)
         except ErmError as exc:
             report.fail(f"{entry.id}: {exc}")
         except Exception as exc:  # one mod must not stop the rest of the import
@@ -694,7 +880,15 @@ def _run(
             }
             table = {mod_id: sources[mod_id] for mod_id in sources if mod_id in named}
             try:
-                _write_profile(organizer, profiles_dir / name, name, data, recipe, table, present, report)
+                if existing.get(name) == KEEP_PROFILE:
+                    placed = [mod_id for mod_id in recipe if mod_id in fresh]
+                    _keep_profile(organizer, profiles_dir / name, name, recipe, placed, report)
+                elif existing.get(name) == REPLACE_PROFILE:
+                    _replace_profile(
+                        organizer, paths, profiles_dir / name, name, data, recipe, table, present, stamp, log, report
+                    )
+                else:
+                    _write_profile(organizer, profiles_dir / name, name, data, recipe, table, present, report)
             except (ErmError, OSError) as exc:
                 report.fail(f"profile {name}: {exc}")
         report.info(
