@@ -347,6 +347,17 @@ class InstallTests(ImporterCase):
         self.assertIn("me3 is installed or adopted silently", text)
         self.assertIn("install the generator yourself", text)
 
+    def test_a_proxy_loader_with_no_installed_json_entry_is_never_recorded_as_a_native(self) -> None:
+        installed = json.loads((self.erm / "installed.json").read_text())
+        del installed["elden-mod-loader"]
+        (self.erm / "installed.json").write_text(json.dumps(installed))
+        report = self.run_import(profiles=["base"])
+        mod = self.modlist.getMod("elden-mod-loader")
+        if mod is not None:
+            self.assertEqual(self.setting("elden-mod-loader", "kind"), "unknown")
+            self.assertFalse(self.setting("elden-mod-loader", "native_dll"))
+        self.assertNotIn("elden-mod-loader: installed as native", report.text())
+
     def test_the_kinds_survive_the_install_callbacks_that_arrive_after_the_loop(self) -> None:
         self.run_import()
         before = {n: (self.setting(n, "kind"), self.setting(n, "native_dll")) for n in self.modlist.mods}

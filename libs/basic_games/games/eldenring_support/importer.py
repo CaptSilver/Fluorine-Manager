@@ -326,6 +326,10 @@ def _stage(
     return destination
 
 
+def _is_proxy(rel: str) -> bool:
+    return Path(rel.lower()).name in kinds.PROXY_NAMES
+
+
 def _dll_sources(entry: Entry, files: list[str], mod_dir: Path):
     """Where the DLL of a native can come from, best first.
 
@@ -337,12 +341,15 @@ def _dll_sources(entry: Entry, files: list[str], mod_dir: Path):
         parts = Path(entry.dll).parts
         for start in range(len(parts)):
             yield Path(*parts[start:]).as_posix()
-    dlls = [f for f in files if f.lower().endswith(".dll")]
+    # A proxy loader is only a native when the profile names it in `dll`.
+    dlls = [f for f in files if f.lower().endswith(".dll") and not _is_proxy(f)]
     if len(dlls) == 1:
         yield dlls[0]
     found = me3pkg.find_native_dll(mod_dir, entry.id)
     if found is not None:
-        yield Path(found).relative_to(mod_dir).as_posix()
+        rel = Path(found).relative_to(mod_dir).as_posix()
+        if not _is_proxy(rel):
+            yield rel
 
 
 def _deploy_proposal(files: list[str], native_dll: str) -> list[str]:
@@ -383,6 +390,14 @@ def _record(mod, entry: Entry, files: list[str], report: Report, modlist) -> boo
     # recording the DLL as a native would load it with no password injection.
     if classified.kind == kinds.ERSC or any(f.lower().endswith("seamlesscoop/ersc.dll") for f in files):
         kinds.set_kind(mod, kinds.ERSC)
+        return True
+    if not entry.dll and classified.kind == kinds.UNKNOWN and any(
+        _is_proxy(rel) for rel in kinds._files(kinds.PathListing(mod_dir))
+    ):
+        # The proxy rule: a bare loader DLL is not a native on its own, and
+        # the same goes when installed.json has no entry to say it was skipped.
+        kinds.set_kind(mod, kinds.UNKNOWN)
+        report.warn(f"{entry.id}: it is a proxy/loader DLL, so its kind is unknown; set it by hand if me3 can chainload it")
         return True
     for candidate in _dll_sources(entry, files, mod_dir):
         if not kinds.native_dll_ok(mod_dir, candidate):
