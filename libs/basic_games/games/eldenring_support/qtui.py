@@ -95,6 +95,38 @@ def pick_profiles(parent, title: str, names: list[str]) -> list[str] | None:
     return [row.text() for row in rows if row.checkState() == Qt.CheckState.Checked]
 
 
+def pick_files(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:
+    """The ticked names of `items` in list order, or None when the dialog is cancelled.
+
+    `checked` says which rows start ticked. An empty answer is a real answer
+    (tick nothing to deploy nothing), which is why cancelling is None.
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    layout = QVBoxLayout(dialog)
+    label = QLabel(text)
+    label.setWordWrap(True)
+    layout.addWidget(label)
+    listing = QListWidget()
+    for name in items:
+        item = QListWidgetItem(name)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Checked if name in checked else Qt.CheckState.Unchecked)
+        listing.addItem(item)
+    layout.addWidget(listing)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    rows = [listing.item(index) for index in range(listing.count())]
+    return [row.text() for row in rows if row.checkState() == Qt.CheckState.Checked]
+
+
 def show_text(parent, title: str, text: str) -> None:
     """A scrollable, read-only text window, for reports too long for a message box."""
     from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout

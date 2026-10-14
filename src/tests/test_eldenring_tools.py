@@ -506,10 +506,11 @@ class SetModKindToolTests(ModToolCase):
         self.modlist.add(generated.NAME, kind="generated")
         self.mod = self.modlist.add("Some Mod", files={"mods/a.dll": b"MZ", "mods/b.dll": b"MZ", "readme.txt": b"x"})
 
-    def drive(self, picked=("Some Mod",), choice=None):
+    def drive(self, picked=("Some Mod",), choice=None, files=None):
         picks = iter(picked)
         with mock.patch.object(tools.qtui, "pick_item", side_effect=lambda *a: next(picks)) as pick, \
-                mock.patch.object(tools, "_choose", return_value=choice) as choose:
+                mock.patch.object(tools, "_choose", return_value=choice) as choose, \
+                mock.patch.object(tools.qtui, "pick_files", return_value=files) as self.files_page:
             self.tool.display()
         return pick, choose
 
@@ -551,6 +552,69 @@ class SetModKindToolTests(ModToolCase):
         self.assertEqual(pick.call_args.args[3], ["mods/a.dll", "mods/b.dll"])
         self.assertEqual(self.kind(), "native")
         self.assertEqual(kinds.recorded_native_dll(self.mod), "mods/b.dll")
+
+    def fov_mod(self):
+        mod = self.modlist.add(
+            "Fov mod", files={"mods/AdjustTheFov.dll": b"MZ", "mods/AdjustTheFov/config.ini": b"a=1", "mods/AdjustTheFov/load.txt": b"x"}
+        )
+        return mod
+
+    def test_a_native_with_config_files_in_its_folder_asks_which_to_deploy_and_records_the_ticked_ones(self) -> None:
+        mod = self.fov_mod()
+        self.drive(picked=("Fov mod", "mods/AdjustTheFov.dll"), choice=1, files=["mods/AdjustTheFov/config.ini"])
+        self.assertEqual(kinds.recorded_deploy_config(mod), ["mods/AdjustTheFov/config.ini"])
+        _, _, _, candidates, ticked = self.files_page.call_args.args
+        self.assertEqual(candidates, ["mods/AdjustTheFov/config.ini", "mods/AdjustTheFov/load.txt"])
+        self.assertIn("hardened", SHOWN[-1][2])
+
+    def test_a_fresh_mod_starts_with_the_classifiers_proposal_ticked(self) -> None:
+        self.fov_mod()
+        self.drive(picked=("Fov mod", "mods/AdjustTheFov.dll"), choice=1, files=[])
+        ticked = self.files_page.call_args.args[4]
+        self.assertEqual(ticked, kinds.propose_deploy_config(
+            kinds.PathListing(self.modlist.getMod("Fov mod").absolutePath()), "mods/AdjustTheFov.dll"))
+
+    def test_a_mod_that_is_already_native_starts_with_what_is_recorded_ticked(self) -> None:
+        mod = self.fov_mod()
+        kinds.set_kind(mod, kinds.NATIVE, native_dll="mods/AdjustTheFov.dll", deploy_config=["mods/AdjustTheFov/load.txt"])
+        self.drive(picked=("Fov mod", "mods/AdjustTheFov.dll"), choice=1, files=["mods/AdjustTheFov/load.txt"])
+        self.assertEqual(self.files_page.call_args.args[4], ["mods/AdjustTheFov/load.txt"])
+        kinds.set_kind(mod, kinds.NATIVE, native_dll="mods/AdjustTheFov.dll", deploy_config=[])
+        self.drive(picked=("Fov mod", "mods/AdjustTheFov.dll"), choice=1, files=[])
+        self.assertEqual(self.files_page.call_args.args[4], [])
+
+    def test_ticking_nothing_records_an_empty_list_and_does_not_mention_the_launcher(self) -> None:
+        mod = self.fov_mod()
+        self.drive(picked=("Fov mod", "mods/AdjustTheFov.dll"), choice=1, files=[])
+        self.assertEqual(kinds.recorded_deploy_config(mod), [])
+        self.assertNotIn("hardened", SHOWN[-1][2])
+
+    def test_cancelling_the_files_page_writes_nothing(self) -> None:
+        mod = self.fov_mod()
+        self.drive(picked=("Fov mod", "mods/AdjustTheFov.dll"), choice=1, files=None)
+        self.assertEqual(mod.calls, [])
+
+    def test_a_dll_with_no_config_folder_skips_the_page_and_clears_a_stale_list(self) -> None:
+        self.drive(picked=("Some Mod", "mods/a.dll"), choice=1)
+        self.files_page.assert_not_called()
+        self.assertEqual(kinds.recorded_deploy_config(self.mod), [])
+
+    def test_a_damaged_record_is_explained_in_the_dialog(self) -> None:
+        self.mod.setPluginSetting(kinds.PLUGIN, "deploy_config", "{not json")
+        _, choose = self.drive(choice=None)
+        self.assertIn("damaged", choose.call_args.args[2])
+
+    def test_a_mod_that_left_the_list_between_the_choice_and_the_lookup_is_reported(self) -> None:
+        def pick_then_lose_the_mod(*args):
+            self.modlist.mods.pop("Some Mod")
+            return "Some Mod"
+
+        with mock.patch.object(tools.qtui, "pick_item", side_effect=pick_then_lose_the_mod), \
+                mock.patch.object(tools, "_choose") as choose:
+            self.tool.display()
+        choose.assert_not_called()
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("no longer in the mod list", SHOWN[-1][2])
 
     def test_native_without_a_dll_is_refused(self) -> None:
         for dll in ("mods/a.dll", "mods/b.dll"):

@@ -203,6 +203,65 @@ class DeployConfigOkTests(TreeCase):
         self.assertFalse(self.ok("mods/A/link.ini"))
 
 
+class DeployConfigCandidatesTests(TreeCase):
+    def candidates(self, files, dll):
+        return kinds.deploy_config_candidates(self.mod(files), dll)
+
+    def test_the_config_files_in_the_dlls_own_folder_are_listed_in_order(self) -> None:
+        files = {
+            "mods/SkipTheIntro.dll": b"x",
+            "mods/SkipTheIntro/load.txt": b"x",
+            "mods/SkipTheIntro/config.ini": b"x",
+        }
+        self.assertEqual(
+            self.candidates(files, "mods/SkipTheIntro.dll"),
+            ["mods/SkipTheIntro/config.ini", "mods/SkipTheIntro/load.txt"],
+        )
+
+    def test_logs_programs_other_files_and_folders_are_left_out(self) -> None:
+        files = {
+            "mods/A.dll": b"x", "mods/A/config.ini": b"x", "mods/A/log.txt": b"x", "mods/A/run.log": b"x",
+            "mods/A/helper.dll": b"x", "mods/A/notes.md": b"x", "mods/A/sub/inner.ini": b"x",
+        }
+        self.assertEqual(self.candidates(files, "mods/A.dll"), ["mods/A/config.ini"])
+
+    def test_the_folder_name_matches_without_regard_to_case_and_keeps_its_own_spelling(self) -> None:
+        files = {"mods/AdjustTheFov.dll": b"x", "mods/adjustthefov/Config.INI": b"x"}
+        self.assertEqual(self.candidates(files, "mods/AdjustTheFov.dll"), ["mods/adjustthefov/Config.INI"])
+
+    def test_a_dll_that_keeps_its_config_beside_itself_has_no_candidates(self) -> None:
+        self.assertEqual(self.candidates({"mods/erdyes.dll": b"x", "mods/erdyes.ini": b"x"}, "mods/erdyes.dll"), [])
+
+    def test_a_dll_at_the_root_looks_at_the_root(self) -> None:
+        self.assertEqual(self.candidates({"A.dll": b"x", "A/c.ini": b"x"}, "A.dll"), ["A/c.ini"])
+
+    def test_a_dll_that_is_not_there_or_escapes_the_mod_has_no_candidates(self) -> None:
+        root = self.mod({"mods/A/c.ini": b"x"})
+        for dll in ("mods/A.dll", "../A.dll", "/abs/A.dll", ""):
+            with self.subTest(dll):
+                self.assertEqual(kinds.deploy_config_candidates(root, dll), [])
+
+    def test_a_config_file_that_is_a_link_out_of_the_mod_is_left_out(self) -> None:
+        root = self.mod({"mods/A.dll": b"x", "mods/A/c.ini": b"x"})
+        outside = self.tmp / "outside.ini"
+        outside.write_text("x")
+        (root / "mods/A/linked.ini").symlink_to(outside)
+        self.assertEqual(kinds.deploy_config_candidates(root, "mods/A.dll"), ["mods/A/c.ini"])
+
+    def test_an_unreadable_folder_is_no_candidates_not_an_exception(self) -> None:
+        root = self.mod({"mods/A.dll": b"x", "mods/A/c.ini": b"x"})
+        real = kinds.os.listdir
+
+        def deny(path):
+            if str(path).endswith("A"):
+                raise PermissionError("denied")
+            return real(path)
+
+        kinds.os.listdir = deny
+        self.addCleanup(setattr, kinds.os, "listdir", real)
+        self.assertEqual(kinds.deploy_config_candidates(root, "mods/A.dll"), [])
+
+
 class RerootTests(TreeCase):
     def test_the_option_directory_becomes_the_root_and_its_siblings_go(self) -> None:
         root = self.mod({

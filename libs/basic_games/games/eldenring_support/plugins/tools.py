@@ -456,9 +456,14 @@ def describe_kind(mod, classified: kinds.Classified) -> str:
     dll = kinds.recorded_native_dll(mod)
     if dll:
         lines.append(f"Recorded DLL: {dll}")
-    deploy = kinds.recorded_deploy_config(mod)
-    if deploy:
-        lines.append("Config files to deploy to Game/mods/: " + ", ".join(deploy))
+    deploy_config = kinds.recorded_deploy_config(mod)
+    if deploy_config is None:
+        lines.append(
+            "Config files to deploy: the recorded value is damaged, and a launch is refused until "
+            "you choose the native again here and tick the files."
+        )
+    elif deploy_config:
+        lines.append("Config files to deploy to Game/mods/: " + ", ".join(deploy_config))
     lines += [
         "",
         "package: loaded by me3 as a content package. native: a DLL me3 chainloads. "
@@ -495,6 +500,9 @@ class SetModKindTool(EldenRingTool):
         if picked is None:
             return
         mod = modlist.getMod(picked)
+        if mod is None:
+            QMessageBox.critical(self._parent, title, f"{picked} is no longer in the mod list.")
+            return
         classified = kinds.classify(kinds.PathListing(mod.absolutePath()), mod.name())
         choice = _choose(self._parent, title, describe_kind(mod, classified), SET_KIND_CHOICES)
         if choice is None:
@@ -505,6 +513,7 @@ class SetModKindTool(EldenRingTool):
             QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {answer.kind}.")
             return
         native_dll = None
+        deploy_config = None
         if kind == kinds.NATIVE:
             dlls = [f for f in kinds.install_files(mod.absolutePath()) if f.lower().endswith(".dll")]
             if not dlls:
@@ -513,8 +522,44 @@ class SetModKindTool(EldenRingTool):
             native_dll = qtui.pick_item(self._parent, title, "DLL to load:", dlls)
             if native_dll is None:
                 return
-        kinds.set_kind(mod, kind, native_dll=native_dll)
-        QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {kind}.")
+            deploy_config = self._choose_config_files(mod, native_dll)
+            if deploy_config is None:
+                return
+        kinds.set_kind(mod, kind, native_dll=native_dll, deploy_config=deploy_config)
+        note = (
+            "\n\nIts config files are copied into Game/mods/ at every launch, which needs the launcher "
+            'hardened: Tools > "Elden Ring: Harden/Unharden launcher…".'
+            if deploy_config
+            else ""
+        )
+        QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {kind}.{note}")
+
+    def _choose_config_files(self, mod, native_dll: str) -> list[str] | None:
+        """The config files to deploy for this DLL, [] for none, None when cancelled.
+
+        A DLL written the LukeYui way reads config.ini from Game/mods/<Name>/
+        and runs on its defaults without it. A DLL that finds its config beside
+        itself needs nothing deployed, and a deploy it never reads still costs a
+        hardened launcher, so the rows start ticked only when a person or the
+        classifier already chose them.
+        """
+        candidates = kinds.deploy_config_candidates(mod.absolutePath(), native_dll)
+        if not candidates:
+            return []
+        if kinds.recorded_kind(mod) == kinds.NATIVE and kinds.recorded_native_dll(mod) == native_dll:
+            ticked = kinds.recorded_deploy_config(mod) or []
+        else:
+            ticked = kinds.propose_deploy_config(kinds.PathListing(mod.absolutePath()), native_dll)
+        return qtui.pick_files(
+            self._parent,
+            self.displayName(),
+            f"Config files to copy into Game/mods/{Path(native_dll).stem}/ at every launch. Tick them for a "
+            "mod that reads its config.ini from there (AdjustTheFov and the other LukeYui mods do). Leave "
+            "them unticked for one that reads it from its own folder. A ticked file needs the hardened "
+            "launcher.",
+            candidates,
+            ticked,
+        )
 
 
 class ImportFromErmTool(EldenRingTool):

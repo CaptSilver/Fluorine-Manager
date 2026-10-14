@@ -225,6 +225,29 @@ def deploy_config_ok(mod_dir, native_dll, paths) -> bool:
     return True
 
 
+def deploy_config_candidates(mod_dir, native_dll) -> list[str]:
+    """The config files a person may choose to deploy for `native_dll`.
+
+    Every file directly inside the DLL's own <stem>/ folder that
+    deploy_config_ok accepts on its own: the Set mod kind tool lists these
+    and records the ones that are ticked.
+    """
+    if not native_dll_ok(mod_dir, native_dll):
+        return []
+    dll = PurePosixPath(native_dll)
+    parent = Path(mod_dir).joinpath(*dll.parent.parts)
+    try:
+        folder = next(
+            name for name in sorted(os.listdir(parent))
+            if name.lower() == dll.stem.lower() and os.path.isdir(parent / name)
+        )
+        names = sorted(os.listdir(parent / folder))
+    except (OSError, StopIteration):
+        return []
+    found = [(dll.parent / folder / name).as_posix() for name in names]
+    return [rel for rel in found if deploy_config_ok(mod_dir, native_dll, [rel])]
+
+
 # -- re-rooting an installed folder -------------------------------------------
 
 def _remove(path: Path) -> None:
