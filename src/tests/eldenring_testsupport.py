@@ -365,7 +365,9 @@ class FakeOrganizer:
     def default_install(self, filename, name_suggestion):
         """Extract the whole archive, as the Quick installer does in import mode."""
         path = self.modsPath_ / name_suggestion
-        path.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            raise AssertionError("installMod would open the Merge/Replace dialog")
+        path.mkdir(parents=True)
         with zipfile.ZipFile(filename) as archive:
             archive.extractall(path)
         (path / "meta.ini").write_text("[General]\n")

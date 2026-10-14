@@ -84,6 +84,13 @@ class OrganizerTests(FakeCase):
         self.modlist.flush_installed()
         self.assertEqual(arrived, [mod])
 
+    def test_installing_onto_an_existing_mod_folder_fails_loudly(self) -> None:
+        archive = support.write_zip(self.tmp / "a.zip", {"x.txt": b"x"})
+        self.organizer.installMod(str(archive), "Mod")
+        with self.assertRaises(AssertionError):
+            self.organizer.installMod(str(archive), "Mod")
+        self.assertEqual(self.modlist.allModsByProfilePriority(), ["Mod"])
+
     def test_the_profiles_folder_can_be_put_anywhere(self) -> None:
         elsewhere = support.FakeOrganizer(self.tmp / "other", profiles_dir=self.tmp / "away/profiles")
         self.assertEqual(Path(elsewhere.profilePath()), self.tmp / "away/profiles/Default")
