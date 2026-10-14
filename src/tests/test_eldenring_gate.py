@@ -114,6 +114,7 @@ class GateCase(unittest.TestCase):
         self.natives: list[tuple[str, Path]] = []
         self.packages: list[tuple[str, Path]] = []
         self.warnings_out: list[str] = []
+        self.merged_out: list[str] = []
         self.prepared_calls = 0
         self.deployables = deploy.Desired()
         self.invalidations = 0
@@ -138,7 +139,8 @@ class GateCase(unittest.TestCase):
         self.prepared_calls += 1
         self.notify = notify
         return gate.Prepared(
-            packages=list(self.packages), natives=list(self.natives), live=LIVE, warnings=list(self.warnings_out)
+            packages=list(self.packages), natives=list(self.natives), live=LIVE,
+            warnings=list(self.warnings_out), merged=list(self.merged_out),
         )
 
     def new_gate(self):
@@ -1775,6 +1777,15 @@ class PreparedLaunchTests(GateCase):
         self.assertTrue(self.launch())
         self.assertEqual(self.vetoes, [])
         self.assertEqual(len(self.snapshots()), 2)
+
+    def test_the_files_the_engine_merged_are_in_the_launch_report(self) -> None:
+        self.merged_out = ["msg/engus/item_dlc02.msgbnd.dcx: merged from a, b with the fmg-3way strategy"]
+        self.assertTrue(self.launch())
+        self.assertEqual(self.last_launch()["report"]["merged"], self.merged_out)
+
+    def test_a_launch_that_merged_nothing_records_an_empty_list(self) -> None:
+        self.assertTrue(self.launch())
+        self.assertEqual(self.last_launch()["report"]["merged"], [])
 
     def test_the_warnings_and_notes_of_preparing_are_in_the_launch_report(self) -> None:
         self.warnings_out = ["shop ships erdtools.dll"]

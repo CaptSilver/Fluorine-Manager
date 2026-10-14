@@ -607,6 +607,7 @@ class LaunchGate:
             "stamp": stamp,
             "warnings": list(prepared.warnings),
             "notes": list(prepared.notes),
+            "merged": list(prepared.merged),
             "rebuilt": prepared.rebuilt,
         }
         data["sentinel"] = {

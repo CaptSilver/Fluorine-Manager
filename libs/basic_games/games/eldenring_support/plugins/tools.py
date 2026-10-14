@@ -121,6 +121,7 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
         except gate.Veto as veto:
             QMessageBox.critical(self._parent, self.dialogTitle(), veto.text())
             return
+        problems.invalidate()
         action(prepared)
 
     def _shielded(self, action) -> None:
@@ -776,6 +777,8 @@ def describe_rebuild(prepared) -> str:
     ]
     if prepared.natives:
         lines += ["", "Natives:", *[f"  {name}" for name, _ in prepared.natives]]
+    if prepared.merged:
+        lines += ["", "Merged by the engine:", *[f"  {line}" for line in prepared.merged]]
     if prepared.notes:
         lines += ["", "The merge could not carry over everything cleanly:", *[f"  {note}" for note in prepared.notes]]
     if prepared.warnings:

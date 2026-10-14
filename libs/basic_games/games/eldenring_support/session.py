@@ -62,6 +62,7 @@ def load_last_launch(paths: state.InstancePaths) -> dict:
     The shape, written by the gate, the sweep and the Save tools:
 
         {"report":  {"outcome": "launched" | "vetoed", "time", "stamp",
+                     "warnings", "notes", "merged", "rebuilt",
                      "key": <problem key or null>, "step", "text"},
          "sentinel": {"stamp", "pid", "start_ticks", "save_dir", "snapshot_dir",
                       "files": {"ER0000.sl2": <entry or null>,

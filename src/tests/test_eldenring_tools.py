@@ -1106,6 +1106,7 @@ class RebuildToolTests(ModToolCase):
         self.prepared = SimpleNamespace(
             rebuilt=True, packages=[("A", Path("/a")), ("Elden Ring Generated", Path("/g"))],
             natives=[("Seamless Co-op", Path("/e"))], notes=["msg/x.dcx: a note"], warnings=["be careful"],
+            merged=["msg/engus/item.msgbnd.dcx: merged from A with the fmg-3way strategy"],
         )
 
     def test_it_is_named_and_limited_to_the_game(self) -> None:
@@ -1118,8 +1119,23 @@ class RebuildToolTests(ModToolCase):
             self.tool.display()
         kind, title, text = SHOWN[-1]
         self.assertEqual((kind, title), ("information", "Elden Ring: Rebuild merges…"))
-        for expected in ("was rebuilt", "  A", "Natives:", "Seamless Co-op", "a note", "be careful"):
+        for expected in ("was rebuilt", "  A", "Natives:", "Seamless Co-op", "a note", "be careful",
+                         "Merged by the engine:", "merged from A"):
             self.assertIn(expected, text)
+
+    def test_a_rebuild_tells_the_problems_list_to_look_again(self) -> None:
+        self.modlist.add(generated.NAME, kind="generated")
+        with mock.patch.object(gate.LaunchGate, "rebuild", return_value=self.prepared), \
+                mock.patch.object(tools.problems, "invalidate") as invalidate:
+            self.tool.display()
+        invalidate.assert_called_once_with()
+
+    def test_a_veto_leaves_the_problems_list_to_the_gate(self) -> None:
+        self.modlist.add(generated.NAME, kind="generated")
+        with mock.patch.object(gate.LaunchGate, "rebuild", side_effect=gate.Veto("Game build", "no")), \
+                mock.patch.object(tools.problems, "invalidate") as invalidate:
+            self.tool.display()
+        invalidate.assert_not_called()
 
     def test_an_up_to_date_mod_says_nothing_was_merged(self) -> None:
         self.modlist.add(generated.NAME, kind="generated")
