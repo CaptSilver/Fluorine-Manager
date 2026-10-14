@@ -580,3 +580,176 @@ def refresh(inventory: Inventory, refreshed: dict[str, FileEntry]) -> Inventory:
         inventory.steam_buildid, inventory.adopted, inventory.regulation_sha, inventory.regulation,
         {**inventory.files, **refreshed}, dict(inventory.links),
     )
+
+
+# -- moving forward -----------------------------------------------------------
+
+
+@dataclass
+class Diff:
+    """What a Steam update did to Game/, split by whether it could carry code.
+
+    A path is suspect when it is a .dll or .exe, has the name of a known mod
+    artifact, or appeared under a top-level folder the inventory did not have.
+    Plain is the rest: archive parts, sd/ and movie/ files, locale data. A
+    ReShade link that is new or no longer as pinned is listed under
+    changed_suspect, since it is a program Wine loads.
+    """
+
+    changed_plain: list[str] = field(default_factory=list)
+    removed_plain: list[str] = field(default_factory=list)
+    appeared_plain: list[str] = field(default_factory=list)
+    changed_suspect: list[str] = field(default_factory=list)
+    removed_suspect: list[str] = field(default_factory=list)
+    appeared_suspect: list[str] = field(default_factory=list)
+    symlinks: list[tuple[str, str]] = field(default_factory=list)
+    unreadable: list[str] = field(default_factory=list)
+    reshade: list[tuple[str, str]] = field(default_factory=list)
+    refreshed: dict[str, FileEntry] = field(default_factory=dict)
+
+    def suspects(self) -> list[str]:
+        return sorted(self.changed_suspect + self.removed_suspect + self.appeared_suspect)
+
+    def plain(self) -> bool:
+        return not (self.suspects() or self.symlinks or self.unreadable)
+
+
+def _suspect(rel: str, appeared: bool, known_tops: set[str]) -> bool:
+    low = rel.lower()
+    if low.endswith(PROGRAM_EXTENSIONS) or low.rsplit("/", 1)[-1] in doctor.BLOCKLIST_FILES:
+        return True
+    return appeared and "/" in rel and rel.split("/")[0].lower() not in known_tops
+
+
+def diff(
+    game_dir,
+    manifest: deploy.Manifest,
+    inventory: Inventory,
+    *,
+    desired: dict[str, str] | None = None,
+    cache: dict | None = None,
+) -> Diff:
+    """Split what an update changed in Game/, over the same exclusions as check.
+
+    regulation.bin is not a concern here: the build identity has already
+    proved the build moved with it, and its sha is refreshed with the rest.
+    """
+    ctx = context(game_dir, manifest, desired)
+    tree = walk(game_dir)
+    found = Diff(unreadable=sorted(tree.unreadable))
+    found.symlinks, found.reshade, moved = _links(game_dir, tree, inventory, ctx, cache)
+    found.changed_suspect += moved
+    known_tops = {rel.split("/")[0].lower() for rel in inventory.files if "/" in rel}
+    for rel, info in sorted(tree.files.items()):
+        if excluded(rel, ctx):
+            continue
+        entry = inventory.files.get(rel)
+        if entry is None:
+            if _is_wanted_copy(game_dir, rel, info, ctx, cache):
+                continue
+            (found.appeared_suspect if _suspect(rel, True, known_tops) else found.appeared_plain).append(rel)
+            continue
+        verdict = _compare(game_dir, rel, info, entry, cache)
+        if verdict == _CHANGED:
+            (found.changed_suspect if _suspect(rel, False, known_tops) else found.changed_plain).append(rel)
+        elif verdict == _REFRESH:
+            found.refreshed[rel] = FileEntry(info.st_size, info.st_mtime_ns, entry.sha256)
+    for rel in sorted(inventory.files):
+        if rel not in tree.files and not excluded(rel, ctx):
+            (found.removed_suspect if _suspect(rel, False, known_tops) else found.removed_plain).append(rel)
+    found.changed_suspect.sort()
+    return found
+
+
+def _stamped(live, files: dict, links: dict) -> Inventory:
+    return Inventory(
+        live.steam_buildid, datetime.now(timezone.utc).isoformat(), live.regulation_sha, live.regulation,
+        files, links,
+    )
+
+
+def _record_paths(game_dir, inventory: Inventory, tree: Tree, rels: Iterable[str], ctx: Context, cache) -> tuple:
+    """(files, links) of `inventory` with `rels` read from the tree: present ones recorded, gone ones dropped."""
+    files, links = dict(inventory.files), dict(inventory.links)
+    for rel in sorted(rels):
+        if rel in tree.links:
+            if not reshade_link_ok(game_dir, rel, ctx):
+                raise InventoryError(f"{rel} is a link that is not ReShade's and is never recorded")
+            links[rel] = _link_entry(game_dir, rel, tree.links[rel], cache)
+        elif rel in tree.files:
+            if excluded(rel, ctx):
+                raise InventoryError(f"{rel} is not a file the inventory holds")
+            files[rel] = _file_entry(game_dir, rel, tree.files[rel], cache)
+        else:
+            files.pop(rel, None)
+            links.pop(rel, None)
+    return files, links
+
+
+def apply_diff(
+    game_dir,
+    manifest: deploy.Manifest,
+    inventory: Inventory,
+    live,
+    found: Diff,
+    *,
+    accept: Collection[str] = (),
+    leave: Collection[str] = (),
+    cache: dict | None = None,
+) -> Inventory:
+    """The inventory moved to `live`'s build; the caller writes it.
+
+    The plain changes are taken without asking: depot content moving is what a
+    build change means. Every suspect path has to be named in `accept` (taken
+    too) or `leave` (the caller is quarantining it), else InventoryError, and
+    a link that is not ReShade's or a folder that cannot be read stops it.
+    """
+    if found.symlinks or found.unreadable:
+        raise InventoryError("Game/ holds links or unreadable folders; they are findings, not depot content.")
+    undecided = sorted(set(found.suspects()) - set(accept) - set(leave))
+    if undecided:
+        raise InventoryError("These need an answer before the inventory moves: " + ", ".join(undecided))
+    taken = [
+        rel for rel in found.changed_plain + found.appeared_plain + found.changed_suspect + found.appeared_suspect
+        if rel not in leave
+    ]
+    blocked = _blocked(game_dir, taken)
+    if blocked:
+        raise InventoryError("These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked))
+    ctx = context(game_dir, manifest)
+    files, links = _record_paths(game_dir, inventory, walk(game_dir), taken, ctx, cache)
+    for rel in found.removed_plain + [r for r in found.removed_suspect if r not in leave]:
+        files.pop(rel, None)
+    files.update(found.refreshed)
+    return _stamped(live, files, links)
+
+
+def re_adopt(
+    game_dir, manifest: deploy.Manifest, inventory: Inventory, rels: Collection[str], *, cache: dict | None = None
+) -> Inventory:
+    """The inventory with `rels` read again from Game/ at the same build; the caller writes it.
+
+    For the paths the user confirmed after a check found them changed or
+    removed: a present file or ReShade link is recorded as it is now, a gone
+    one is dropped. A known mod artifact is refused.
+    """
+    blocked = _blocked(game_dir, rels)
+    if blocked:
+        raise InventoryError("These are known mod artifacts and are never recorded as vanilla: " + ", ".join(blocked))
+    ctx = context(game_dir, manifest)
+    files, links = _record_paths(game_dir, inventory, walk(game_dir), rels, ctx, cache)
+    return Inventory(
+        inventory.steam_buildid, inventory.adopted, inventory.regulation_sha, inventory.regulation, files, links
+    )
+
+
+def repin(inventory: Inventory, live) -> Inventory:
+    """The inventory holding `live`'s regulation.bin as the vanilla one; the caller writes it.
+
+    The one path that re-pins the file: regulation.bin is not a `files` entry,
+    so re_adopt never lists it.
+    """
+    return Inventory(
+        inventory.steam_buildid, inventory.adopted, live.regulation_sha, live.regulation,
+        dict(inventory.files), dict(inventory.links),
+    )

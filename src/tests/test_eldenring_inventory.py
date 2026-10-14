@@ -769,6 +769,206 @@ class UnreadableTests(CheckCase):
         (self.game / "version.dll").symlink_to(self.tmp / "x.dll")
         self.assertNotEqual(self.check().signature(), quiet)
 
+NEW_LIVE = LIVE._replace(steam_buildid="25999999", regulation="11811000", regulation_sha="b" * 64)
+
+
+class DiffCase(InventoryCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.put("bink2w64.dll", b"MZ bink")
+        self.put("sd/old.bin", b"old")
+        self.put("Data0.bdt", b"x" * 20)
+        with mock.patch.object(inventory, "HASH_CAP", 10):
+            self.recorded = self.adopt("bink2w64.dll", "sd/old.bin", "Data0.bdt", *self.vanilla())
+
+    def diff(self, recorded=None, **kwargs):
+        return inventory.diff(self.game, kwargs.pop("manifest", self.manifest), recorded or self.recorded, **kwargs)
+
+
+class DiffTests(DiffCase):
+    def test_an_untouched_folder_has_no_difference(self) -> None:
+        found = self.diff()
+        self.assertEqual((found.suspects(), found.changed_plain, found.removed_plain, found.appeared_plain), ([], [], [], []))
+        self.assertTrue(found.plain())
+
+    def test_what_an_update_adds_that_could_carry_code_is_suspect(self) -> None:
+        self.put("foo.dll")
+        self.put("bar.exe")
+        self.put("newfolder/x.bin")
+        self.put("modengine.toml")
+        self.assertEqual(
+            self.diff().appeared_suspect, ["bar.exe", "foo.dll", "modengine.toml", "newfolder/x.bin"]
+        )
+
+    def test_a_new_dll_inside_a_folder_the_inventory_has_is_suspect_by_its_extension(self) -> None:
+        self.put("sd/new.dll")
+        self.put("sd/new.bin")
+        found = self.diff()
+        self.assertEqual(found.appeared_suspect, ["sd/new.dll"])
+        self.assertEqual(found.appeared_plain, ["sd/new.bin"])
+
+    def test_archive_parts_and_loose_data_are_plain(self) -> None:
+        self.put("sd/x.bin")
+        self.put("movie/new.bk2")
+        self.put("locale.txt")
+        self.assertEqual(self.diff().appeared_plain, ["locale.txt", "movie/new.bk2", "sd/x.bin"])
+
+    def test_a_changed_or_removed_program_is_suspect_and_a_changed_or_removed_archive_is_plain(self) -> None:
+        self.put("steam_api64.dll", b"MZ stoam")
+        touch(self.game / "steam_api64.dll")
+        (self.game / "bink2w64.dll").unlink()
+        self.put("Data0.bdt", b"y" * 25)
+        (self.game / "sd/old.bin").unlink()
+        found = self.diff()
+        self.assertEqual(found.changed_suspect, ["steam_api64.dll"])
+        self.assertEqual(found.removed_suspect, ["bink2w64.dll"])
+        self.assertEqual(found.changed_plain, ["Data0.bdt"])
+        self.assertEqual(found.removed_plain, ["sd/old.bin"])
+
+    def test_the_game_executable_every_patch_changes_is_still_a_question(self) -> None:
+        self.put("eldenring.exe", b"MZ the patched game")
+        found = self.diff()
+        self.assertEqual(found.changed_suspect, ["eldenring.exe"])
+        self.assertFalse(found.plain())
+
+    def test_a_moved_mtime_with_the_same_bytes_is_refreshed_not_a_change(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        touch(self.game / "Data0.bdt")
+        found = self.diff()
+        self.assertEqual(sorted(found.refreshed), ["Data0.bdt", "steam_api64.dll"])
+        self.assertTrue(found.plain())
+
+    def test_links_and_unreadable_folders_are_reported_beside_the_split(self) -> None:
+        (self.game / "version.dll").symlink_to(self.tmp / "x.dll")
+        found = self.diff()
+        self.assertEqual(found.symlinks, [("version.dll", str(self.tmp / "x.dll"))])
+        self.assertFalse(found.plain())
+
+    def test_a_deployed_folder_is_not_a_new_top_level_folder_and_its_files_never_appear(self) -> None:
+        manifest = deploy.Manifest(
+            {"mods/Thing/config.ini": deploy.Entry("0" * 64, 1, "Thing mod")}, ["mods/Thing"]
+        )
+        self.put("mods/Thing/config.ini")
+        self.put("mods/Thing/log.txt")
+        self.assertTrue(self.diff(manifest=manifest).plain())
+
+    def test_a_file_a_native_wants_there_is_not_an_appearance(self) -> None:
+        self.put("mods/Fov/config.ini", b"fov=90\n")
+        self.assertEqual(self.diff().appeared_suspect, ["mods/Fov/config.ini"])
+        self.assertTrue(self.diff(desired={"mods/Fov/config.ini": sha(b"fov=90\n")}).plain())
+
+    def test_the_regulation_file_and_the_harden_pair_are_not_part_of_the_split(self) -> None:
+        self.put("regulation.bin", b"patched")
+        self.put("start_protected_game.exe", b"MZ copy")
+        self.put("start_protected_game.exe.erm-backup", b"MZ eac")
+        self.assertTrue(self.diff().plain())
+
+
+class ApplyDiffTests(DiffCase):
+    def apply(self, found, **kwargs):
+        return inventory.apply_diff(self.game, self.manifest, self.recorded, NEW_LIVE, found, **kwargs)
+
+    def test_the_plain_changes_are_taken_and_the_build_and_regulation_move(self) -> None:
+        self.put("sd/x.bin", b"new")
+        self.put("Data0.bdt", b"y" * 25)
+        (self.game / "sd/old.bin").unlink()
+        moved = self.apply(self.diff())
+        self.assertEqual(
+            (moved.steam_buildid, moved.regulation, moved.regulation_sha), ("25999999", "11811000", "b" * 64)
+        )
+        self.assertEqual(moved.files["sd/x.bin"].sha256, sha(b"new"))
+        self.assertEqual(moved.files["Data0.bdt"].size, 25)
+        self.assertNotIn("sd/old.bin", moved.files)
+        self.assertEqual(moved.files["steam_api64.dll"], self.recorded.files["steam_api64.dll"])
+
+    def test_the_mtime_refreshes_ride_along(self) -> None:
+        touch(self.game / "steam_api64.dll")
+        moved = self.apply(self.diff())
+        self.assertEqual(moved.files["steam_api64.dll"].mtime_ns, (self.game / "steam_api64.dll").stat().st_mtime_ns)
+
+    def test_a_suspect_nobody_answered_for_stops_the_move_and_names_it(self) -> None:
+        self.put("version.dll")
+        with self.assertRaises(inventory.InventoryError) as caught:
+            self.apply(self.diff())
+        self.assertIn("version.dll", str(caught.exception))
+
+    def test_an_accepted_suspect_is_recorded_and_a_left_one_is_not(self) -> None:
+        self.put("version.dll", b"MZ v")
+        self.put("other.dll", b"MZ o")
+        (self.game / "bink2w64.dll").unlink()
+        found = self.diff()
+        moved = self.apply(found, accept=["version.dll", "bink2w64.dll"], leave=["other.dll"])
+        self.assertEqual(moved.files["version.dll"].sha256, sha(b"MZ v"))
+        self.assertNotIn("other.dll", moved.files)
+        self.assertNotIn("bink2w64.dll", moved.files)
+
+    def test_a_link_that_is_not_reshades_stops_the_move(self) -> None:
+        (self.game / "version.dll").symlink_to(self.tmp / "x.dll")
+        with self.assertRaises(inventory.InventoryError):
+            self.apply(self.diff(), accept=["version.dll"])
+
+    def test_a_known_mod_artifact_is_never_taken_even_when_accepted(self) -> None:
+        self.put("Dinput8.dll")
+        with self.assertRaises(inventory.InventoryError) as caught:
+            self.apply(self.diff(), accept=["Dinput8.dll"])
+        self.assertIn("never recorded as vanilla", str(caught.exception))
+
+    def test_nothing_is_written_by_the_move_itself(self) -> None:
+        before = self.paths.vanilla_inventory.read_bytes()
+        self.put("sd/x.bin")
+        self.apply(self.diff())
+        self.assertEqual(self.paths.vanilla_inventory.read_bytes(), before)
+
+
+class DiffReshadeTests(InventoryCase):
+    def test_a_moved_link_is_a_suspect_change_and_accepting_it_re_pins_the_new_target(self) -> None:
+        links = self.install_reshade()
+        recorded = self.adopt(*self.vanilla(), *sorted(links))
+        other = self.reshade_dir / "ReShade32.dll"
+        other.write_bytes(b"MZ other")
+        (self.game / "dxgi.dll").unlink()
+        (self.game / "dxgi.dll").symlink_to(other)
+        found = inventory.diff(self.game, self.manifest, recorded)
+        self.assertEqual(found.changed_suspect, ["dxgi.dll"])
+        moved = inventory.apply_diff(self.game, self.manifest, recorded, NEW_LIVE, found, accept=["dxgi.dll"])
+        self.assertEqual(moved.links["dxgi.dll"], inventory.LinkEntry(str(other), sha(b"MZ other")))
+
+
+class ReAdoptTests(CheckCase):
+    def test_a_changed_file_is_read_again_and_a_gone_one_is_dropped(self) -> None:
+        self.put("steam_api64.dll", b"MZ updated by a patch")
+        (self.game / "movie/intro.bk2").unlink()
+        moved = inventory.re_adopt(self.game, self.manifest, self.recorded, ["steam_api64.dll", "movie/intro.bk2"])
+        self.assertEqual(moved.files["steam_api64.dll"].sha256, sha(b"MZ updated by a patch"))
+        self.assertNotIn("movie/intro.bk2", moved.files)
+        self.assertFalse(self.check(moved).blocking())
+        self.assertEqual(moved.regulation_sha, self.recorded.regulation_sha)
+        self.assertEqual(moved.steam_buildid, self.recorded.steam_buildid)
+
+    def test_a_link_is_pinned_at_its_new_target(self) -> None:
+        links = self.install_reshade()
+        plain = self.recorded
+        moved = inventory.re_adopt(self.game, self.manifest, plain, sorted(links))
+        self.assertEqual(sorted(moved.links), sorted(links))
+
+    def test_a_known_mod_artifact_or_a_path_the_inventory_never_holds_is_refused(self) -> None:
+        self.put("Dinput8.dll")
+        with self.assertRaises(inventory.InventoryError):
+            inventory.re_adopt(self.game, self.manifest, self.recorded, ["Dinput8.dll"])
+        self.put("x.dmp")
+        with self.assertRaises(inventory.InventoryError):
+            inventory.re_adopt(self.game, self.manifest, self.recorded, ["x.dmp"])
+
+    def test_a_link_that_is_not_reshades_is_refused(self) -> None:
+        (self.game / "version.dll").symlink_to(self.tmp / "x.dll")
+        with self.assertRaises(inventory.InventoryError):
+            inventory.re_adopt(self.game, self.manifest, self.recorded, ["version.dll"])
+
+    def test_repinning_replaces_only_the_regulation_fields(self) -> None:
+        moved = inventory.repin(self.recorded, NEW_LIVE)
+        self.assertEqual((moved.regulation_sha, moved.regulation), ("b" * 64, "11811000"))
+        self.assertEqual((moved.files, moved.links, moved.steam_buildid), (self.recorded.files, self.recorded.links, BUILD))
+
 
 if __name__ == "__main__":
     unittest.main()
