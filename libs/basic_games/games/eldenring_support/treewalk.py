@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 META_INI = "meta.ini"
 HIDDEN_SUFFIX = ".mohidden"
@@ -39,14 +40,36 @@ def package_files(root, strict: bool = False) -> list[tuple[str, Path]]:
     return sorted(found)
 
 
-def listing_digest(root) -> str:
-    """sha256 over the sorted (path, size, mtime_ns) of every game file.
+class Entry(NamedTuple):
+    rel: str
+    path: Path
+    size: int
+    mtime_ns: int
 
-    One walk and no content read, so a mod update that adds a colliding file at
-    an undeclared path moves it without the cost of hashing the mod.
+
+def package_listing(root) -> list[Entry]:
+    """package_files with each file's size and mtime, from one walk.
+
+    A file that cannot be stat'd raises: a listing that silently left one out
+    would let two different setups digest the same.
     """
-    digest = hashlib.sha256()
+    found = []
     for rel, path in package_files(root):
         info = path.stat()
-        digest.update(f"{rel}\0{info.st_size}\0{info.st_mtime_ns}\n".encode())
+        found.append(Entry(rel, path, info.st_size, info.st_mtime_ns))
+    return found
+
+
+def digest_of(listing: list[Entry]) -> str:
+    """sha256 over the (path, size, mtime_ns) of every entry, in listing order."""
+    digest = hashlib.sha256()
+    for entry in listing:
+        digest.update(f"{entry.rel}\0{entry.size}\0{entry.mtime_ns}\n".encode())
     return digest.hexdigest()
+
+
+def listing_digest(root) -> str:
+    """digest_of(package_listing(root)): one walk and no content read, so a mod
+    update that adds a colliding file moves it without the cost of hashing the mod.
+    """
+    return digest_of(package_listing(root))

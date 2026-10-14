@@ -112,5 +112,39 @@ class StrictWalkTests(TreewalkCase):
         self.assertEqual(treewalk.package_files(self.root, strict=True), treewalk.package_files(self.root))
 
 
+class PackageListingTests(TreewalkCase):
+    def test_each_entry_carries_the_size_and_mtime_the_digest_is_made_of(self) -> None:
+        path = self.put("msg/engus/a.dcx", b"abc")
+        os.utime(path, ns=(1_000_000_000, 2_000_000_000))
+        self.put("b.bin", b"z")
+        listing = treewalk.package_listing(self.root)
+        self.assertEqual([entry.rel for entry in listing], ["b.bin", "msg/engus/a.dcx"])
+        entry = listing[1]
+        self.assertEqual((entry.path, entry.size, entry.mtime_ns), (path, 3, 2_000_000_000))
+
+    def test_the_digest_of_a_listing_is_the_listing_digest(self) -> None:
+        self.put("a.bin")
+        self.put("sub/b.bin", b"yy")
+        self.assertEqual(
+            treewalk.digest_of(treewalk.package_listing(self.root)), treewalk.listing_digest(self.root)
+        )
+
+    def test_the_digest_moves_with_a_name_a_size_or_a_timestamp(self) -> None:
+        path = self.put("a.bin", b"x")
+        before = treewalk.listing_digest(self.root)
+        os.utime(path, ns=(1, 1))
+        touched = treewalk.listing_digest(self.root)
+        path.write_bytes(b"xx")
+        os.utime(path, ns=(1, 1))
+        grown = treewalk.listing_digest(self.root)
+        path.rename(self.root / "b.bin")
+        renamed = treewalk.listing_digest(self.root)
+        self.assertEqual(len({before, touched, grown, renamed}), 4)
+
+    def test_a_folder_with_no_game_files_has_the_digest_of_nothing(self) -> None:
+        self.assertEqual(treewalk.package_listing(self.root), [])
+        self.assertEqual(treewalk.digest_of([]), treewalk.listing_digest(self.root))
+
+
 if __name__ == "__main__":
     unittest.main()
