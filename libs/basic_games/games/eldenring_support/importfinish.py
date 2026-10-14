@@ -20,7 +20,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import archives, deploy, environment, fixes, hardening, importer, inventory, kinds, procs, saves, state
+from . import (
+    archives,
+    deploy,
+    environment,
+    fixes,
+    hardening,
+    importer,
+    importgame,
+    importsave,
+    inventory,
+    kinds,
+    procs,
+    saves,
+    state,
+)
 from .ermlib import gamebuild, steam
 from .ermlib.errors import ErmError
 
@@ -307,3 +321,127 @@ def mark_done(organizer, stamp: str, report: importer.Report, blockers: list[str
         "Game/mods/ under the hardened launcher."
     )
     return True
+
+
+# -- Game/ --------------------------------------------------------------------
+
+
+def clean_game(
+    organizer, installed: dict, paths: state.InstancePaths, host: Host, ui: Ui, report: importer.Report, stamp: str
+) -> bool:
+    """Move erm's files out of Game/ after the user accepts the list. False when it was declined or a move failed.
+
+    Refuses, moving nothing, while the deploy manifest holds files or
+    folders: on a re-run after a gated launch, installed.json still names the
+    config files Fluorine deployed over erm's, and quarantining them would
+    leave the manifest naming files that are gone. A file that cannot be
+    moved is reported and the rest go on. An edited
+    config file is carried into its mod folder first; if that fails the file
+    still goes to quarantine with the edit in it.
+    """
+    manifest = deploy.read_manifest(paths)
+    if manifest.files or manifest.dirs:
+        report.warn(
+            "Fluorine has files deployed into Game/mods/, and moving them would leave the deploy record naming "
+            "files that are gone. Undeploy them first (Sync deployed files), then run the import again. Nothing "
+            "was moved."
+        )
+        return False
+    found = importgame.survey(organizer, installed, host.game_dir)
+    for line in found.left:
+        report.warn(line)
+    if found.gone:
+        report.info(f"{len(found.gone)} of the files erm recorded were already gone from Game/")
+    if not found.moves() and not found.carries:
+        report.ok("none of erm's files are in Game/")
+        return True
+    where = paths.quarantine_game / importgame.folder_name(stamp)
+    if not ui.review(TITLE, importgame.review_text(found, where), "Move them to quarantine"):
+        report.warn(
+            "Game/ was not touched: the list of files to move was not accepted. Run the import again to be asked."
+        )
+        return False
+    with ui.busy("Elden Ring: moving erm's files out of Game/"):
+        done = importgame.execute(found, paths, host.game_dir, stamp)
+    for carry, aside in done.carried:
+        original = f" The mod's own file is at {aside}." if aside is not None else ""
+        report.ok(f"kept your edited {carry.rel} in the {carry.mod} mod folder.{original}")
+    if done.carried:
+        report.info(
+            "A mod whose config you changed now differs from a fresh install of its archive, so a partner who "
+            "imports a list sees a content difference on it."
+        )
+    for text in done.warnings:
+        report.warn(text)
+    if done.moved:
+        report.ok(f"moved {len(done.moved)} files out of Game/ into {where}")
+    if done.removed:
+        report.info("removed the folders that were left empty: " + ", ".join(done.removed))
+    for text in done.failed:
+        report.fail(text)
+    return not done.failed
+
+
+# -- the whole of it ------------------------------------------------------------
+
+
+def finish(
+    organizer, erm_dir, report: importer.Report, *, host: Host, ui: Ui, stamp: str
+) -> importer.Report:
+    """Run the second part of the import into `report`. Raises ImportStopped, with the report, when it cannot go on.
+
+    The order: the question about ER0000.sl2; the move out of Game/; the
+    launcher report; the vanilla inventory; Steam's launch option; the done
+    mark. The launch option is asked about only when the question is settled
+    and Game/ is recorded as vanilla, because clearing it is what hands
+    ER0000.sl2 to a Steam Play under Easy Anti-Cheat, where a proxy DLL
+    still in Game/ would load.
+    """
+    try:
+        _finish(organizer, Path(erm_dir), report, host, ui, stamp)
+    except importer.ImportStopped as exc:
+        exc.report = report
+        raise
+    except ErmError as exc:
+        raise importer.ImportStopped(str(exc), report) from exc
+    except OSError as exc:
+        raise importer.ImportStopped(f"{type(exc).__name__}: {exc}", report) from exc
+    except Exception as exc:
+        raise importer.ImportStopped(f"unexpected {type(exc).__name__}: {exc}", report) from exc
+    return report
+
+
+def _finish(organizer, erm_dir: Path, report: importer.Report, host: Host, ui: Ui, stamp: str) -> None:
+    installed = importer.read_installed(erm_dir)
+    procs.refuse_while_running(host.running, "run the import again")
+    paths = state.InstancePaths(organizer)
+    saved = importsave.review(
+        organizer, paths, host.save_dir, stamp, report, ask_answer=ui.ask_answer, ask_action=ui.ask_action,
+        running=host.running, steam_running=host.steam_running, install_root=host.steam_root,
+    )
+    cleaned = clean_game(organizer, installed, paths, host, ui, report, stamp)
+    launcher_report(host, paths, report)
+    adopted = False
+    if cleaned:
+        adopted = adopt_inventory(installed, paths, host, ui, report)
+    else:
+        report.warn("Game/ was not recorded as vanilla: erm's files are still in it.")
+    option = False
+    if saved and adopted:
+        option = launch_option_cleared(host, ui, report)
+    else:
+        report.info(
+            "Steam's launch option was not looked at: it stays as it is until ER0000.sl2 is settled and Game/ is "
+            "recorded as vanilla. Clearing it lets a Steam Play start the game under Easy Anti-Cheat, which must "
+            "not happen with erm's files still in Game/."
+        )
+    blockers = []
+    if not saved:
+        blockers.append("ER0000.sl2 is still unreviewed")
+    if not cleaned:
+        blockers.append("erm's files are still in Game/")
+    elif not adopted:
+        blockers.append("Game/ is not recorded as vanilla")
+    if saved and adopted and not option:
+        blockers.append("Steam still carries a launch option")
+    mark_done(organizer, stamp, report, blockers)

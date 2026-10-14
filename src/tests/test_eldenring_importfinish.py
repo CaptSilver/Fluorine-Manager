@@ -21,6 +21,16 @@ importsave = support.module(PACKAGE, "importsave")
 inventory = support.module(PACKAGE, "inventory")
 kinds = support.module(PACKAGE, "kinds")
 state = support.module(PACKAGE, "state")
+saves = support.module(PACKAGE, "saves")
+deploy = support.module(PACKAGE, "deploy")
+
+import test_eldenring_importer as base  # noqa: E402  (shares the loaded package and builds the fake erm checkout)
+
+REGULATION_BLOB = base._regulation_blob("11711000")
+ERM_FILES = [path for files in base.FILES.values() for path in files]
+RESIDUE = ["mods/AdjustTheFov/log.txt", "mods/logs/x.log", "mod_loader_log.txt"]
+STAMP2 = "20261014T130000000001Z"
+EDITED = b"fov = 1.5\n"
 
 REGULATION = b"regulation"
 REG_SHA = hashlib.sha256(REGULATION).hexdigest()
@@ -446,6 +456,274 @@ class MarkDoneTests(GameCase):
         self.mark([])
         self.assertFalse(self.mark(["Steam still has a launch option set"], stamp="20261014T130000000001Z"))
         self.assertEqual(self.done(), STAMP)
+
+
+class FinishCase(base.ImporterCase):
+    """An erm checkout imported by the first part, and a Game/ that still holds what erm put there."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.home = self.tmp / "home"
+        env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
+        locked = mock.patch.object(importfinish.hardening, "is_immutable", return_value=True)
+        locked.start()
+        self.addCleanup(locked.stop)
+        self.script = Script()
+        self.steam = self.tmp / "steam-root"
+        (self.steam / "userdata").mkdir(parents=True)
+        self.options: list = []
+        self.steam_up = False
+        self.running: list = []
+        self.live = LIVE._replace(regulation_sha=hashlib.sha256(REGULATION_BLOB).hexdigest())
+        self.host = importfinish.Host(
+            game_dir=self.game, library=self.tmp / "lib", save_dir=self.save_dir,
+            steam_root=lambda: self.steam, running=lambda: list(self.running), steam_running=lambda: self.steam_up,
+            identify=lambda game_dir, library, cache: self.live, read_options=lambda: list(self.options),
+        )
+        self.put("regulation.bin", REGULATION_BLOB)
+        self.put("steam_api64.dll", b"MZ steam")
+        self.put("sd/sd.bdt", b"archive")
+        for rel in ERM_FILES:
+            self.put(rel, b"erm " + rel.encode())
+        self.put("mods/AdjustTheFov/config.ini", EDITED)
+        for rel in RESIDUE:
+            self.put(rel, b"log")
+        # the launcher as erm left it: a copy of eldenring.exe, with the real one beside it
+        self.put("start_protected_game.exe", b"MZ")
+        self.put("start_protected_game.exe.erm-backup", b"MZ eac")
+
+    def put(self, rel: str, data: bytes = b"x") -> Path:
+        path = self.game / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def finish(self, stamp: str = STAMP) -> importer.Report:
+        self.report = importer.Report()
+        return importfinish.finish(
+            self.organizer, self.erm, self.report, host=self.host, ui=self.script.ui(), stamp=stamp
+        )
+
+    def where(self, stamp: str = STAMP) -> Path:
+        return self.paths.quarantine_game / f"erm-import-{stamp}"
+
+    def done(self):
+        return self.organizer.persistent(kinds.PLUGIN, "erm_import_done")
+
+
+class FinishTests(FinishCase):
+    def test_the_whole_import_cleans_game_adopts_it_and_marks_the_import_done(self) -> None:
+        self.run_import()
+        report = self.finish()
+        self.assertEqual(
+            set(base.tree(self.game)),
+            {
+                "eldenring.exe", "regulation.bin", "steam_api64.dll", "sd/sd.bdt", "start_protected_game.exe",
+                "start_protected_game.exe.erm-backup",
+            },
+        )
+        self.assertEqual(
+            set(base.tree(self.where())),
+            set(ERM_FILES) | set(RESIDUE) | {"mod-defaults/adjust-the-fov/mods/AdjustTheFov/config.ini"},
+        )
+        self.assertFalse(os.path.lexists(self.game / "mods"))
+        self.assertFalse(os.path.lexists(self.game / "SeamlessCoop"))
+        self.assertEqual(sorted(inventory.read(self.paths).files), ["eldenring.exe", "sd/sd.bdt", "steam_api64.dll"])
+        self.assertEqual(self.done(), STAMP)
+        self.assertEqual(self.script.kinds_shown(), ["review", "adoption"])
+        text = report.text()
+        self.assertIn("kept your edited mods/AdjustTheFov/config.ini", text)
+        self.assertIn("hardened as erm left it", text)
+        self.assertIn("The import is done", text)
+        self.assertIs(report, self.report)
+
+    def test_the_users_edit_is_in_the_mod_folder_and_the_mods_own_file_is_aside(self) -> None:
+        self.run_import()
+        self.finish()
+        copy = Path(self.mod("adjust-the-fov").absolutePath()) / "mods/AdjustTheFov/config.ini"
+        self.assertEqual(copy.read_bytes(), EDITED)
+        aside = self.where() / "mod-defaults/adjust-the-fov/mods/AdjustTheFov/config.ini"
+        self.assertEqual(aside.read_bytes(), b"fov = 1\n")
+
+    def test_a_config_the_user_did_not_change_is_not_carried(self) -> None:
+        self.put("mods/AdjustTheFov/config.ini", b"fov = 1\n")
+        self.run_import()
+        report = self.finish()
+        self.assertFalse((self.where() / "mod-defaults").exists())
+        self.assertNotIn("kept your edited", report.text())
+
+    def test_the_launcher_pair_is_never_touched(self) -> None:
+        self.run_import()
+        self.finish()
+        self.assertEqual((self.game / "start_protected_game.exe").read_bytes(), b"MZ")
+        self.assertEqual((self.game / "start_protected_game.exe.erm-backup").read_bytes(), b"MZ eac")
+        self.assertFalse((self.where() / "start_protected_game.exe").exists())
+
+    def test_an_unlocked_swap_is_reported_with_the_tool_action_and_the_import_still_finishes(self) -> None:
+        self.run_import()
+        with mock.patch.object(importfinish.hardening, "is_immutable", return_value=False):
+            report = self.finish()
+        self.assertIn("Re-harden", report.text())
+        self.assertEqual(self.done(), STAMP)
+
+    def test_a_second_run_asks_nothing_and_changes_nothing(self) -> None:
+        self.run_import()
+        self.finish()
+        asked = list(self.script.shown)
+        game, quarantined = base.tree(self.game), base.tree(self.paths.quarantine_game)
+        report = self.finish(stamp=STAMP2)
+        self.assertEqual(self.script.shown, asked)
+        self.assertEqual(base.tree(self.game), game)
+        self.assertEqual(base.tree(self.paths.quarantine_game), quarantined)
+        self.assertEqual(self.done(), STAMP)
+        text = report.text()
+        self.assertIn("none of erm's files are in Game/", text)
+        self.assertIn("already matches", text)
+        self.assertIn("already marked done", text)
+
+    def test_declining_the_list_leaves_game_untouched_and_the_import_not_done(self) -> None:
+        self.run_import()
+        before = base.tree(self.game)
+        self.script.accept = False
+        report = self.finish()
+        self.assertEqual(base.tree(self.game), before)
+        self.assertFalse(os.path.lexists(self.paths.quarantine_game))
+        self.assertFalse(os.path.lexists(self.paths.vanilla_inventory))
+        self.assertIsNone(self.done())
+        self.assertEqual(self.script.kinds_shown(), ["review"])
+        self.assertIn("erm's files are still in Game/", report.text())
+
+    def test_files_deployed_into_game_stop_the_move_and_nothing_is_taken(self) -> None:
+        self.run_import()
+        entry = deploy.Entry("0" * 64, 1, "adjust-the-fov")
+        deploy.write_manifest(
+            self.paths, deploy.Manifest({"mods/AdjustTheFov/config.ini": entry}, ["mods/AdjustTheFov"])
+        )
+        before = base.tree(self.game)
+        report = self.finish()
+        self.assertEqual(base.tree(self.game), before)
+        self.assertFalse(os.path.lexists(self.paths.quarantine_game))
+        self.assertIn("Undeploy them first", report.text())
+        self.assertNotIn("review", self.script.kinds_shown())
+        self.assertIsNone(self.done())
+
+    def test_a_running_game_stops_the_import_before_anything_moves(self) -> None:
+        self.run_import()
+        before = base.tree(self.game)
+        self.running = [(5, "eldenring.exe")]
+        with self.assertRaises(importer.ImportStopped) as caught:
+            self.finish()
+        self.assertIn("still running", str(caught.exception))
+        self.assertIs(caught.exception.report, self.report)
+        self.assertEqual(base.tree(self.game), before)
+        self.assertEqual(self.script.shown, [])
+
+    def test_a_regulation_mismatch_stops_after_the_move_and_the_report_keeps_what_moved(self) -> None:
+        self.run_import()
+        self.live = self.live._replace(regulation_sha="0" * 64)
+        with self.assertRaises(importer.ImportStopped) as caught:
+            self.finish()
+        self.assertIn("Verify the game files in Steam", str(caught.exception))
+        self.assertTrue(any("moved" in text for _, text in caught.exception.report.lines))
+        self.assertFalse(os.path.lexists(self.game / "dinput8.dll"))
+        self.assertFalse(os.path.lexists(self.paths.vanilla_inventory))
+        self.assertIsNone(self.done())
+
+    def test_something_else_in_game_that_blocks_adoption_is_reported_and_the_import_is_not_done(self) -> None:
+        self.put("winhttp.dll", b"MZ")
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), "me3 launch %command%")]
+        report = self.finish()
+        self.assertNotIn("launch-option", self.script.kinds_shown())
+        self.assertIn("winhttp.dll", report.text())
+        self.assertFalse(os.path.lexists(self.paths.vanilla_inventory))
+        self.assertIsNone(self.done())
+        self.assertIn("Game/ is not recorded as vanilla", report.text())
+
+    def test_a_mods_folder_that_is_a_link_is_left_alone_and_the_import_is_not_done(self) -> None:
+        behind = self.tmp / "moved-mods"
+        shutil.move(str(self.game / "mods"), str(behind))
+        (self.game / "mods").symlink_to(behind)
+        before = base.tree(behind)
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), "me3 launch %command%")]
+        report = self.finish()
+        self.assertNotIn("launch-option", self.script.kinds_shown())
+        self.assertEqual(base.tree(behind), before)
+        self.assertTrue((self.game / "mods").is_symlink())
+        self.assertIn("a link", report.text())
+        self.assertIsNone(self.done())
+
+    def test_an_unexpected_error_is_a_stop_that_carries_the_report(self) -> None:
+        self.run_import()
+        with mock.patch.object(importfinish, "adopt_inventory", side_effect=TypeError("odd")):
+            with self.assertRaises(importer.ImportStopped) as caught:
+                self.finish()
+        self.assertIn("TypeError", str(caught.exception))
+        self.assertTrue(any("moved" in text for _, text in caught.exception.report.lines))
+
+    def test_a_missing_or_damaged_installed_json_stops_before_anything_is_asked(self) -> None:
+        self.run_import()
+        (self.erm / "installed.json").write_text("[1]")
+        with self.assertRaises(importer.ImportStopped):
+            self.finish()
+        self.assertEqual(self.script.shown, [])
+
+
+class LaunchOptionOrderTests(FinishCase):
+    VALUE = "me3 launch -p /home/x/erm/tools/me3/erm-coop.me3 # %command%"
+
+    def test_a_launch_option_that_stays_set_keeps_the_import_open(self) -> None:
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: False
+        report = self.finish()
+        self.assertIsNone(self.done())
+        self.assertIn(self.VALUE, report.text())
+        self.assertIn("Steam still carries a launch option", report.text())
+
+    def test_an_option_cleared_when_asked_finishes_the_import(self) -> None:
+        self.run_import()
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.script.recheck = lambda: self.options.clear() or True
+        self.finish()
+        self.assertEqual(self.done(), STAMP)
+        self.assertEqual(self.script.kinds_shown(), ["review", "adoption", "launch-option"])
+
+    def test_an_unreviewed_save_with_steam_open_holds_the_import_open_and_the_launch_option_alone(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla")
+        self.run_import()
+        self.script.answer, self.script.action = importsave.NO, importsave.QUARANTINE
+        self.options = [(Path("/steam/userdata/1/config/localconfig.vdf"), self.VALUE)]
+        self.steam_up = True
+        report = self.finish()
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"vanilla")
+        self.assertEqual(self.script.kinds_shown(), ["answer", "action", "review", "adoption"])
+        self.assertIsNone(self.done())
+        self.assertEqual(importsave.unreviewed(self.organizer), "20261014T010203000001Z")
+        self.assertIn("ER0000.sl2 is still unreviewed", report.text())
+        self.assertIn("launch option was not looked at", report.text())
+        # Steam is closed on the next run: the question resumes, the save goes, the option is asked about
+        self.steam_up = False
+        self.script.recheck = lambda: self.options.clear() or True
+        self.finish(stamp=STAMP2)
+        self.assertFalse((self.save_dir / "ER0000.sl2").exists())
+        self.assertEqual(self.script.kinds_shown()[4:], ["answer", "action", "launch-option"])
+        self.assertEqual(self.done(), STAMP2)
+        self.assertEqual(importsave.unreviewed(self.organizer), "")
+
+    def test_a_save_kept_as_vanilla_after_a_clean_audit_lets_the_import_finish(self) -> None:
+        (self.save_dir / "ER0000.sl2").write_bytes(b"vanilla")
+        self.run_import()
+        clean = saves.Audited(True, "ER0000.sl2\n\nThe audit found nothing.")
+        with mock.patch.object(importsave.saves, "audit_file", return_value=clean):
+            report = self.finish()
+        self.assertEqual(self.done(), STAMP)
+        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), b"vanilla")
+        self.assertIn("you vouched", report.text())
+        self.assertEqual(self.script.kinds_shown(), ["answer", "action", "review", "adoption"])
 
 
 if __name__ == "__main__":
