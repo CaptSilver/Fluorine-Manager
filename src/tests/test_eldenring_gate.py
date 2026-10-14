@@ -98,7 +98,9 @@ class GateCase(unittest.TestCase):
         self.base.mkdir()
         self.ini = self.base / "ModOrganizer.ini"
         self.ini.write_text("")
-        self.organizer = types.SimpleNamespace(basePath=lambda: str(self.base))
+        self.organizer = types.SimpleNamespace(
+            basePath=lambda: str(self.base), profilePath=lambda: str(self.base / "profiles/Default")
+        )
         self.paths = state.InstancePaths(self.organizer)
         self.game = FakeGame(self.install)
         self.binary = me3_host.binary_path()
@@ -2312,6 +2314,104 @@ class ProblemsListenerTests(GateCase):
         self.addCleanup(support.module(PACKAGE, "problems").subscribe(lambda: heard.append(1)))
         plain.run(str(self.binary), str(self.paths.root), self.args)
         self.assertEqual(heard, [1])
+
+
+class ActiveListTests(GateCase):
+    """A profile with an active list launches only when the setup is the list's, checked after the me3 profile is written."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.make_saves()
+        self.active = None
+        self.verify_calls: list[tuple] = []
+        self.found: list = []
+        self.gate = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: self.vetoes.append((t, x)),
+            show_modal=lambda t, x: self.modals.append((t, x)), prepare=self.fake_prepare,
+            running=lambda: list(self.up), warn=self.warnings.append, desired=lambda: self.deployables,
+            invalidate=self.count_invalidation, active_list=lambda: self.active, verify=self.fake_verify,
+        )
+
+    def fake_verify(self, doc, prepared):
+        self.verify_calls.append((doc, prepared.live))
+        if isinstance(self.found, Exception):
+            raise self.found
+        return list(self.found)
+
+    def test_a_profile_without_an_active_list_is_not_checked(self) -> None:
+        self.assertTrue(self.launch())
+        self.assertEqual(self.verify_calls, [])
+
+    def test_the_list_is_checked_against_the_build_the_launch_identified(self) -> None:
+        self.active = {"name": "seamless-full"}
+        self.assertTrue(self.launch())
+        self.assertEqual(self.verify_calls, [({"name": "seamless-full"}, LIVE)])
+
+    def test_a_blocking_finding_vetoes_with_the_findings_and_no_session_is_started(self) -> None:
+        self.active = {"name": "x"}
+        self.found = [
+            gate.listfile.Finding(gate.listfile.MISSING, "pack", "not installed."),
+            gate.listfile.Finding(gate.listfile.SEED_DIFFERS, "", "seeds differ"),
+        ]
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ACTIVE_LIST_MISMATCH, "[missing] pack: not installed.", "[seed_differs] seeds differ")
+        self.assertIn("Import list", self.last_veto())
+        self.assertEqual(self.snapshots(), [])
+        self.assertFalse(self.paths.build_stamp.exists())
+        self.assertNotIn("sentinel", self.last_launch())
+
+    def test_an_informational_finding_does_not_stop_the_launch_and_is_in_the_report(self) -> None:
+        self.active = {"name": "x"}
+        self.found = [gate.listfile.Finding(gate.listfile.UNPINNED_LOCAL, "mine", "a local mod.", blocking=False)]
+        self.assertTrue(self.launch())
+        self.assertEqual(self.last_launch()["report"]["warnings"], ["mine: a local mod."])
+
+    def test_a_list_that_cannot_be_read_is_a_veto_naming_the_fix(self) -> None:
+        self.active = {"format": 9}
+        self.found = gate.listfile.ListFormatError("the list is format 9")
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.ACTIVE_LIST_MISMATCH, "format 9")
+
+    def test_it_comes_after_the_native_check_and_before_anything_is_stamped(self) -> None:
+        self.active = {"name": "x"}
+        self.natives = [("broken", self.tmp / "missing.dll")]
+        self.assertFalse(self.launch())
+        self.assert_vetoed(gate.NATIVE_DLL_INVALID)
+        self.assertEqual(self.verify_calls, [])
+
+    def test_a_rebuild_never_checks_the_list(self) -> None:
+        self.active = {"name": "x"}
+        self.gate.rebuild()
+        self.assertEqual(self.verify_calls, [])
+
+    def test_the_default_check_is_the_real_verify_over_the_instance_and_its_hash_cache(self) -> None:
+        plain = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: self.vetoes.append((t, x)),
+            show_modal=lambda t, x: None, prepare=self.fake_prepare, running=lambda: [],
+            desired=lambda: self.deployables, active_list=lambda: {"name": "x"},
+        )
+        with mock.patch.object(gate.listfile, "verify", return_value=[]) as real:
+            self.gate = plain
+            self.assertTrue(self.launch())
+        args, kwargs = real.call_args
+        self.assertEqual(args[0], self.organizer)
+        self.assertEqual(args[1], {"name": "x"})
+        self.assertEqual(kwargs["live"], LIVE)
+        self.assertIsInstance(kwargs["cache"], dict)
+
+    def test_the_default_reader_takes_the_active_list_from_the_profile(self) -> None:
+        profile = self.tmp / "profile"
+        profile.mkdir()
+        self.organizer.profilePath = lambda: str(profile)
+        state.write_profile_rules(profile, {"merges": [], "prunes": [], "renames": [], "active_list": {"name": "from disk"}})
+        plain = gate.LaunchGate(
+            self.organizer, self.game, show_veto=lambda t, x: None, show_modal=lambda t, x: None,
+            prepare=self.fake_prepare, running=lambda: [], desired=lambda: self.deployables,
+            verify=self.fake_verify,
+        )
+        self.gate = plain
+        self.assertTrue(self.launch())
+        self.assertEqual(self.verify_calls[0][0], {"name": "from disk"})
 
 
 if __name__ == "__main__":

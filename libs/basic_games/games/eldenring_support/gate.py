@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, deploy, doctor, environment, hardening, inventory, me3, me3_host, pe, prepare as preparing, problems,
-    procs, qtui, saves, session, state,
+    archives, deploy, doctor, environment, hardening, inventory, listfile, me3, me3_host, pe, prepare as preparing,
+    problems, procs, qtui, saves, session, state,
 )
 from .ermlib.errors import ErmError
 from .prepare import Prepared
@@ -45,6 +45,7 @@ ENTRY_SETTINGS_UNREADABLE = "ENTRY_SETTINGS_UNREADABLE"
 ME3_CONFIG_OVERRIDE = "ME3_CONFIG_OVERRIDE"
 ME3_CONFIG_STEAM_DIR = "ME3_CONFIG_STEAM_DIR"
 GAME_DIR_STRAYS = deploy.GAME_DIR_STRAYS
+ACTIVE_LIST_MISMATCH = preparing.ACTIVE_LIST_MISMATCH
 
 ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
 
@@ -113,9 +114,13 @@ class LaunchGate:
     procs.game_running, `warn(message)` logs and `invalidate()` tells the
     problems listeners that something they report may have changed.
     `wrapper_options()` returns (title, options) for every stored me3 entry that
-    has wrapper options (qtui.instance_wrapper_options over basePath()/ModOrganizer.ini
-    unless supplied): the wrapper is the one input the three-argument
-    onAboutToRun cannot show the gate.
+    has wrapper options (qtui.instance_wrapper_options over
+    basePath()/ModOrganizer.ini unless supplied): the wrapper is the one input
+    the three-argument onAboutToRun cannot show the gate. `active_list()`
+    returns the profile's active list document or None (read from the
+    profile's eldenring.json unless supplied) and `verify(doc, prepared)`
+    returns listfile.verify's findings for it (over the organizer, the
+    identified build and the instance's hash cache unless supplied).
     """
 
     def __init__(
@@ -132,6 +137,8 @@ class LaunchGate:
         desired: Callable[[], deploy.Desired] | None = None,
         invalidate: Callable[[], None] | None = None,
         wrapper_options: Callable[[], list[tuple[str, str]]] | None = None,
+        active_list: Callable[[], dict | None] | None = None,
+        verify: Callable[[dict, Prepared], list[listfile.Finding]] | None = None,
     ) -> None:
         self._organizer = organizer
         self._game = game
@@ -145,6 +152,8 @@ class LaunchGate:
         self._warn = warn or (lambda message: None)
         self._desired = desired or (lambda: deploy.desired(self._organizer))
         self._wrapper_options = wrapper_options or self._stored_wrapper_options
+        self._active_list = active_list or self._profile_active_list
+        self._verify = verify or self._verify_against_instance
         # Looked up at call time, so a listener subscribed later is heard.
         self._invalidate = invalidate or (lambda: problems.invalidate())
         self._session_stamp: str | None = None
@@ -202,6 +211,7 @@ class LaunchGate:
         prepared = self._prepared()
         prepared.warnings[:0] = notes
         self._write_profile(paths, binary, cwd, args, prepared)
+        self._check_active_list(prepared)
         self._snapshot(paths, data, prepared)
         # Last, so a vetoed launch leaves the old stamp and the next run
         # notices a patch again.
@@ -231,6 +241,45 @@ class LaunchGate:
     def _prepared(self) -> Prepared:
         with self._busy("Elden Ring: preparing the mods") as busy:
             return self._prepare(busy.update)
+
+    # A profile with an active list launches only when this setup is the list's:
+    # co-op partners have to run the same mods, in the same order, merged the same
+    # way. Launch only, after the merge has just run: a Rebuild builds the outputs
+    # this compares and has nothing to say about them.
+    def _check_active_list(self, prepared: Prepared) -> None:
+        doc = self._active_list()
+        if doc is None:
+            return
+        fix = (
+            'Run Tools > "Elden Ring: Import list…" with the list to fetch and install what differs, or '
+            '"Elden Ring: Verify against a list…" for the whole picture; that dialog can also stop using '
+            "the active list."
+        )
+        with self._busy("Elden Ring: checking the active list") as busy:
+            busy.update("Comparing this setup with the active list")
+            try:
+                found = self._verify(doc, prepared)
+            except listfile.ListFormatError as exc:
+                raise _Veto("Active list", f"The profile's active list cannot be used: {exc}", fix, ACTIVE_LIST_MISMATCH) from exc
+        prepared.warnings.extend(
+            f"{item.subject}: {item.text}" if item.subject else item.text for item in found if not item.blocking
+        )
+        blocked = listfile.blocking(found)
+        if blocked:
+            raise _Veto(
+                "Active list",
+                "This setup is not the one the profile's active list describes:\n" + listfile.describe(blocked),
+                fix,
+                ACTIVE_LIST_MISMATCH,
+            )
+
+    def _profile_active_list(self) -> dict | None:
+        return state.read_profile_rules(self._organizer.profilePath())["active_list"]
+
+    def _verify_against_instance(self, doc: dict, prepared: Prepared) -> list[listfile.Finding]:
+        paths = state.InstancePaths(self._organizer)
+        with archives.hash_cache(paths) as cache:
+            return listfile.verify(self._organizer, doc, live=prepared.live, cache=cache)
 
     # Anything in Game/ that loads code behind me3's back makes the launch
     # something other than the profile says: erm's dinput8.dll would load every
