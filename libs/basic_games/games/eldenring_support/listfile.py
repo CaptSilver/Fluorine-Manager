@@ -909,11 +909,15 @@ def _vanilla_findings(organizer, doc: dict, cache: dict) -> list[Finding]:
         # A merge opens downloads/<recorded name>, so that name has to hold the pinned bytes; a copy under
         # another name does not help a Rebuild. Only the one file is hashed unless it is missing or wrong.
         named = os.path.join(downloads, source["archive"])
-        if os.path.isfile(named) and state.cached_sha256(cache, named) == source["sha256"]:
-            continue
+        problem = "is not in the downloads folder under that name with the pinned bytes"
+        try:
+            if os.path.isfile(named) and state.cached_sha256(cache, named) == source["sha256"]:
+                continue
+        except OSError as exc:
+            problem = f"is in the downloads folder but this user cannot read it ({exc.strerror or exc})"
         text = (
-            f"{source['archive']} (the unmodified file a merge compares against) is not in the downloads "
-            "folder under that name with the pinned bytes, so a Rebuild would fail and the merge cannot be proven the same."
+            f"{source['archive']} (the unmodified file a merge compares against) {problem}, "
+            "so a Rebuild would fail and the merge cannot be proven the same."
         )
         elsewhere = archives.find_by_sha(downloads, source["sha256"], cache)
         if elsewhere is not None:
@@ -970,7 +974,7 @@ def verify(
     found += _rules_findings(rules, doc)
     found += _build_finding(doc, live)
     found += _codecs_finding(doc, codecs or generated.codecs)
-    found += _me3_findings(doc, host_status or (lambda: me3_host.status(paths)))
+    found += _me3_findings(doc, host_status or me3_host.status)
     found += _vanilla_findings(organizer, doc, cache)
     if check_outputs:
         found += _output_findings(paths, doc)

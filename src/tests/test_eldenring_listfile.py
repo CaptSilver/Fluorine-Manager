@@ -952,6 +952,19 @@ class VerifyRoundTripTests(VerifyCase):
         )
         self.assertEqual(before, after)
 
+    def test_the_default_me3_check_leaves_the_instance_untouched(self) -> None:
+        home = self.tmp / "home"
+        binary = home / ".local" / "bin" / "me3"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"not the pinned me3")
+        binary.chmod(0o755)
+        with mock.patch.dict("os.environ", {"HOME": str(home), "XDG_DATA_HOME": str(home / ".local" / "share")}):
+            found = listfile.verify(
+                self.organizer, self.doc, live=LIVE, cache=self.cache, codecs=lambda: CODECS
+            )
+        self.assertIn("me3_differs", self.kinds_of(found))
+        self.assertFalse(state.InstancePaths(self.organizer).me3_host_state.exists())
+
 
 class VerifyModTests(VerifyCase):
     def test_a_listed_mod_that_is_not_installed_is_missing(self) -> None:
@@ -1260,10 +1273,10 @@ class VerifyListTests(VerifyCase):
                 self.assertEqual(len(found), 1)
         self.assertEqual(self.found("me3_differs", host_status=lambda: me3_host.Status(me3_host.MISSING)), [])
 
-    def test_the_default_host_check_reads_the_instance_through_me3_host(self) -> None:
+    def test_the_default_host_check_asks_me3_host_without_an_instance_to_cache_in(self) -> None:
         with mock.patch.object(me3_host, "status", return_value=me3_host.Status(me3_host.OFF_PIN)) as status:
             findings = listfile.verify(self.organizer, self.doc, live=LIVE, cache=self.cache, codecs=lambda: CODECS)
-        self.assertEqual(status.call_args.args[0].root, self.paths.root)
+        status.assert_called_once_with()
         self.assertIn("me3_differs", self.kinds_of(findings))
 
     def test_a_merge_that_produced_other_bytes_is_a_generated_output_mismatch(self) -> None:
@@ -1335,6 +1348,26 @@ class VerifyListTests(VerifyCase):
         self.doc = self.export()
         (self.organizer.downloads / "a.zip").write_bytes(b"something else")
         self.assertEqual([item.subject for item in self.found("archive_missing")], ["vanilla source anc"])
+
+    def test_a_vanilla_source_archive_that_cannot_be_read_is_archive_missing(self) -> None:
+        sha = hashlib.sha256(b"ancestor").hexdigest()
+        source = {"archive": "a.zip", "sha256": sha, "source": "nexus", "nexus_id": 1, "file_id": None, "version": "v1"}
+        state.write_profile_rules(
+            self.organizer.profilePath(), {"merges": [], "prunes": [], "renames": [], "vanilla_sources": {"anc": source}}
+        )
+        self.doc = self.export()
+        (self.organizer.downloads / "a.zip").write_bytes(b"ancestor")
+        real = state.cached_sha256
+
+        def unreadable(cache, path):
+            if str(path).endswith("a.zip"):
+                raise PermissionError("denied")
+            return real(cache, path)
+
+        with mock.patch.object(state, "cached_sha256", unreadable):
+            found = self.found("archive_missing")
+        self.assertEqual([item.subject for item in found], ["vanilla source anc"])
+        self.assertIn("cannot read", found[0].text)
 
 
 class DefaultCodecsTests(VerifyCase):
