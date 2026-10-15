@@ -400,6 +400,18 @@ TEST(ResultsDialog, NoRetryButtonWhenNothingCanBeRetried) {
   EXPECT_EQ(dialog.findChild<QPushButton *>("retryButton"), nullptr);
 }
 
+TEST(ResultsDialog, CancelledReportOffersNoRetryButton) {
+  // presentResults ignores a retry on a cancelled run, so the button would do
+  // nothing. The rows can still be retryable (failures before the cancel).
+  CollectionReport report = makeReport();
+  report.cancelled = true;
+
+  CollectionResultsDialog dialog(report);
+
+  EXPECT_EQ(dialog.findChild<QPushButton *>("retryButton"), nullptr);
+  EXPECT_FALSE(dialog.retryRequested());
+}
+
 TEST(ResultsDialog, DroppedFoldersAreWordedByWhatHappenedToThem) {
   CollectionReport report = makeReport();
   report.droppedFolders = {QStringLiteral("Gone"), QStringLiteral("Shared")};

@@ -189,7 +189,9 @@ CollectionResultsDialog::CollectionResultsDialog(const CollectionReport &report,
 
   auto *buttons = new QHBoxLayout;
   buttons->addStretch(1);
-  if (anythingToRetry) {
+  // A cancelled run is not resumed from here (the session ignores the request),
+  // so the dialog says to re-run the link instead of offering a dead button.
+  if (anythingToRetry && !report.cancelled) {
     m_retryButton = new QPushButton(tr("Retry ticked"), this);
     m_retryButton->setObjectName(QStringLiteral("retryButton"));
     connect(m_retryButton, &QPushButton::clicked, this, [this] {
