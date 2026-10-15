@@ -1428,5 +1428,9 @@ add_dependencies(test_nexus_collections 7z)
 set_tests_properties(test_nexus_collections PROPERTIES
     ENVIRONMENT "MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
 
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionarchiveinstaller.cpp
+    collections/test_collectionarchiveinstaller.cpp)
+
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)
