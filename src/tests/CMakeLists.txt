@@ -1377,6 +1377,7 @@ add_executable(test_nexus_collections EXCLUDE_FROM_ALL
     collections/test_collectionplacementmoves.cpp
     collections/test_collectionplan.cpp
     collections/test_collectionstate.cpp
+    collections/test_fomodmodel.cpp
     collections/test_nxmurl.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifest.cpp
@@ -1385,6 +1386,7 @@ add_executable(test_nexus_collections EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplan.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionreport.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionstate.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/fomodmodel.cpp
 )
 set_target_properties(test_nexus_collections PROPERTIES
     AUTOMOC OFF
