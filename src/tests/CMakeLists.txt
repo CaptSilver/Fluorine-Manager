@@ -1372,8 +1372,10 @@ add_dependencies(fluorine-tests test_archive_extraction_containment)
 # ---------------------------------------------------------------------------
 add_executable(test_nexus_collections EXCLUDE_FROM_ALL
     collections/test_collectionlink.cpp
+    collections/test_collectionmanifest.cpp
     collections/test_nxmurl.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifest.cpp
 )
 set_target_properties(test_nexus_collections PROPERTIES
     AUTOMOC OFF

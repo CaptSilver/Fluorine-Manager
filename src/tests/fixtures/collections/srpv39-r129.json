@@ -1,0 +1,6536 @@
+{
+  "info": {
+    "author": "rVeinz",
+    "authorUrl": "",
+    "name": "NCR - Extras",
+    "description": "",
+    "installInstructions": "🔹Refer to our [Discord](https://discord.gg/jkcbbNbNkC) for any issues with the update and any other change logs. \n⚠️ You will encounter warning messages several times during installing this revision. Click \"Yes install to staging anyway\" on all warnings that appear.\n⚠️ Don't forget to install new revisions to a seperate profile, and remove old mods to prevent conflicts.\n⚠️ For stability, delete all files in Steam\\steamapps\\common\\Cyberpunk 2077\\r6\\cache with each update, verify game files, then deploy mods via Vortex\n⚠️ In Vortex, go to Settings on the left and then open V2077 Settings. Ensure the option \"Automatically convert old style 'archive' mods to REDmods on install\" is turned OFF. And \"Don't prompt when reaching the fallback installer\" is turned ON.\n⚠️ Our collections support Vortex only. The Nexus Mod App (NMA) is beta, use at your own risk. We do not support provided for NMA issues.\n⚠️ Blank screen after 2.3 update? Disable all mods, launch game vanilla, accept the EULA, then re-enable your mods.\n\nHave a good games! 🎮💜",
+    "domainName": "cyberpunk2077",
+    "gameVersions": [
+      "2.3.1.0"
+    ]
+  },
+  "mods": [
+    {
+      "name": "BO7 Suppressors",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 30013,
+        "fileId": 146665,
+        "md5": "380ef14270adc413f7a3dcf6c00eeaa9",
+        "fileSize": 34266425,
+        "logicalFilename": "BO7 Suppressors",
+        "updatePolicy": "exact",
+        "tag": "2CFo-pnffq"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CODE P0L4R1S - PHOTO MODE",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27447,
+        "fileId": 135648,
+        "md5": "286e842803bb66a7218b06cacf41afd1",
+        "fileSize": 338521,
+        "logicalFilename": "CODE P0L4R1S - PHOTO MODE",
+        "updatePolicy": "exact",
+        "tag": "rC7yd5Yn4X"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Oranje 3 Merrimac Necromancer",
+      "version": "1.1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26443,
+        "fileId": 148851,
+        "md5": "9234b92186580e6a160d8c582b0329f4",
+        "fileSize": 14037058,
+        "logicalFilename": "Oranje 3 Merrimac Necromancer",
+        "updatePolicy": "exact",
+        "tag": "_RBMORJCD7"
+      },
+      "author": "Oranje3",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Mayo - Virtual Atelier",
+      "version": "1.3.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12939,
+        "fileId": 157431,
+        "md5": "a77f5fd87dcb518848910404e95d21b6",
+        "fileSize": 22751,
+        "logicalFilename": "Mayo - Virtual Atelier",
+        "updatePolicy": "exact",
+        "tag": "-GCjwZ6kwC"
+      },
+      "author": "Mayo",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Virtual Atelier",
+      "version": "4.13",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 10090,
+        "fileId": 158100,
+        "md5": "8ae3f5571f046c3267d729cb8a9e4567",
+        "fileSize": 18167,
+        "logicalFilename": "Zenitex Virtual Atelier",
+        "updatePolicy": "exact",
+        "tag": "y5IJZH3zoM"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Miscellaneous",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "NC Fashion Virtual Atelier",
+      "version": "10.1.h",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4805,
+        "fileId": 161447,
+        "md5": "71d43259c4735208c73fd5728b9e29ff",
+        "fileSize": 64807,
+        "logicalFilename": "NC Fashion Virtual Atelier",
+        "updatePolicy": "exact",
+        "tag": "Amuw62UPOy"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Mayo - High Waist Leggings 3.0 - 2K Version",
+      "version": "3.0.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17045,
+        "fileId": 148082,
+        "md5": "5b1b3ca9b1098eff4088ab530e6fc63d",
+        "fileSize": 65641079,
+        "logicalFilename": "Mayo - High Waist Leggings 3.0 - 2K Version",
+        "updatePolicy": "exact",
+        "tag": "B8cYS119jA"
+      },
+      "author": "Mayo",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Sabbath7991 Virtual Atelier Legendary Attachments",
+      "version": "1.83",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18757,
+        "fileId": 162824,
+        "md5": "14eedeb8587b310c1d7981d883400621",
+        "fileSize": 378277,
+        "logicalFilename": "Sabbath7991 Virtual Atelier Legendary Attachments",
+        "updatePolicy": "exact",
+        "tag": "OLsm8Fj2fm"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Combat Gloves",
+      "version": "2.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19432,
+        "fileId": 147909,
+        "md5": "ec00c186e734aaae23861c63a6b616bb",
+        "fileSize": 26168959,
+        "logicalFilename": "Zenitex Combat Gloves",
+        "updatePolicy": "exact",
+        "tag": "GRcxgSzv8_"
+      },
+      "author": "ScorpionTank - Kerensky",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Ballistic Mask",
+      "version": "4.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12422,
+        "fileId": 147603,
+        "md5": "c55a154ac1d0f024b7e0cdd0496b87a5",
+        "fileSize": 9376740,
+        "logicalFilename": "Zenitex Ballistic Mask",
+        "updatePolicy": "exact",
+        "tag": "2tePMOQ6WS"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "02 - Rosa's Shop 2",
+      "version": "4.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8919,
+        "fileId": 148051,
+        "md5": "3d338fdd71175d09e1720cb83a3b169b",
+        "fileSize": 26589,
+        "logicalFilename": "Rosa's Goat Wear (Shop 2)",
+        "updatePolicy": "exact",
+        "tag": "02P2lazNtB"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_female_virtual_boutique",
+      "version": "7.6",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 5114,
+        "fileId": 164305,
+        "md5": "196420a304fbbe7360b9da3ac7cf9189",
+        "fileSize": 201130,
+        "logicalFilename": "ND_female_virtual_boutique",
+        "updatePolicy": "exact",
+        "tag": "eweQyiQt45"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Core Dependency",
+      "version": "5.1.8",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16356,
+        "fileId": 157086,
+        "md5": "6025d78c61fb2b07e3acd34e7a284a99",
+        "fileSize": 17677578,
+        "logicalFilename": "Zenitex Core Dependency",
+        "updatePolicy": "exact",
+        "tag": "SU9AWIJeSi"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Modders Resources",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "HOLOTECH",
+      "version": "1.0.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29672,
+        "fileId": 155804,
+        "md5": "fc927abc192c778aead0969b039e596e",
+        "fileSize": 12579,
+        "logicalFilename": "HoloTech Store",
+        "updatePolicy": "exact",
+        "tag": "fmKnmNi9Zn"
+      },
+      "author": "PinkyDude",
+      "details": {
+        "category": "Atelier Shop",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AKA Cosmetics",
+      "version": "1.10",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28187,
+        "fileId": 163462,
+        "md5": "5cdfd16249ca83b576ac7198a56fb664",
+        "fileSize": 633059,
+        "logicalFilename": "AKA Cosmetics",
+        "updatePolicy": "exact",
+        "tag": "gyWVGlKpCG"
+      },
+      "author": "Alliekat",
+      "details": {
+        "category": "Atelier Shop",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Balaclava Pack",
+      "version": "2.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17411,
+        "fileId": 147079,
+        "md5": "09fb8e3c6ae2aff63349261cad8ec68e",
+        "fileSize": 24442994,
+        "logicalFilename": "Zenitex Balaclava Pack",
+        "updatePolicy": "exact",
+        "tag": "bE6rzkkKmZX"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "RGF x BeautiDuwanger - Nylon Pantyhose",
+      "version": "2.34",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12076,
+        "fileId": 147031,
+        "md5": "6644a31cf21d9e1ac69de3a902c2528c",
+        "fileSize": 17969197,
+        "logicalFilename": "RGF x BeautiDuwanger - Nylon Pantyhose",
+        "updatePolicy": "exact",
+        "tag": "6yvWy0Rt0fl"
+      },
+      "author": "Zwei - BeautiDuwanger",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Turtleneck Bodysuit",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27086,
+        "fileId": 147175,
+        "md5": "0ef17a59d0e2109101b0c08cb83d950b",
+        "fileSize": 7028167,
+        "logicalFilename": "Rosa's Turtleneck Bodysuit",
+        "updatePolicy": "exact",
+        "tag": "q3N1PxguGMU"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ALL IN ONE - Back",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29648,
+        "fileId": 146642,
+        "md5": "2ccf8af450e11185b041c080b1b13ff0",
+        "fileSize": 3132476,
+        "logicalFilename": "ALL IN ONE - Back",
+        "updatePolicy": "exact",
+        "tag": "bcHseS3MHrX"
+      },
+      "author": "PinkyDude",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ALL IN ONE - Head",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29648,
+        "fileId": 146643,
+        "md5": "46e3e6478d6f89ee65d91a02f0752d0e",
+        "fileSize": 5888191,
+        "logicalFilename": "ALL IN ONE - Head",
+        "updatePolicy": "exact",
+        "tag": "x1FuNpkz0rC"
+      },
+      "author": "PinkyDude",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Veegee Shop 3",
+      "version": "1.5.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18890,
+        "fileId": 146593,
+        "md5": "23d68a9a1bd28c898dec66f579aa0732",
+        "fileSize": 28308,
+        "logicalFilename": "Veegee Shop 3",
+        "updatePolicy": "exact",
+        "tag": "3PAIee1e1kG"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Mayo - Eve Jeans - 2k Textures",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25537,
+        "fileId": 145939,
+        "md5": "16bbc72119552dfbc54dd3ee1de69562",
+        "fileSize": 55272252,
+        "logicalFilename": "Mayo - Eve Jeans - 2k Textures",
+        "updatePolicy": "exact",
+        "tag": "hCLKRAjQ8as"
+      },
+      "author": "Mayo",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Community Hair Pack",
+      "version": "1.07",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28483,
+        "fileId": 144000,
+        "md5": "8c69ca7de1bed523cd44587aed09bb32",
+        "fileSize": 35113119,
+        "logicalFilename": "Community Hair Pack",
+        "updatePolicy": "exact",
+        "tag": "dOFuvlUkoaU"
+      },
+      "author": "B1W",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beautiful MAKEUP II - BASE - Basegame Head",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29513,
+        "fileId": 144664,
+        "md5": "742b341e32e499677578faacfa988e3c",
+        "fileSize": 40015422,
+        "logicalFilename": "Beautiful MAKEUP II - BASE - Basegame Head",
+        "updatePolicy": "exact",
+        "tag": "lT3vS70anwq"
+      },
+      "author": "Arkhe0",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beautiful MAKEUP - BASE - For Basegame Head",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29336,
+        "fileId": 144047,
+        "md5": "3af0c6cabb7ad1cefe5592b251ba7739",
+        "fileSize": 38588136,
+        "logicalFilename": "Beautiful MAKEUP - BASE - Basegame Head",
+        "updatePolicy": "exact",
+        "tag": "QQ8BBRooRMz"
+      },
+      "author": "Arkhe0",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "1. AIO - ALL IN ONE - HYST HAIR COLLECTION",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21766,
+        "fileId": 127082,
+        "md5": "9b38668321c9a85731c65f4e79109ec0",
+        "fileSize": 22204242,
+        "logicalFilename": "1. AIO - ALL IN ONE - HYST HAIR COLLECTION",
+        "updatePolicy": "exact",
+        "tag": "2a5kC-MtQYT"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CCXL - GLEY PONY V2",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26170,
+        "fileId": 129502,
+        "md5": "dbe222f71c7d241e8544ee6b97db83e5",
+        "fileSize": 21552257,
+        "logicalFilename": "CCXL - GLEY PONY V2",
+        "updatePolicy": "exact",
+        "tag": "KrgR-hzYk0s"
+      },
+      "author": "meluminary",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Sedth_CCXL_eyelashes_FEM_V1",
+      "version": "2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25068,
+        "fileId": 124892,
+        "md5": "25736f75df62b78249db34a46d713414",
+        "fileSize": 24757565,
+        "logicalFilename": "Sedth_CCXL_eyelashes_FEM_V1",
+        "updatePolicy": "exact",
+        "tag": "rTy3XMMJB3X"
+      },
+      "author": "SEDTHSEDTHTANANURAK",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CORE - HoloPlugins",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29638,
+        "fileId": 145176,
+        "md5": "f19b4cec1edddf35bc5b2ce7338495bf",
+        "fileSize": 6560,
+        "logicalFilename": "CORE - HoloPlugins",
+        "updatePolicy": "exact",
+        "tag": "bUro5eFOTg1"
+      },
+      "author": "PinkyDude",
+      "details": {
+        "category": "Miscellaneous",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ALL IN ONE - Behind",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29648,
+        "fileId": 146245,
+        "md5": "8b92681a919a7dfcdac1b43c20145153",
+        "fileSize": 323649,
+        "logicalFilename": "ALL IN ONE - Behind",
+        "updatePolicy": "exact",
+        "tag": "r8jxNR51l2g"
+      },
+      "author": "PinkyDude",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AlliekatsGothEyeshadowAXL",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29629,
+        "fileId": 145113,
+        "md5": "ebb59e6e1086c4ad930a15495c35a447",
+        "fileSize": 5198384,
+        "logicalFilename": "AlliekatsGothEyeshadowAXL",
+        "updatePolicy": "exact",
+        "tag": "8v3Ci7Trj2T"
+      },
+      "author": "XxAlliekat123xX",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CCXL - EVERYDAY MEGAPAK",
+      "version": "4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19863,
+        "fileId": 132816,
+        "md5": "f5d63aeac78644dd431aa736f3585347",
+        "fileSize": 21486154,
+        "logicalFilename": "CCXL - EVERYDAY MEGAPAK",
+        "updatePolicy": "exact",
+        "tag": "zhp5wIpnusQ"
+      },
+      "author": "meluminary",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "V Mannequin Holographic Projector H10",
+      "version": "1.8",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26101,
+        "fileId": 129869,
+        "md5": "a403d3a3c047c9296bc97bada24cd910",
+        "fileSize": 39274,
+        "logicalFilename": "V Mannequin Holographic Projector H10",
+        "updatePolicy": "exact",
+        "tag": "llyxcq_Zmla"
+      },
+      "author": "elminister",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "00 - Multicolored Hair Pack - All In One",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21614,
+        "fileId": 110413,
+        "md5": "12e7af12ff266bf7579e76e136fff014",
+        "fileSize": 58098858,
+        "logicalFilename": "00 - Multicolored Hair Pack - All In One",
+        "updatePolicy": "exact",
+        "tag": "mk5Pitd1ik5"
+      },
+      "author": "eagul",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beanie's CCXL Clinic - Player Cyberware",
+      "version": "4.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21901,
+        "fileId": 111479,
+        "md5": "babe431583bff2134e7869a7cccfb716",
+        "fileSize": 92134,
+        "logicalFilename": "Beanie's CCXL Clinic - Player Cyberware",
+        "updatePolicy": "exact",
+        "tag": "5sIQl9rzh42"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AlliekatsAXLCheeks",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29385,
+        "fileId": 144088,
+        "md5": "b1f874cdd70300915719d878a507791d",
+        "fileSize": 16177994,
+        "logicalFilename": "AlliekatsAXLCheeks",
+        "updatePolicy": "exact",
+        "tag": "wCACXZGI9jV"
+      },
+      "author": "XxAlliekat123xX",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beautiful Eyebrows - 02 - Fuller - CCXL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26168,
+        "fileId": 129560,
+        "md5": "be088a8ef8c2ab42ebaafe8fd3ac6f5d",
+        "fileSize": 38054497,
+        "logicalFilename": "Beautiful Eyebrows - 02 - Fuller - CCXL",
+        "updatePolicy": "exact",
+        "tag": "ESEmUBM8Soq"
+      },
+      "author": "Arkhe",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "- Head Cyberware CCXL - Vanilla",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23969,
+        "fileId": 121114,
+        "md5": "ab10b0dbfc421de80d2689f2b83003ce",
+        "fileSize": 19243074,
+        "logicalFilename": "- Head Cyberware CCXL - Vanilla",
+        "updatePolicy": "exact",
+        "tag": "AV55V7Srgr_"
+      },
+      "author": "berrywoman",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CCXL More Cyberware",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21935,
+        "fileId": 110766,
+        "md5": "27a503ad28d22fe61a6762e74375a610",
+        "fileSize": 7589,
+        "logicalFilename": "CCXL More Cyberware",
+        "updatePolicy": "exact",
+        "tag": "0i6JPVr-y6I"
+      },
+      "author": "Zwei",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beautiful Eyebrows - 01 - Fuller - CCXL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18783,
+        "fileId": 129325,
+        "md5": "f62dbd0a12a865754178e752bb92e9b1",
+        "fileSize": 35551420,
+        "logicalFilename": "Beautiful Eyebrows - 01 - Fuller - CCXL",
+        "updatePolicy": "exact",
+        "tag": "orErDfj7iTn"
+      },
+      "author": "Arkhe",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "MAKE UP - ENHANCER - 64x64 pixels",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28869,
+        "fileId": 142583,
+        "md5": "2fd16c76515afa5f521cb90fc1660e7c",
+        "fileSize": 4850,
+        "logicalFilename": "MAKE UP - ENHANCER - 64x64 pixels",
+        "updatePolicy": "exact",
+        "tag": "s2nfYrVw4Ty"
+      },
+      "author": "Arkhe0",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Teeth Pack - CCXL",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26745,
+        "fileId": 132132,
+        "md5": "a83bda52b3cd53376cd6add83f741a3f",
+        "fileSize": 10740843,
+        "logicalFilename": "Teeth Pack - CCXL",
+        "updatePolicy": "exact",
+        "tag": "YvC5saf-U2W"
+      },
+      "author": "icxrus",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SILVER x ZXR - Femme Fatale Hair - No Braid - CCXL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28766,
+        "fileId": 142510,
+        "md5": "ebf44492a4c37c05703075e5e6b2b33f",
+        "fileSize": 931705,
+        "logicalFilename": "SILVER x ZXR - Femme Fatale Hair - No Braid - CCXL",
+        "updatePolicy": "exact",
+        "tag": "Nvx6YerIj7y"
+      },
+      "author": "SilverEzredes - Zwei - Rev",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CCXL - HAIR MEGAPAK",
+      "version": "5.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19197,
+        "fileId": 106301,
+        "md5": "810eeff8380b9d69265865941ee1a103",
+        "fileSize": 15552335,
+        "logicalFilename": "CCXL - HAIR MEGAPAK",
+        "updatePolicy": "exact",
+        "tag": "ImS-qzwNl1_"
+      },
+      "author": "meluminary",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "All in One",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19191,
+        "fileId": 100307,
+        "md5": "fbdd24dafba942c524a8918230391ca4",
+        "fileSize": 22467652,
+        "logicalFilename": "All in One",
+        "updatePolicy": "exact",
+        "tag": "GWWSVfEyXmF"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Microblend Resource",
+      "version": "1.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4571,
+        "fileId": 81689,
+        "md5": "1cf508429a3d3de5355869777c5a4ca4",
+        "fileSize": 27518155,
+        "logicalFilename": "Microblend Resource",
+        "updatePolicy": "exact",
+        "tag": "7yud7gjTsWm"
+      },
+      "author": "NoraLee",
+      "details": {
+        "category": "Modders Resources",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hair Profiles CCXL 1.02",
+      "version": "1.02",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19115,
+        "fileId": 98945,
+        "md5": "aba599764e6cc7cd3a15e136e47f3aa3",
+        "fileSize": 206171,
+        "logicalFilename": "Hair Profiles CCXL 1.02",
+        "updatePolicy": "exact",
+        "tag": "E4jMvy5dPmw"
+      },
+      "author": "island_dancer and psiberx",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Fantasy Glass Eyes CCXL by protossvoid",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25716,
+        "fileId": 127805,
+        "md5": "32a14c91086c9ae72eb9c868eb8ce718",
+        "fileSize": 6432067,
+        "logicalFilename": "Fantasy Glass Eyes CCXL by protossvoid",
+        "updatePolicy": "exact",
+        "tag": "egzcvivmsvM"
+      },
+      "author": "protossvoid",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Fusion Eyes Ccxl",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29050,
+        "fileId": 158542,
+        "md5": "9e287e79f1dd265417137154671be88b",
+        "fileSize": 25103872,
+        "logicalFilename": "Jhaeros Fusion Eyes Ccxl",
+        "updatePolicy": "exact",
+        "tag": "VcApEg7Em2F"
+      },
+      "author": "JhaerosTheGreat",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Elsi Texture Base - 2K",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19689,
+        "fileId": 103280,
+        "md5": "8fbc03aeffed55e377dbce0ec7e06b7b",
+        "fileSize": 6372002,
+        "logicalFilename": "Elsi Texture Base - 2K",
+        "updatePolicy": "exact",
+        "tag": "_a0l5ops1Gv"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "NeuroMultilayerMaterialXtender-2.2.1.zip",
+      "version": "2.2.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 5570,
+        "fileId": 114368,
+        "md5": "aa82b9e4b346faf33db4c301c3322b11",
+        "fileSize": 28042873,
+        "logicalFilename": "NeuroMultilayerMaterialXtender-2.2.1.zip",
+        "updatePolicy": "exact",
+        "tag": "CyIeB51PgYs"
+      },
+      "author": "Neurolinked",
+      "details": {
+        "category": "Modders Resources",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "IslandDancer's Hair Profiles Compatibility Patch",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21613,
+        "fileId": 110210,
+        "md5": "e5dda038c0e1f016b5991362d985f8c9",
+        "fileSize": 3792,
+        "logicalFilename": "IslandDancer's Hair Profiles Compatibility Patch",
+        "updatePolicy": "exact",
+        "tag": "o2nE2r59ppa"
+      },
+      "author": "eagul",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Multicolored Hair Core",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21613,
+        "fileId": 110209,
+        "md5": "b13f3e2ac5986260fb056ba0804b87ca",
+        "fileSize": 3283,
+        "logicalFilename": "Multicolored Hair Core",
+        "updatePolicy": "exact",
+        "tag": "wFAQrrMeB70"
+      },
+      "author": "eagul",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Cosplay Bright Eyes CCXL by protossvoid",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25715,
+        "fileId": 127804,
+        "md5": "b09a8b432fd589bc6c9998c344971f5e",
+        "fileSize": 5408168,
+        "logicalFilename": "Cosplay Bright Eyes CCXL by protossvoid",
+        "updatePolicy": "exact",
+        "tag": "7AdHXQJ6EzH"
+      },
+      "author": "protossvoid",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "PRC Framework",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8590,
+        "fileId": 49147,
+        "md5": "38af34b9fbee4da5bbdafcc27584c01a",
+        "fileSize": 784753,
+        "logicalFilename": "PRC Framework",
+        "updatePolicy": "exact",
+        "tag": "78auYesjdF9"
+      },
+      "author": "eagul",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CCXL Piercing Colours",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27914,
+        "fileId": 137916,
+        "md5": "3e5ac3738c83732559e163241b034e3c",
+        "fileSize": 1303320,
+        "logicalFilename": "CCXL Piercing Colours",
+        "updatePolicy": "exact",
+        "tag": "KxLAd1v38Kz"
+      },
+      "author": "visages",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beautiful Exotics Eyes CCXL by protossvoid",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25718,
+        "fileId": 127807,
+        "md5": "0dd1482065fbd8703c5eea673ec0d157",
+        "fileSize": 6390639,
+        "logicalFilename": "Beautiful Exotics Eyes CCXL by protossvoid",
+        "updatePolicy": "exact",
+        "tag": "3h9R0fsyjxX"
+      },
+      "author": "protossvoid",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "00 - All in One",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19688,
+        "fileId": 101242,
+        "md5": "aa5e05fffaec0c913d46ed23dd8e4cdd",
+        "fileSize": 16833299,
+        "logicalFilename": "00 - All in One",
+        "updatePolicy": "exact",
+        "tag": "iIs3ez3iKIW"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AlliekatXLEyeshadowKawaii",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28792,
+        "fileId": 141852,
+        "md5": "e5dc8f9af65628c1ad8831956e54e625",
+        "fileSize": 5413324,
+        "logicalFilename": "AlliekatXLEyeshadowKawaii",
+        "updatePolicy": "exact",
+        "tag": "o60ZYUtPyoz"
+      },
+      "author": "XxAlliekat123xX",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Alliekat's AXL Eyeshadows",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28186,
+        "fileId": 139362,
+        "md5": "f4b2ad91ad09197b2d37f35073f439fd",
+        "fileSize": 16182589,
+        "logicalFilename": "Alliekat's AXL Eyeshadows",
+        "updatePolicy": "exact",
+        "tag": "C68BPFrvo1G"
+      },
+      "author": "Alliekat",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Lara Croft - Ponytail",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25469,
+        "fileId": 140167,
+        "md5": "ec7ad37865f6168a11724ef3286f4d46",
+        "fileSize": 6159279,
+        "logicalFilename": "Lara Croft - Ponytail",
+        "updatePolicy": "exact",
+        "tag": "XA0xePm1Iox"
+      },
+      "author": "LadyLea X EzioMaverick",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Community Palette Project",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 10437,
+        "fileId": 71181,
+        "md5": "a77cce5f74784a9b1bd21f5925823047",
+        "fileSize": 3881735,
+        "logicalFilename": "The Community Palette Project",
+        "updatePolicy": "exact",
+        "tag": "2DQKLzc4n9P"
+      },
+      "author": "NoraLee",
+      "details": {
+        "category": "Modders Resources",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Immersive V Dialogue Expanded",
+      "version": "1.1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 24377,
+        "fileId": 122680,
+        "md5": "ccb287455fb7a114c02f2a4d1fcc3808",
+        "fileSize": 15205910,
+        "logicalFilename": "Immersive V Dialogue Expanded",
+        "updatePolicy": "exact",
+        "tag": "arNlcWQ-_yR"
+      },
+      "author": "skyrayfox",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Melee Weapon Pack 2 - Throwing Knife - Skullpiercer",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25846,
+        "fileId": 128317,
+        "md5": "07062a9a1dc79d2175b286bdd94b5718",
+        "fileSize": 2745308,
+        "logicalFilename": "Throwing Knife - Skullpiercer",
+        "updatePolicy": "exact",
+        "tag": "9KKiqYLmdk6"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hide Body Parts - Body Toggles",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26627,
+        "fileId": 132357,
+        "md5": "6ff30e6481893b3f051e7407c2a1d059",
+        "fileSize": 105518,
+        "logicalFilename": "Hide Body Parts - Body Toggles",
+        "updatePolicy": "exact",
+        "tag": "bpPRycSW0Eh"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "V's Accessory Drawer - Both V - Main File",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26507,
+        "fileId": 131145,
+        "md5": "cf149b52fccd4b75ed7e63da8e0fce03",
+        "fileSize": 3059077,
+        "logicalFilename": "V's Accessory Drawer - Both V - Main File",
+        "updatePolicy": "exact",
+        "tag": "UD2rJv7BuGg"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Katana and Sword Pack - High Voltage",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25725,
+        "fileId": 127832,
+        "md5": "e4555ce9b5dce2014bc7387ef6d6a99b",
+        "fileSize": 9679355,
+        "logicalFilename": "High Voltage",
+        "updatePolicy": "exact",
+        "tag": "Ftx2z808Vie"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Monstas - Monster High inspired CCXL hair colors and AXL Nails - Monsta Nails",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25557,
+        "fileId": 154562,
+        "md5": "d9ee0a3c303d770186f623e0e1fc33ce",
+        "fileSize": 3215554,
+        "logicalFilename": "Monsta Nails",
+        "updatePolicy": "exact",
+        "tag": "7GbklajJq-K"
+      },
+      "author": "ratstick and luvwich and sailorskunk",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Clothes - Mini Skirt and Overknee Socks",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25546,
+        "fileId": 127156,
+        "md5": "b2e747f5ad8d8f7c2bb9f4a70db24b27",
+        "fileSize": 4028107,
+        "logicalFilename": "Rosa's Clothes - Mini Skirt and Overknee Socks",
+        "updatePolicy": "exact",
+        "tag": "sFpT1nvQz33"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Belt top MF",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25380,
+        "fileId": 126530,
+        "md5": "6457a2237860253d58b0be079fc5dc20",
+        "fileSize": 16864556,
+        "logicalFilename": "Belt top MF",
+        "updatePolicy": "exact",
+        "tag": "H471vOO5367"
+      },
+      "author": "Raenef",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Sitting Collection Part 7 - FV - MV - MB pose pack - TSC Complete Collection Fem PM",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25167,
+        "fileId": 125393,
+        "md5": "faf5f52b93d04db02166c17bc2d18b5a",
+        "fileSize": 317092,
+        "logicalFilename": "TSC Complete Collection Fem PM",
+        "updatePolicy": "exact",
+        "tag": "MULHCJAl521"
+      },
+      "author": "DeavenExe",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Simple Outfit",
+      "version": "1.0.",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 24737,
+        "fileId": 123425,
+        "md5": "cce71652feb02b27f11f580613fa39bc",
+        "fileSize": 13636246,
+        "logicalFilename": "Rosa's Simple Outfit",
+        "updatePolicy": "exact",
+        "tag": "Krv7sl_DvWl"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Covert Leggings",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 24373,
+        "fileId": 146219,
+        "md5": "e8fd02aedafe392d6e39ff6df08f591b",
+        "fileSize": 7243276,
+        "logicalFilename": "Zenitex Covert Leggings",
+        "updatePolicy": "exact",
+        "tag": "8f-85dj_m-Z"
+      },
+      "author": "ScorpionTank - NotMayoSan",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SCOFIL - Kriostech Store",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23477,
+        "fileId": 130364,
+        "md5": "1b6f4574d9a2d35a00c2ade140de721a",
+        "fileSize": 66086,
+        "logicalFilename": "SCOFIL - Kriostech Store",
+        "updatePolicy": "exact",
+        "tag": "Iehpp6EFiQn"
+      },
+      "author": "SCOFIL",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Sleeveless Turtleneck",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 22082,
+        "fileId": 120286,
+        "md5": "25e1acc2af536581f80944efbca8ad27",
+        "fileSize": 15081301,
+        "logicalFilename": "Zenitex Sleeveless Turtleneck",
+        "updatePolicy": "exact",
+        "tag": "-lUXjGwOG1d"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Basic Cropped Tank - Both V - Main File",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20593,
+        "fileId": 105750,
+        "md5": "dc90d703a9cde17e2b14a009584c5a58",
+        "fileSize": 2054304,
+        "logicalFilename": "Basic Cropped Tank - Both V - Main File",
+        "updatePolicy": "exact",
+        "tag": "9pywMiXbHTz"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Beanie's Salon Equippable Bangs - 16 AXL Hair Add-Ons - Equippable Bangs",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19877,
+        "fileId": 109314,
+        "md5": "eae7b884dd696c4f9973bd780a33ea04",
+        "fileSize": 3576679,
+        "logicalFilename": "Equippable Bangs",
+        "updatePolicy": "exact",
+        "tag": "jY0UoHKeqm7"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Comfy Leggings - Fem V - Main File",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20459,
+        "fileId": 104759,
+        "md5": "524de46bc68366a5957d40ace6a92b6a",
+        "fileSize": 1547155,
+        "logicalFilename": "Comfy Leggings - Fem V - Main File",
+        "updatePolicy": "exact",
+        "tag": "MQf1FUZyGR-"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Underwear",
+      "version": "1.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20394,
+        "fileId": 120275,
+        "md5": "e22ebe4ce642ad8eeda5b258d4953f05",
+        "fileSize": 14257086,
+        "logicalFilename": "Zenitex Underwear",
+        "updatePolicy": "exact",
+        "tag": "ab8G7RlCqd-"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Claire Accessories - Main File",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19762,
+        "fileId": 103913,
+        "md5": "0fca38c554c3972be148e38427485e1d",
+        "fileSize": 11335688,
+        "logicalFilename": "Claire Accessories - Main File",
+        "updatePolicy": "exact",
+        "tag": "EuSa4GQiiKG"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Ballcap Ponytail",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19753,
+        "fileId": 101589,
+        "md5": "cc220e5da9bffbb74593aabff6ab36b2",
+        "fileSize": 1115835,
+        "logicalFilename": "Ballcap Ponytail",
+        "updatePolicy": "exact",
+        "tag": "-BZ4_rCOefn"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Veegee Roddy Hair 14",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18997,
+        "fileId": 98770,
+        "md5": "4ab00eb63ca64edef208425a59da0c6c",
+        "fileSize": 845684,
+        "logicalFilename": "Veegee Roddy Hair 14",
+        "updatePolicy": "exact",
+        "tag": "WYZG7ZuSRsA"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Sticky Grenades - Legendary Plus",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18910,
+        "fileId": 97568,
+        "md5": "11d371e744d0a5683b26b743db0e72ae",
+        "fileSize": 101450,
+        "logicalFilename": "Sticky Grenades - Legendary Plus",
+        "updatePolicy": "exact",
+        "tag": "JziAQV-LtGf"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Ankle Boots",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18896,
+        "fileId": 97239,
+        "md5": "07c110c5e6f3c77ea8023ec8632714a8",
+        "fileSize": 12009338,
+        "logicalFilename": "Ankle Boots",
+        "updatePolicy": "exact",
+        "tag": "bQ22IrKN_5s"
+      },
+      "author": "Cubfan82",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Breezy's Thrift Shop - Atelier",
+      "version": "30.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18465,
+        "fileId": 120437,
+        "md5": "517d05a7397ba4040da646e9a7ed9d20",
+        "fileSize": 28362,
+        "logicalFilename": "Breezy's Thrift Shop - Atelier",
+        "updatePolicy": "exact",
+        "tag": "YhoU7By1Mga"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Casino Aviators",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18191,
+        "fileId": 93655,
+        "md5": "55491fe8e942565736afa51b378ac7ad",
+        "fileSize": 515092,
+        "logicalFilename": "Casino Aviators",
+        "updatePolicy": "exact",
+        "tag": "IrV_IcY9nDk"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Breezy's Accessory Alcove - Atelier",
+      "version": "10.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17749,
+        "fileId": 131506,
+        "md5": "143e49ea0d05974bfd21daf1a989f8d8",
+        "fileSize": 24463,
+        "logicalFilename": "Breezy's Accessory Alcove - Atelier",
+        "updatePolicy": "exact",
+        "tag": "pi6CeKzpo-k"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Combat Goggles",
+      "version": "1.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17049,
+        "fileId": 120261,
+        "md5": "1494f19f69941446b57dcc0bbb6a3197",
+        "fileSize": 8364838,
+        "logicalFilename": "Zenitex Combat Goggles",
+        "updatePolicy": "exact",
+        "tag": "eCAqTSFfNB2"
+      },
+      "author": "ScorpionTank - Adshield",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Earrings Pack - 8 pieces Archive XL Jewelry - Earrings Pack",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16659,
+        "fileId": 98804,
+        "md5": "0c08459ea965feb8171e3d5d5ffc530c",
+        "fileSize": 769469,
+        "logicalFilename": "Earrings Pack",
+        "updatePolicy": "exact",
+        "tag": "bEHih4NuQJl"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Tactical Belt Archive XL",
+      "version": "1.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15548,
+        "fileId": 158465,
+        "md5": "00c90d6c39e64956d8305e347aec2ba5",
+        "fileSize": 16426028,
+        "logicalFilename": "Tactical Belt Archive XL",
+        "updatePolicy": "exact",
+        "tag": "NGSNHjcJdhY"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Lime Atelier",
+      "version": "2.9",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16616,
+        "fileId": 126812,
+        "md5": "d582acdc7a5c72524a5aa8e33d99d550",
+        "fileSize": 981961,
+        "logicalFilename": "Lime Atelier",
+        "updatePolicy": "exact",
+        "tag": "yVkXNfPn3h7"
+      },
+      "author": "Limerence",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Manta Ray Glasses - Core",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16130,
+        "fileId": 84338,
+        "md5": "164c671a618e86e6f6fd038f1b210308",
+        "fileSize": 6593988,
+        "logicalFilename": "Manta Ray Glasses - Core",
+        "updatePolicy": "exact",
+        "tag": "bKg2eyOdC-i"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Chain Jewelry - Main",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15861,
+        "fileId": 89127,
+        "md5": "366b659e00b3c20eb11ac7166ab3a8cc",
+        "fileSize": 10040728,
+        "logicalFilename": "Chain Jewelry - Main",
+        "updatePolicy": "exact",
+        "tag": "8o4ghd6iFtt"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nerdish X Veegee Kurt Outfit - Both V",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14383,
+        "fileId": 75888,
+        "md5": "a109c5c01e13fde2e5fdae5457a133af",
+        "fileSize": 12886666,
+        "logicalFilename": "Nerdish X Veegee Kurt Outfit - Both V",
+        "updatePolicy": "exact",
+        "tag": "xaQ84Q5EMvF"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "V's Bullet Necklace - Main",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15076,
+        "fileId": 84049,
+        "md5": "97219016d845a89863ad43286b5049a1",
+        "fileSize": 2032189,
+        "logicalFilename": "V's Bullet Necklace - Main",
+        "updatePolicy": "exact",
+        "tag": "FyMBNvJmmoL"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Breezy's Clothing Emporium - Atelier",
+      "version": "22.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14744,
+        "fileId": 94532,
+        "md5": "edda86c1c665e35aac2332058132b6d3",
+        "fileSize": 25352,
+        "logicalFilename": "Breezy's Clothing Emporium - Atelier",
+        "updatePolicy": "exact",
+        "tag": "qaL0yTQFpTx"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Ballistic Vest",
+      "version": "3.6",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14348,
+        "fileId": 120252,
+        "md5": "256d555916adcdbe81c3270e6c8e24fa",
+        "fileSize": 16980243,
+        "logicalFilename": "Military Ballistic Vest",
+        "updatePolicy": "exact",
+        "tag": "fZ4Tsw2_7Cp"
+      },
+      "author": "ScorpionTank - Livreur De Tofu",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Bean Trunk - Virtual Atelier",
+      "version": "10.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12836,
+        "fileId": 125234,
+        "md5": "72a312389b6a1ad6aedbf1dbf13e6108",
+        "fileSize": 1002030,
+        "logicalFilename": "The Bean Trunk - Virtual Atelier",
+        "updatePolicy": "exact",
+        "tag": "iLC8zJNcHM-"
+      },
+      "author": "beaniebby",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Veegee Shop 2",
+      "version": "2.3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 13870,
+        "fileId": 108963,
+        "md5": "ceb9a1950c5320a41923b128dbbb4099",
+        "fileSize": 19325,
+        "logicalFilename": "Veegee Shop 2",
+        "updatePolicy": "exact",
+        "tag": "AezgDFaR_vO"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "MONSTERaider - Psycho Visors ArchiveXL (Regular)",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12768,
+        "fileId": 67118,
+        "md5": "195f4986cd569563a482fb7dc6616656",
+        "fileSize": 8429850,
+        "logicalFilename": "MONSTERaider - Psycho Visors ArchiveXL (Regular)",
+        "updatePolicy": "exact",
+        "tag": "FYoYunK1AJj"
+      },
+      "author": "MONSTERaider",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Bean Box - Virtual Atelier",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12765,
+        "fileId": 119640,
+        "md5": "f7c011ccea7f8df882ab498d98d595bc",
+        "fileSize": 997935,
+        "logicalFilename": "The Bean Box - Virtual Atelier",
+        "updatePolicy": "exact",
+        "tag": "ydnQrPaeKCg"
+      },
+      "author": "beaniebby",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Cateye Glasses",
+      "version": "1.11",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12224,
+        "fileId": 71199,
+        "md5": "3bb90d41ee69147682627a534cb758d4",
+        "fileSize": 1367912,
+        "logicalFilename": "Cateye Glasses",
+        "updatePolicy": "exact",
+        "tag": "j-osya5hPLK"
+      },
+      "author": "beaniebby",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Panam Pants",
+      "version": "4.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 10842,
+        "fileId": 155514,
+        "md5": "6778cfc11d96fc88875e6b9f00b198c1",
+        "fileSize": 5699980,
+        "logicalFilename": "Zenitex Panam Pants",
+        "updatePolicy": "exact",
+        "tag": "zDg_AbEgy-p"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Tactical Vest",
+      "version": "4.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9774,
+        "fileId": 155814,
+        "md5": "a301e8765e23cd23cbb1c6103c59ec21",
+        "fileSize": 26788413,
+        "logicalFilename": "Zenitex Tactical Harness",
+        "updatePolicy": "exact",
+        "tag": "dcJsoFh_rEa"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Merc Life - Updated for PL",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9245,
+        "fileId": 49949,
+        "md5": "d7a31cc4536787d21b47053fa1a86b69",
+        "fileSize": 291402,
+        "logicalFilename": "The Merc Life - Updated for PL",
+        "updatePolicy": "exact",
+        "tag": "Q9HfcYemG54"
+      },
+      "author": "IronWings",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nike Shoe  - Archive XL - Nike Air Jordans - Both V",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9201,
+        "fileId": 49250,
+        "md5": "6ef2097be1e54c062a64808a1c58a7f6",
+        "fileSize": 7403528,
+        "logicalFilename": "Nike Air Jordans - Both V",
+        "updatePolicy": "exact",
+        "tag": "THXXAcZm8uB"
+      },
+      "author": "Cars and Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Stiletto Platform Heels",
+      "version": "v1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9184,
+        "fileId": 160735,
+        "md5": "320ee7309adffeb6b34ed1a335440035",
+        "fileSize": 4827188,
+        "logicalFilename": "Stiletto Platform Heels",
+        "updatePolicy": "exact",
+        "tag": "EajLHvLkbLr"
+      },
+      "author": "ErenN77",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Jon Vk Close Quarters Combat Set - 2.0 (Test)",
+      "version": "1.11",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9152,
+        "fileId": 51080,
+        "md5": "d5b7b624ee6a4a30255bc23e58680f9c",
+        "fileSize": 251627,
+        "logicalFilename": "Jon Vk Close Quarters Combat Set - 2.0 (Test)",
+        "updatePolicy": "exact",
+        "tag": "pe-KV6onSNg"
+      },
+      "author": "IronWings",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Meluminary_clothes_part_3_BOOBA_BOOTY_EEX",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8494,
+        "fileId": 107003,
+        "md5": "58ff27075211e5231a02ef29307d1244",
+        "fileSize": 11479707,
+        "logicalFilename": "ND_Meluminary_clothes_part_3_FemV",
+        "updatePolicy": "exact",
+        "tag": "EEeBlYHIlcd"
+      },
+      "author": "NolaDreamer and Meluminary",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Catears Helmet Archive Xl",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8838,
+        "fileId": 47089,
+        "md5": "e5f9e351a143dda5c50a62aaef0c6355",
+        "fileSize": 2056251,
+        "logicalFilename": "Catears Helmet Archive Xl",
+        "updatePolicy": "exact",
+        "tag": "pJ0cyTXTzYQ"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nola_and_Aquelyras_feminine_atelier",
+      "version": "3.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8704,
+        "fileId": 129730,
+        "md5": "b4e4c83a35775933cf3398bb58073954",
+        "fileSize": 1164103,
+        "logicalFilename": "Nola_and_Aquelyras_feminine_atelier",
+        "updatePolicy": "exact",
+        "tag": "0XeHVigHN1h"
+      },
+      "author": "NolaDreamer and Aquelyras",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Meluminary_clothes_part_2_BOOBA_BOOTY_XL_EEX",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8209,
+        "fileId": 107002,
+        "md5": "59eeae61ee99f47aa41fc4a71a65a6d6",
+        "fileSize": 13619630,
+        "logicalFilename": "ND_Meluminary_clothes_part_2_FemV",
+        "updatePolicy": "exact",
+        "tag": "ABtpZ1g3-Gt"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Veegee Shop",
+      "version": "2.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8183,
+        "fileId": 72256,
+        "md5": "628efd74977ae10356c6bc5cc793f397",
+        "fileSize": 19739,
+        "logicalFilename": "Veegee Shop",
+        "updatePolicy": "exact",
+        "tag": "KQsIJLnUxZQ"
+      },
+      "author": "VeegeeAlvarez",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "MONSTERaider - NetWatch Legs Standard (Regular)",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8148,
+        "fileId": 58041,
+        "md5": "41404f241e2e1248e8499ebac262fb4a",
+        "fileSize": 5687687,
+        "logicalFilename": "MONSTERaider - NetWatch Legs Standard (Regular)",
+        "updatePolicy": "exact",
+        "tag": "tzzpcz_L3Rb"
+      },
+      "author": "MONSTERaider",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nola_and_Meluminary_feminine_atelier",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7703,
+        "fileId": 45548,
+        "md5": "1abeedc725b95a18d864ee7fff7543db",
+        "fileSize": 584239,
+        "logicalFilename": "Nola_and_Meluminary_feminine_atelier",
+        "updatePolicy": "exact",
+        "tag": "CB1MUX6nncP"
+      },
+      "author": "NolaDreamer and Meluminary",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "MONSTERaider - Psycho CyberTubes ArchiveXL - SP (Regular)",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7860,
+        "fileId": 41392,
+        "md5": "1beb6bb7ca5b1ff71566dfd641a51404",
+        "fileSize": 3288584,
+        "logicalFilename": "MONSTERaider - Psycho CyberTubes ArchiveXL - SP (Regular)",
+        "updatePolicy": "exact",
+        "tag": "r1fY9JxvvNY"
+      },
+      "author": "MONSTERaider",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Kwek's Aviators With NPC and New Colors - FemaleV",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7803,
+        "fileId": 41137,
+        "md5": "7fc7db3e37d6183c917a03f0018ef3ff",
+        "fileSize": 281362,
+        "logicalFilename": "Kwek's Aviators With NPC and New Colors - FemaleV",
+        "updatePolicy": "exact",
+        "tag": "UYEQi4GUsqq"
+      },
+      "author": "kweknexuss",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Meluminary_clothes_part_1_BOOBA_BOOTY_XL_EEX",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7665,
+        "fileId": 106998,
+        "md5": "d4ac83a26b4d48cf2f0756008df19181",
+        "fileSize": 11011391,
+        "logicalFilename": "ND_Meluminary_clothes_part_1_FemV",
+        "updatePolicy": "exact",
+        "tag": "wlx3h13E-T3"
+      },
+      "author": "NolaDreamer and Meluminary",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Ziva Curvy Sandals High Heeled Archive XL",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7521,
+        "fileId": 114753,
+        "md5": "e52d26a28c445b9f5219fab49e95b03a",
+        "fileSize": 1286342,
+        "logicalFilename": "Ziva Curvy Sandals HIgh Heeled Archive XL",
+        "updatePolicy": "exact",
+        "tag": "YikwT06FPWE"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "MONSTERaider - Viktor Vektor Store (Regular)",
+      "version": "1.6",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7448,
+        "fileId": 150983,
+        "md5": "d3f9427b52e804589c94454f1a64ede7",
+        "fileSize": 23501,
+        "logicalFilename": "MONSTERaider - Viktor Vektor Store",
+        "updatePolicy": "exact",
+        "tag": "u7UPqQ1fkfu"
+      },
+      "author": "MONSTERaider",
+      "details": {
+        "category": "User Interface",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Limerence Pistol Garter",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21171,
+        "fileId": 107420,
+        "md5": "126838c35e5ecd30ea060298e844e42e",
+        "fileSize": 28050668,
+        "logicalFilename": "Limerence Pistol Garter",
+        "updatePolicy": "exact",
+        "tag": "x777psQ3eng"
+      },
+      "author": "Limerence",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Kwek's Sporty Glasses - FemaleV",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7440,
+        "fileId": 39360,
+        "md5": "c50aeaf4f5e668423047775d7dd73f38",
+        "fileSize": 359013,
+        "logicalFilename": "Kwek's Sporty Glasses - FemaleV",
+        "updatePolicy": "exact",
+        "tag": "3AWnipHvTa-"
+      },
+      "author": "kweknexuss",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Kwek's Head Aviator Glasses - FemaleV",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7409,
+        "fileId": 39240,
+        "md5": "fc1798ef685e1857be4e3b35215dca2f",
+        "fileSize": 339003,
+        "logicalFilename": "Kwek's Head Aviator Glasses - FemaleV",
+        "updatePolicy": "exact",
+        "tag": "exiN_UHsKoH"
+      },
+      "author": "kweknexuss",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Angy Pose Packs - Cute and Sexy",
+      "version": "3.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 6871,
+        "fileId": 127698,
+        "md5": "c52135a45aea02efffd8816471fc909f",
+        "fileSize": 742401,
+        "logicalFilename": "Angy Pose Packs - Cute and Sexy",
+        "updatePolicy": "exact",
+        "tag": "_7d6KPrkh8L"
+      },
+      "author": "xBaebsae",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "XRX Halloween Victorian Gloves Archive XL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17421,
+        "fileId": 90537,
+        "md5": "affa8d4cb1bea28727e94d4833aefcd4",
+        "fileSize": 50002005,
+        "logicalFilename": "XRX Halloween Victorian Gloves Archive XL",
+        "updatePolicy": "exact",
+        "tag": "6ZnHujQ3RET"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Kwek's Seawright Optometry Shop - regular version",
+      "version": "1.1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 6505,
+        "fileId": 41144,
+        "md5": "8b83a4d65a4592497051582862ca84d7",
+        "fileSize": 8198,
+        "logicalFilename": "Kwek's Seawright Optometry Shop - regular version",
+        "updatePolicy": "exact",
+        "tag": "O87vLmVyKQx"
+      },
+      "author": "kweknexuss",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "XRX Helmet Archive XL",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4962,
+        "fileId": 43928,
+        "md5": "4e61401f77a85037091e193c1062741a",
+        "fileSize": 900438,
+        "logicalFilename": "XRX Helmet Archive XL",
+        "updatePolicy": "exact",
+        "tag": "JSTPxCnBsN8"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rockegirl Atelier",
+      "version": "2.33",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4717,
+        "fileId": 130749,
+        "md5": "5ff9d1f8f00ac83ed53c29b2cf8171fd",
+        "fileSize": 22340,
+        "logicalFilename": "Rockergirl Atelier",
+        "updatePolicy": "exact",
+        "tag": "4N1Z6ch3BUO"
+      },
+      "author": "Zwei",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Reyes Accessories - Main File",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17069,
+        "fileId": 103915,
+        "md5": "9cd58d401b1b789977801cdd4ef7a9ac",
+        "fileSize": 23431438,
+        "logicalFilename": "Reyes Accessories - Main File",
+        "updatePolicy": "exact",
+        "tag": "KvgzhQMpqoz"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Bomber Jackets - Main File",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19132,
+        "fileId": 151535,
+        "md5": "b70372496cf3bb35772b4977e0b2139f",
+        "fileSize": 27744249,
+        "logicalFilename": "Bomber Jackets - Main File",
+        "updatePolicy": "exact",
+        "tag": "8JBG829uiLH"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Alvarix Custom Store - Atelier - Alvarix",
+      "version": "3.5.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4602,
+        "fileId": 120954,
+        "md5": "6b19e5e5aabb51ec1d116503516b5505",
+        "fileSize": 44803,
+        "logicalFilename": "Alvarix Custom Store - Atelier",
+        "updatePolicy": "exact",
+        "tag": "ONhEQGpJS5Q"
+      },
+      "author": "AlvarixPT",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "TurtleNeck Top Camo Archive XL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19025,
+        "fileId": 97680,
+        "md5": "39e2c547be7bdc38784f916f904f6b48",
+        "fileSize": 21886752,
+        "logicalFilename": "TurtleNeck Top Camo Archive XL",
+        "updatePolicy": "exact",
+        "tag": "FnmUpEFcARS"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Cowgirl Vest - Fem V - Main File",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19842,
+        "fileId": 102434,
+        "md5": "711df97666cb43cc304d18aecbdc00fd",
+        "fileSize": 2213579,
+        "logicalFilename": "Cowgirl Vest - Fem V - Main File",
+        "updatePolicy": "exact",
+        "tag": "mQLuA0Jns4v"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Arcadie Outfit - Core",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17678,
+        "fileId": 91613,
+        "md5": "1551463e5c371912c3036c068ff8f20a",
+        "fileSize": 65480131,
+        "logicalFilename": "Arcadie Outfit - Core",
+        "updatePolicy": "exact",
+        "tag": "98nPPcFMNO7"
+      },
+      "author": "beaniebby",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Alt_jacket_and_pants_FemV",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7701,
+        "fileId": 122834,
+        "md5": "fc041343177bd10c5ff6e780d2789bba",
+        "fileSize": 32212901,
+        "logicalFilename": "ND_Alt_jacket_and_pants_FemV",
+        "updatePolicy": "exact",
+        "tag": "zcJtexd_-TZ"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Muzzle Attachment Pack",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21530,
+        "fileId": 109118,
+        "md5": "6a849a7883c7c240774f041e40ccd4f4",
+        "fileSize": 81659869,
+        "logicalFilename": "Muzzle Attachment Pack",
+        "updatePolicy": "exact",
+        "tag": "78_wEzlICki"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Bean Cup - Virtual Atelier",
+      "version": "1.10",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12223,
+        "fileId": 93654,
+        "md5": "c3d1f2d2ecad0f2fe5f8c2de2fecefa7",
+        "fileSize": 1003425,
+        "logicalFilename": "The Bean Cup - Virtual Atelier",
+        "updatePolicy": "exact",
+        "tag": "fkcIMvrhJpv"
+      },
+      "author": "beaniebby",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Metallic Heels",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15913,
+        "fileId": 83139,
+        "md5": "ce28818be41f8fb691b229f5b751aaf2",
+        "fileSize": 18970732,
+        "logicalFilename": "Metallic Heels",
+        "updatePolicy": "exact",
+        "tag": "eKGsiK1YG5-"
+      },
+      "author": "beanie",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "XRX Spandex Long Gloves",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16730,
+        "fileId": 87620,
+        "md5": "e42d9e61ac8f08e392014068e57820c4",
+        "fileSize": 17824424,
+        "logicalFilename": "XRX Spandex Long Gloves",
+        "updatePolicy": "exact",
+        "tag": "g7ZbLQbDZaM"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "XRX Latex LongGloves Archive XL",
+      "version": "1.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12264,
+        "fileId": 68869,
+        "md5": "fcd92526a3075d1f1b1981321fb44699",
+        "fileSize": 17874513,
+        "logicalFilename": "XRX Latex LongGloves Archive XL",
+        "updatePolicy": "exact",
+        "tag": "TxXa_FObhfO"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Dog Tags - Main File (AiO)",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16403,
+        "fileId": 85864,
+        "md5": "2323481f1762a02acd6c8384d5c15c9c",
+        "fileSize": 7931585,
+        "logicalFilename": "Dog Tags - Main File (AiO)",
+        "updatePolicy": "exact",
+        "tag": "syzo-fkUv22"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Casual Loose Shirt - Main File",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17359,
+        "fileId": 102820,
+        "md5": "262d213872ce813cff77938744f42a83",
+        "fileSize": 6128942,
+        "logicalFilename": "Casual Loose Shirt - Main File",
+        "updatePolicy": "exact",
+        "tag": "VLHOF28BW_J"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Limerence Garter Belt Dagger",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21593,
+        "fileId": 109373,
+        "md5": "dab322024cda4958c93a07f99b2b8e85",
+        "fileSize": 72360120,
+        "logicalFilename": "Limerence Garter Belt Dagger",
+        "updatePolicy": "exact",
+        "tag": "rL_Y0v8LNs9"
+      },
+      "author": "Limerence",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Aquelyras_rockergirl_outfit_FemV",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9602,
+        "fileId": 118905,
+        "md5": "0441330e0457b9022e2bf4bdbc5de45c",
+        "fileSize": 151404273,
+        "logicalFilename": "ND_Aquelyras_rockergirl_outfit_FemV",
+        "updatePolicy": "exact",
+        "tag": "-wsPHD0TLG5"
+      },
+      "author": "NolaDreamer and Aquelyras",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nikke Rapi Outfit and Hair",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 22112,
+        "fileId": 111476,
+        "md5": "3b5fab07251957ae9ff3aca753f5c21d",
+        "fileSize": 46918535,
+        "logicalFilename": "Nikke Rapi Outfit and Hair",
+        "updatePolicy": "exact",
+        "tag": "TyCQmSYk8zI"
+      },
+      "author": "AlvarixPT",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Cyberarms_Collection_3.0",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 13846,
+        "fileId": 116841,
+        "md5": "362a779edae05f6a1d91064323f9c043",
+        "fileSize": 267086016,
+        "logicalFilename": "Cyberarms_Collection_3.0",
+        "updatePolicy": "exact",
+        "tag": "bre2SCEls9w"
+      },
+      "author": "AlvarixPT",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Tactical Style Outfit Pt2",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 22635,
+        "fileId": 113484,
+        "md5": "5289b9bd3e35dba29af820ed334ab3a5",
+        "fileSize": 147203744,
+        "logicalFilename": "Tactical Style Outfit Pt2",
+        "updatePolicy": "exact",
+        "tag": "m3M55dgy2RE"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Angel Outfit",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8866,
+        "fileId": 117116,
+        "md5": "372d23c67fc799cdbb05804c824a5bda",
+        "fileSize": 27950115,
+        "logicalFilename": "Angel Outfit",
+        "updatePolicy": "exact",
+        "tag": "VYP9eSgFxeS"
+      },
+      "author": "AlvarixPT",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "void_Toyota_GT86",
+      "version": "1.4.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23632,
+        "fileId": 163173,
+        "md5": "c8c5343c0d79bbc38e1899e72132700f",
+        "fileSize": 100962064,
+        "logicalFilename": "void_Toyota_GT86",
+        "updatePolicy": "exact",
+        "tag": "SLAlkG58FfF"
+      },
+      "choices": {
+        "options": [
+          {
+            "name": "intro",
+            "groups": [
+              {
+                "name": "intro",
+                "choices": [
+                  {
+                    "name": "skip tuning parts",
+                    "idx": 1
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "body colour, widebody, spoilers, mirrors",
+            "groups": [
+              {
+                "name": "body colour",
+                "choices": []
+              },
+              {
+                "name": "widebody",
+                "choices": []
+              },
+              {
+                "name": "spoilers",
+                "choices": []
+              },
+              {
+                "name": "mirrors",
+                "choices": []
+              },
+              {
+                "name": "hoods",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "bumpers, skirts, stance",
+            "groups": [
+              {
+                "name": "bumpers front",
+                "choices": []
+              },
+              {
+                "name": "bumpers rear",
+                "choices": []
+              },
+              {
+                "name": "skirts",
+                "choices": []
+              },
+              {
+                "name": "stance",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "diffusers, exhaust, roof fins, no antenna",
+            "groups": [
+              {
+                "name": "diffusers",
+                "choices": []
+              },
+              {
+                "name": "exhausts",
+                "choices": []
+              },
+              {
+                "name": "roof fins",
+                "choices": []
+              },
+              {
+                "name": "roof tail",
+                "choices": []
+              },
+              {
+                "name": "no antenna",
+                "choices": []
+              },
+              {
+                "name": "headlights",
+                "choices": []
+              },
+              {
+                "name": "taillights",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "neon, interior",
+            "groups": [
+              {
+                "name": "neon",
+                "choices": []
+              },
+              {
+                "name": "rollcage",
+                "choices": []
+              },
+              {
+                "name": "bobblehead",
+                "choices": []
+              },
+              {
+                "name": "alt display",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "wheels, wheel colours, tire lettering",
+            "groups": [
+              {
+                "name": "wheels",
+                "choices": []
+              },
+              {
+                "name": "wheel colours",
+                "choices": []
+              },
+              {
+                "name": "tire lettering",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "Nova Traffic, VCD Previews",
+            "groups": [
+              {
+                "name": "Nova Traffic",
+                "choices": [
+                  {
+                    "name": "don't add Nova Traffic support",
+                    "idx": 0
+                  }
+                ]
+              },
+              {
+                "name": "VCD Previews",
+                "choices": [
+                  {
+                    "name": "VCD Previews on",
+                    "idx": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "type": "fomod"
+      },
+      "author": "yellingintothevoid",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Limerence Katana Garter",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25003,
+        "fileId": 124602,
+        "md5": "c462744e8ea6dc27b79a652596c75962",
+        "fileSize": 32051006,
+        "logicalFilename": "Limerence Katana Garter",
+        "updatePolicy": "exact",
+        "tag": "FuddSBPWoH2"
+      },
+      "author": "Limerence",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nola Dreamer's Fishnet tights - ARCHIVE XL - Togglable Feet - Equipment-EX - ND_fishnet_tights_FemV",
+      "version": "1.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7334,
+        "fileId": 112915,
+        "md5": "35442811beaf90d83a2d84e8da9907f4",
+        "fileSize": 19949947,
+        "logicalFilename": "ND_fishnet_tights_FemV",
+        "updatePolicy": "exact",
+        "tag": "JAXn_yAx_oU"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Combat Pants",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20479,
+        "fileId": 154544,
+        "md5": "d81f28a000e30c4637bdd2dcc28327eb",
+        "fileSize": 25608481,
+        "logicalFilename": "Zenitex Combat Pants",
+        "updatePolicy": "exact",
+        "tag": "aOvbRS7WF8L"
+      },
+      "author": "ScorpionTank - Raemaze",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Military Backpack",
+      "version": "1.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18152,
+        "fileId": 120267,
+        "md5": "93b1e379c81ab9d62c8cb4c98251d1ce",
+        "fileSize": 68727159,
+        "logicalFilename": "Zenitex Military Backpack",
+        "updatePolicy": "exact",
+        "tag": "6MM3Q218b1E"
+      },
+      "author": "ScorpionTank - Kerensky",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Stealthsuit",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16172,
+        "fileId": 145226,
+        "md5": "04b2953de4398a4a3712362f69539582",
+        "fileSize": 63638718,
+        "logicalFilename": "Zenitex Stealthsuit",
+        "updatePolicy": "exact",
+        "tag": "aNWywR7uyPV"
+      },
+      "author": "ScorpionTank - Adshield - Peachu",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Pistol Holsters",
+      "version": "1.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18002,
+        "fileId": 120266,
+        "md5": "2460e84799633ff6cf0a7e07903d22f2",
+        "fileSize": 25939803,
+        "logicalFilename": "Military Pistol Holsters",
+        "updatePolicy": "exact",
+        "tag": "KbghGDqgLuv"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Ops-Core FAST Helmet",
+      "version": "3.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 13557,
+        "fileId": 120256,
+        "md5": "3a59f2696241b2eafc90d3af8ea797f3",
+        "fileSize": 21287082,
+        "logicalFilename": "Ops-Core FAST Helmet",
+        "updatePolicy": "exact",
+        "tag": "s5B1ZZJRAN3"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Combat Helmet",
+      "version": "2.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 24094,
+        "fileId": 145151,
+        "md5": "c37f263e2467364f1a4d59611031cfe9",
+        "fileSize": 18239700,
+        "logicalFilename": "Zenitex Combat Helmet",
+        "updatePolicy": "exact",
+        "tag": "a6CN8NXrl9O"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Combat Jacket",
+      "version": "2.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19119,
+        "fileId": 154674,
+        "md5": "bee4e9409ce9b6a9e8bb2338530956a3",
+        "fileSize": 18465753,
+        "logicalFilename": "Zenitex Combat Jacket",
+        "updatePolicy": "exact",
+        "tag": "zT6gXaetHJQ"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Harley-Davidson Thundergod",
+      "version": "1.1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21522,
+        "fileId": 124945,
+        "md5": "fd1261283fcb8f4a435b027b043a06cc",
+        "fileSize": 53200563,
+        "logicalFilename": "Harley-Davidson Thundergod",
+        "updatePolicy": "exact",
+        "tag": "xMqyXdHrOLy"
+      },
+      "author": "PinkyDude",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Freyna Christmas Outfit - Archive XL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26179,
+        "fileId": 129705,
+        "md5": "d92275a37a8fb7ffd6a5f0fe3fd82de6",
+        "fileSize": 41759202,
+        "logicalFilename": "Freyna Christmas Outfit - Archive XL",
+        "updatePolicy": "exact",
+        "tag": "TBI1KNnLCP9"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Aquelyras_Cargo_Outfit_FemV",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 13323,
+        "fileId": 115197,
+        "md5": "cf29eeae4267555ed84e47a619d13e61",
+        "fileSize": 53333577,
+        "logicalFilename": "ND_Aquelyras_Cargo_Outfit_FemV",
+        "updatePolicy": "exact",
+        "tag": "YoTBSLPmAvK"
+      },
+      "author": "NolaDreamer x Aquelyras",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Combat Boots",
+      "version": "3.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14781,
+        "fileId": 120253,
+        "md5": "5ddbed270d4da70a64c0dbe49c7f2e50",
+        "fileSize": 18448511,
+        "logicalFilename": "Military Combat Boots",
+        "updatePolicy": "exact",
+        "tag": "09DeI1cMHUa"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Streetwear PT5 - BOTH V",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26283,
+        "fileId": 130412,
+        "md5": "e6cf4dfb56b781a6136c2a1164373bf4",
+        "fileSize": 39745422,
+        "logicalFilename": "Streetwear PT5 - BOTH V",
+        "updatePolicy": "exact",
+        "tag": "iXaatQ3mF9z"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Travelers Backpack - Both V - Main File",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23097,
+        "fileId": 116248,
+        "md5": "115ed5c26ffdfaee23e617464f32f2f5",
+        "fileSize": 1167363,
+        "logicalFilename": "Travelers Backpack - Both V - Main File",
+        "updatePolicy": "exact",
+        "tag": "02eyYX0HN1E"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "BDF_DRe_ArchV4",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18736,
+        "fileId": 130299,
+        "md5": "b06663e491ffaf7d37e24e5aaca9a36b",
+        "fileSize": 87170211,
+        "logicalFilename": "BDF_DRe_ArchV4",
+        "updatePolicy": "exact",
+        "tag": "36hjrLA-m96"
+      },
+      "author": "DennisReactive",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "XRX Tactical Shorts ArchiveXL",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9400,
+        "fileId": 158144,
+        "md5": "9b70a1a9488b9f005c5086c08e39c6a8",
+        "fileSize": 18073695,
+        "logicalFilename": "XRX Tactical Shorts ArchiveXL",
+        "updatePolicy": "exact",
+        "tag": "o3xQ4sj17pX"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Midnight Arms Gravemaker - CyberopticEX with attachments",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26617,
+        "fileId": 131873,
+        "md5": "8b00b71afc2be0a3aea4a850772cb66d",
+        "fileSize": 69375278,
+        "logicalFilename": "CyberopticEX with attachments",
+        "updatePolicy": "exact",
+        "tag": "ItKL31A1v7P"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nomad Junkbox - Both V - Main File",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25465,
+        "fileId": 126880,
+        "md5": "4fda4f6470f3052adb8b38b268d5b111",
+        "fileSize": 2826168,
+        "logicalFilename": "Nomad Junkbox - Both V - Main File",
+        "updatePolicy": "exact",
+        "tag": "g11oDaYrfqK"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "North Oak Nail Spa - FemV Pedicures and Nails",
+      "version": "1.5.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 24993,
+        "fileId": 154575,
+        "md5": "0c1daaa60ac38c8ce0abf9fd47cba83a",
+        "fileSize": 5514121,
+        "logicalFilename": "North Oak Nail Spa - FemV Pedicures and Nails",
+        "updatePolicy": "exact",
+        "tag": "e-dmJhdtIV4"
+      },
+      "author": "lovewich",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SCOFIL - Kriostech Military Outfit",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 22024,
+        "fileId": 131665,
+        "md5": "b580a7b392b3ef24fe4b055ffadcf937",
+        "fileSize": 61423258,
+        "logicalFilename": "SCOFIL - Kriostech Military Outfit",
+        "updatePolicy": "exact",
+        "tag": "cZW9DVN7HRn"
+      },
+      "author": "SCOFIL",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Militech Sight Pack",
+      "version": "1.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25490,
+        "fileId": 158468,
+        "md5": "f8117a96583b82b2727e4ae973982823",
+        "fileSize": 52939646,
+        "logicalFilename": "Militech Sight Pack",
+        "updatePolicy": "exact",
+        "tag": "Osk8sgz1wHn"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Maiden and Priest",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26442,
+        "fileId": 130645,
+        "md5": "f3a1c5d68d47cf41a136390b6d62c21f",
+        "fileSize": 9297258,
+        "logicalFilename": "Maiden and Priest",
+        "updatePolicy": "exact",
+        "tag": "ocQvQ16GwCI"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Accessory and Jewelry collection - Main File - AiO",
+      "version": "1.01",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 24327,
+        "fileId": 136862,
+        "md5": "03ccfb31ea14127b6ac84c570f8b0da5",
+        "fileSize": 94038072,
+        "logicalFilename": "Accessory and Jewelry collection - Main File - AiO",
+        "updatePolicy": "exact",
+        "tag": "CQwvVZTy4DM"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Valentino Holsters - Main File",
+      "version": "2.02",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18100,
+        "fileId": 136826,
+        "md5": "cdf46d532fa4a817c4b5eff50e07e6ea",
+        "fileSize": 113881833,
+        "logicalFilename": "Valentino Holsters - Main File",
+        "updatePolicy": "exact",
+        "tag": "dVarg-M-rQW"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Combat T-Shirt",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26406,
+        "fileId": 145416,
+        "md5": "d37f05b048c2980c1a0816ad3ea15e96",
+        "fileSize": 20173081,
+        "logicalFilename": "Zenitex Combat T-Shirt",
+        "updatePolicy": "exact",
+        "tag": "lnT-DlHf0Cb"
+      },
+      "author": "ScorpionTank - NotMayoSan",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Casual Style Outfit Pt37",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27689,
+        "fileId": 136992,
+        "md5": "59b97b9b1b0413e00fb62365706f82a8",
+        "fileSize": 57644881,
+        "logicalFilename": "Casual Style Outfit Pt37",
+        "updatePolicy": "exact",
+        "tag": "B8e9nftsjRK"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "void_Honda_CRX_Mugen",
+      "version": "1.1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27152,
+        "fileId": 163181,
+        "md5": "a6bac05a689f48d6a411995da448c35d",
+        "fileSize": 56762921,
+        "logicalFilename": "void_Honda_CRX_Mugen",
+        "updatePolicy": "exact",
+        "tag": "zEqAWhQEFMZ"
+      },
+      "choices": {
+        "options": [
+          {
+            "name": "intro",
+            "groups": [
+              {
+                "name": "intro",
+                "choices": [
+                  {
+                    "name": "skip tuning parts",
+                    "idx": 1
+                  }
+                ]
+              },
+              {
+                "name": "colour tutorial",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "exterior",
+            "groups": [
+              {
+                "name": "colour preset",
+                "choices": []
+              },
+              {
+                "name": "widebody kit",
+                "choices": []
+              },
+              {
+                "name": "lightbar",
+                "choices": []
+              },
+              {
+                "name": "roof scoops",
+                "choices": []
+              },
+              {
+                "name": "roof wing",
+                "choices": []
+              },
+              {
+                "name": "splitter",
+                "choices": []
+              },
+              {
+                "name": "spoilers",
+                "choices": []
+              },
+              {
+                "name": "wheels",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "interior",
+            "groups": [
+              {
+                "name": "remove rollcage",
+                "choices": []
+              },
+              {
+                "name": "remove seatbelts",
+                "choices": []
+              },
+              {
+                "name": "remove tech",
+                "choices": []
+              },
+              {
+                "name": "radio",
+                "choices": []
+              },
+              {
+                "name": "seats",
+                "choices": []
+              },
+              {
+                "name": "shiftknob",
+                "choices": []
+              },
+              {
+                "name": "steering wheel",
+                "choices": []
+              },
+              {
+                "name": "trunk",
+                "choices": []
+              }
+            ]
+          },
+          {
+            "name": "Nova Traffic",
+            "groups": [
+              {
+                "name": "Nova Traffic",
+                "choices": [
+                  {
+                    "name": "don't add Nova Traffic support",
+                    "idx": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "type": "fomod"
+      },
+      "author": "yellingintothevoid",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "XRX Combat Symmetric Top Archive XL",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16277,
+        "fileId": 158474,
+        "md5": "7bcb8f8874c86e0bbb15b0856231e244",
+        "fileSize": 41034182,
+        "logicalFilename": "XRX Combat Symmetric Top Archive XL",
+        "updatePolicy": "exact",
+        "tag": "k7Zm_ZsbBA4"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Unzipped Hoodie - Main File",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17491,
+        "fileId": 102819,
+        "md5": "3496b1497ca00c93c56408a7ee49b713",
+        "fileSize": 8493239,
+        "logicalFilename": "Unzipped Hoodie - Main File",
+        "updatePolicy": "exact",
+        "tag": "iELJTF4tum-"
+      },
+      "author": "Breezypunk",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SCOFIL - Military Armor-Plated Pants and Pouches",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23912,
+        "fileId": 120144,
+        "md5": "d6da428850b62e490d162e96613f9134",
+        "fileSize": 20641460,
+        "logicalFilename": "SCOFIL - Military Armor-Plated Pants and Pouches",
+        "updatePolicy": "exact",
+        "tag": "4SXmxLrW-14"
+      },
+      "author": "SCOFIL",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Harness Gun Holster Leather Latex Hyst Archive XL",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 13389,
+        "fileId": 71761,
+        "md5": "3ece931f09683f7b7ab3511996e24cd6",
+        "fileSize": 10817993,
+        "logicalFilename": "Harness Gun Holster Leather Latex Hyst Archive XL",
+        "updatePolicy": "exact",
+        "tag": "m1_IDacxTMM"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Merc Pants",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27371,
+        "fileId": 135226,
+        "md5": "9c0ec1b99c528b311da371acc2ee483b",
+        "fileSize": 4133102,
+        "logicalFilename": "Rosa's Merc Pants",
+        "updatePolicy": "exact",
+        "tag": "1JlxZHu-ihL"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Long Bodysuit",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19796,
+        "fileId": 127056,
+        "md5": "3880675b1171ed0f9de5dbfe9d9a9ff5",
+        "fileSize": 6266809,
+        "logicalFilename": "Rosa's Long Bodysuit",
+        "updatePolicy": "exact",
+        "tag": "sR8mvYqw6V_"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Layered Tops",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21906,
+        "fileId": 126753,
+        "md5": "07b6bbbe729336114e4f8d32daf3d54d",
+        "fileSize": 10782376,
+        "logicalFilename": "Rosa's Layered Tops",
+        "updatePolicy": "exact",
+        "tag": "HnKj2luxMmN"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "void_Lotus_Esprit_Turbo",
+      "version": "1.6.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21574,
+        "fileId": 138127,
+        "md5": "a0063950f302b9fda8d92dc0a5c16ac9",
+        "fileSize": 58713606,
+        "logicalFilename": "void_Lotus_Esprit_Turbo",
+        "updatePolicy": "exact",
+        "tag": "TFvY5raoOup"
+      },
+      "choices": {
+        "options": [
+          {
+            "name": "intro",
+            "groups": [
+              {
+                "name": "intro",
+                "choices": [
+                  {
+                    "name": "install tuning parts",
+                    "idx": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "splitter, spoilers, rollcage, bobblehead",
+            "groups": [
+              {
+                "name": "splitter",
+                "choices": [
+                  {
+                    "name": "add splitter",
+                    "idx": 1
+                  }
+                ]
+              },
+              {
+                "name": "spoilers",
+                "choices": [
+                  {
+                    "name": "sp04",
+                    "idx": 4
+                  }
+                ]
+              },
+              {
+                "name": "rollcage",
+                "choices": [
+                  {
+                    "name": "no rollcage",
+                    "idx": 0
+                  }
+                ]
+              },
+              {
+                "name": "bobblehead",
+                "choices": [
+                  {
+                    "name": "bobblehead on",
+                    "idx": 1
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "lightbars, badges, wheels",
+            "groups": [
+              {
+                "name": "lightbar front",
+                "choices": [
+                  {
+                    "name": "no lightbar front",
+                    "idx": 0
+                  }
+                ]
+              },
+              {
+                "name": "lightbar rear",
+                "choices": [
+                  {
+                    "name": "no lightbar rear",
+                    "idx": 0
+                  }
+                ]
+              },
+              {
+                "name": "wheels",
+                "choices": [
+                  {
+                    "name": "wh02",
+                    "idx": 2
+                  }
+                ]
+              },
+              {
+                "name": "badges",
+                "choices": [
+                  {
+                    "name": "badges off",
+                    "idx": 1
+                  },
+                  {
+                    "name": "stripes off",
+                    "idx": 2
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "Nova Traffic, VCD Previews",
+            "groups": [
+              {
+                "name": "Nova Traffic",
+                "choices": [
+                  {
+                    "name": "don't add Nova Traffic support",
+                    "idx": 0
+                  }
+                ]
+              },
+              {
+                "name": "VCD Previews",
+                "choices": [
+                  {
+                    "name": "VCD Previews on",
+                    "idx": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "type": "fomod"
+      },
+      "author": "yellingintothevoid",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Cozy Dress",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26034,
+        "fileId": 152607,
+        "md5": "63d03934202fc8e24f32e6b9d15952fb",
+        "fileSize": 6540909,
+        "logicalFilename": "Rosa's Cozy Dress",
+        "updatePolicy": "exact",
+        "tag": "UHj8Y69I5Xr"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Classic Leather and Denim Jackets - Fem Masc V (ArchiveXL) - Nancy Jacket - Main File",
+      "version": "2.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16508,
+        "fileId": 135865,
+        "md5": "766ead4730cb08a09cb7e9d3708aac26",
+        "fileSize": 19833689,
+        "logicalFilename": "Nancy Jacket - Main File",
+        "updatePolicy": "exact",
+        "tag": "rRCxJFqNer5"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Mini Short Outfit - Archive XL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28032,
+        "fileId": 138655,
+        "md5": "43bdd8a9862ce6cfb33f07a43ab12f1b",
+        "fileSize": 25771017,
+        "logicalFilename": "Mini Short Outfit - Archive XL",
+        "updatePolicy": "exact",
+        "tag": "UGf3KUTtmjo"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "main_slr_interior_leather_black",
+      "version": "0.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19251,
+        "fileId": 99922,
+        "md5": "0e7d70c31b9039eacae7d84731e9b486",
+        "fileSize": 26409223,
+        "logicalFilename": "main_slr_interior_leather_black",
+        "updatePolicy": "exact",
+        "tag": "IJT2AKDQF_K"
+      },
+      "author": "cast",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Version 2",
+      "version": "0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19598,
+        "fileId": 100937,
+        "md5": "f60961619e85689afa9463495b7cf062",
+        "fileSize": 22672364,
+        "logicalFilename": "Version 2",
+        "updatePolicy": "exact",
+        "tag": "AWo1GWqX9tc"
+      },
+      "author": "cast",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_heart_choker_garters_FemV",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 11685,
+        "fileId": 127893,
+        "md5": "6560f8e03d2319abb782a900327e9e67",
+        "fileSize": 29477542,
+        "logicalFilename": "ND_heart_choker_garters_FemV",
+        "updatePolicy": "exact",
+        "tag": "IOkszF5YtHX"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "HystxMel - Secretary Dress XL",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19376,
+        "fileId": 140609,
+        "md5": "df6c56911b697499fb50b3f6877fb564",
+        "fileSize": 46285909,
+        "logicalFilename": "HystxMel - Secretary Dress XL",
+        "updatePolicy": "exact",
+        "tag": "c62ux6ivzzs"
+      },
+      "author": "Hyst - Meluminary",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Mini_dress_with_glasses_FemV",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15704,
+        "fileId": 109392,
+        "md5": "a6e7a056db58aa50e2a841243fc65814",
+        "fileSize": 23498314,
+        "logicalFilename": "ND_Mini_dress_with_glasses_FemV",
+        "updatePolicy": "exact",
+        "tag": "k7D_mlztQ-t"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "1966 Ford Mustang GT",
+      "version": "v1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16477,
+        "fileId": 87573,
+        "md5": "19c4a5998e6eaf9788516e431293bd9e",
+        "fileSize": 18171718,
+        "logicalFilename": "1966 Ford Mustang GT",
+        "updatePolicy": "exact",
+        "tag": "mIgUSH8mPRY"
+      },
+      "author": "ErenN77",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AVANTE - Afficianado Suit",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28530,
+        "fileId": 140881,
+        "md5": "b7686be1a047df75970cf2582510f514",
+        "fileSize": 103374663,
+        "logicalFilename": "AVANTE - Afficianado Suit",
+        "updatePolicy": "exact",
+        "tag": "J7GYipSxq82"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Groovy Y2K Outfit Pt2",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28260,
+        "fileId": 141410,
+        "md5": "bdcdabfb30ebc5b90da9f4e4a5e5995b",
+        "fileSize": 91291313,
+        "logicalFilename": "Groovy Y2K Outfit Pt2",
+        "updatePolicy": "exact",
+        "tag": "ua_zFzOG1Bs"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Office Top MF",
+      "version": "1.2.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25425,
+        "fileId": 142958,
+        "md5": "ebf8c27b214286f3014e9cf665319c44",
+        "fileSize": 42396556,
+        "logicalFilename": "Office Top MF",
+        "updatePolicy": "exact",
+        "tag": "yJLMY56E1di"
+      },
+      "author": "Raenef",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "(PM) SOLO Vol9",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28315,
+        "fileId": 140051,
+        "md5": "f67063af041dd5e2d37051d1d0e8e220",
+        "fileSize": 353130,
+        "logicalFilename": "(PM) SOLO Vol9",
+        "updatePolicy": "exact",
+        "tag": "GwsB-vcFcO6"
+      },
+      "author": "rysyu",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Corset Dress - Archive XL",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20912,
+        "fileId": 143737,
+        "md5": "654a6fc0c138ed71c4e80479b671615a",
+        "fileSize": 30907106,
+        "logicalFilename": "Corset Dress - Archive XL",
+        "updatePolicy": "exact",
+        "tag": "OyIBEQ9yfcJ"
+      },
+      "author": "Hyst - Atomiic",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Elegant Dress - Archive XL",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19723,
+        "fileId": 144345,
+        "md5": "785e20f3eac89b70b580f4bc5d9fd593",
+        "fileSize": 60142895,
+        "logicalFilename": "Elegant Dress - Archive XL",
+        "updatePolicy": "exact",
+        "tag": "lGiLDtFtchU"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Bracelets_Collection_FemV",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16722,
+        "fileId": 89898,
+        "md5": "91ebb3dd4c6de1fafad0c97b2818d7e8",
+        "fileSize": 15368335,
+        "logicalFilename": "ND_Bracelets_Collection_FemV",
+        "updatePolicy": "exact",
+        "tag": "f8T4hFRPSH-"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "HystAtelierStore",
+      "version": "1.35",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 6015,
+        "fileId": 155171,
+        "md5": "a8d31bbe4d9019f9378a1730854997b9",
+        "fileSize": 74811,
+        "logicalFilename": "HystAtelierStore",
+        "updatePolicy": "exact",
+        "tag": "U4GQcogNGsM"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Armor Pads",
+      "version": "4.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 12044,
+        "fileId": 149200,
+        "md5": "d708fddcfdc35e0eeea36078b220bc28",
+        "fileSize": 6661029,
+        "logicalFilename": "Zenitex Armor Pads",
+        "updatePolicy": "exact",
+        "tag": "f7sLM4z42b0"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex FM12 Respirator",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27908,
+        "fileId": 145324,
+        "md5": "a6f748eab56c52fdf17bdf900b291178",
+        "fileSize": 6357335,
+        "logicalFilename": "Zenitex FM12 Respirator",
+        "updatePolicy": "exact",
+        "tag": "Q-DTZrbMuas"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Avante Fashionwear - VA",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28532,
+        "fileId": 140812,
+        "md5": "3c904cefe897e46229d67549780802ce",
+        "fileSize": 12212,
+        "logicalFilename": "Avante Fashionwear - VA",
+        "updatePolicy": "exact",
+        "tag": "tF6Hn9GY7YE"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Raetelier 3",
+      "version": "2.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25054,
+        "fileId": 141133,
+        "md5": "fdaafd0c7cf63ade53a514068ae4530e",
+        "fileSize": 14357,
+        "logicalFilename": "Raetelier 3",
+        "updatePolicy": "exact",
+        "tag": "CIapbgQZwU9"
+      },
+      "author": "Raenef",
+      "details": {
+        "category": "Utilities",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Military Gas Mask",
+      "version": "2.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21307,
+        "fileId": 146067,
+        "md5": "eb9fc8078af27012289caeee40caa4f6",
+        "fileSize": 18066849,
+        "logicalFilename": "Zenitex M50 Gas Mask",
+        "updatePolicy": "exact",
+        "tag": "jm_bXsuejxh"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Not So Short Shorts",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28784,
+        "fileId": 141807,
+        "md5": "64ae7ff8ea7ee15d1d39a7ffe8e20284",
+        "fileSize": 9581837,
+        "logicalFilename": "Rosa's Not So Short Shorts",
+        "updatePolicy": "exact",
+        "tag": "p2B0IgUlALk"
+      },
+      "author": "sRosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Baddie Essentials",
+      "version": "2.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25722,
+        "fileId": 129490,
+        "md5": "463e4ffbc0217d07ff9969828471052e",
+        "fileSize": 148486,
+        "logicalFilename": "Baddie Essentials",
+        "updatePolicy": "exact",
+        "tag": "WK-3UVmE1Bx"
+      },
+      "author": "CyberWynter",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Clothes - Core",
+      "version": "4.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25291,
+        "fileId": 141806,
+        "md5": "fc8c42d42e0c4b8931468b8f0a80d4fe",
+        "fileSize": 18689086,
+        "logicalFilename": "Rosa's Clothes - Core",
+        "updatePolicy": "exact",
+        "tag": "mdIfbwciHhs"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "01 - Rosa's Shop 1",
+      "version": "4.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8919,
+        "fileId": 141805,
+        "md5": "bc6faefabed1d03f9c864f931d2a5cec",
+        "fileSize": 20704,
+        "logicalFilename": "01 - Rosa's Shop 1",
+        "updatePolicy": "exact",
+        "tag": "EuhFlY2nmnN"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_AirPods_Max_FemV",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28288,
+        "fileId": 142500,
+        "md5": "a879c5cc0704faf79a31667254b1d8bd",
+        "fileSize": 512802,
+        "logicalFilename": "ND_AirPods_Max_FemV",
+        "updatePolicy": "exact",
+        "tag": "pT5pJxffzz_"
+      },
+      "author": "NolaDreamer x PersianGirl",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "The Crow pose pack - PM",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28945,
+        "fileId": 142400,
+        "md5": "49df54ebaca4805c1ac51cb2ac9bef97",
+        "fileSize": 102323,
+        "logicalFilename": "The Crow pose pack - PM",
+        "updatePolicy": "exact",
+        "tag": "nccxo6kArTt"
+      },
+      "author": "juztNea",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Cub's Closet",
+      "version": "23",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15621,
+        "fileId": 144471,
+        "md5": "d266a50d3f141a2bada7adc2da206e62",
+        "fileSize": 14692,
+        "logicalFilename": "Cub's Closet",
+        "updatePolicy": "exact",
+        "tag": "aUNgnAVZ0YR"
+      },
+      "author": "Cubfan82",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Iconic Shops",
+      "version": "3.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7215,
+        "fileId": 158483,
+        "md5": "4908f1b8625bf8b9c31bd44e7869500e",
+        "fileSize": 1588740,
+        "logicalFilename": "IconicShop",
+        "updatePolicy": "exact",
+        "tag": "mt2Zsa6r3ok"
+      },
+      "author": "1DP",
+      "details": {
+        "category": "Miscellaneous",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Katana and Sword Pack - HF Murasama",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 25725,
+        "fileId": 127833,
+        "md5": "f1d4836d31c57d6aacc7971a55919743",
+        "fileSize": 8408764,
+        "logicalFilename": "HF Murasama",
+        "updatePolicy": "exact",
+        "tag": "GUElkZHgpHG"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Pistol Pack 5 - Samurai Eagle",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27320,
+        "fileId": 135610,
+        "md5": "a493cbc8119c2c033fb404dc0fa576c9",
+        "fileSize": 20105800,
+        "logicalFilename": "Samurai Eagle",
+        "updatePolicy": "exact",
+        "tag": "rgbkQrN1Gzq"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "north oak nails - winter 2026 collection",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26597,
+        "fileId": 154565,
+        "md5": "f09d623585e452f50f4c820e8045b4c6",
+        "fileSize": 4522647,
+        "logicalFilename": "north oak nails - winter 2026 collection",
+        "updatePolicy": "exact",
+        "tag": "AZbjKBurH7n"
+      },
+      "author": "lovewich",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ND_Accessories_store",
+      "version": "1.8",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14299,
+        "fileId": 162448,
+        "md5": "530da9f16b3e4ddd00d3d35ecdb63d2a",
+        "fileSize": 109824,
+        "logicalFilename": "ND_Accessories_store",
+        "updatePolicy": "exact",
+        "tag": "WHrHsvHbeNc"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Anti-Glare Face Paint",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28956,
+        "fileId": 143938,
+        "md5": "6af41a1ae0f39e05506b45be28f5528c",
+        "fileSize": 6815,
+        "logicalFilename": "Anti-Glare Face Paint",
+        "updatePolicy": "exact",
+        "tag": "3HkPdRuwdz9"
+      },
+      "author": "Monacoco",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hailey Task Force Outfit XL",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 30613,
+        "fileId": 149136,
+        "md5": "fbaffb78576a027d1a9196e251442ef5",
+        "fileSize": 48082676,
+        "logicalFilename": "Hailey Task Force Outfit XL",
+        "updatePolicy": "exact",
+        "tag": "firhP3jpmCd"
+      },
+      "author": "LxRHyst",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CORNMILF Renault 5 Turbo",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31006,
+        "fileId": 150319,
+        "md5": "4ae8ed9d33275884b251bc8f748567aa",
+        "fileSize": 24278227,
+        "logicalFilename": "CORNMILF Renault 5 Turbo",
+        "updatePolicy": "exact",
+        "tag": "8B8S3UbY-dY"
+      },
+      "author": "Cornmilf",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "VMF",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28744,
+        "fileId": 141482,
+        "md5": "02f303437511cf9e64202f2e6c34b45a",
+        "fileSize": 783,
+        "logicalFilename": "VMF",
+        "updatePolicy": "exact",
+        "tag": "s79_kga5mx7"
+      },
+      "author": "cornmilf",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CORNMILF Chevrolet Chevelle SS 454",
+      "version": "3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31033,
+        "fileId": 157103,
+        "md5": "0fc5fca32507b3d2ab90507c734ddbc9",
+        "fileSize": 18269788,
+        "logicalFilename": "CORNMILF Chevrolet Chevelle SS 454",
+        "updatePolicy": "exact",
+        "tag": "pd9gdZh0As4"
+      },
+      "author": "Cornmilf",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Nola Dreamer's Jewelry Collection - Cartier Inspired - Archive XL - ND Cartier Accessories FemV",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32021,
+        "fileId": 154234,
+        "md5": "38a6e48aa637c90dd4ac845bcf50527a",
+        "fileSize": 1386436,
+        "logicalFilename": "ND Cartier Accessories FemV",
+        "updatePolicy": "exact",
+        "tag": "hk6M7zJblGC"
+      },
+      "author": "NolaDreamer",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "HK UMP45",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32144,
+        "fileId": 154344,
+        "md5": "efd467806926dbb768bca21ce982e1ae",
+        "fileSize": 25254072,
+        "logicalFilename": "HK UMP45",
+        "updatePolicy": "exact",
+        "tag": "4SHof8ep84P"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Pump Action Shotgun Pack - MCS-880",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31621,
+        "fileId": 152304,
+        "md5": "6ec6453a178f03d250246818e1abee9c",
+        "fileSize": 11546155,
+        "logicalFilename": "MCS-880",
+        "updatePolicy": "exact",
+        "tag": "p33PTnEv4S3"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Pump Action Shotgun Pack - KS-23",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31621,
+        "fileId": 152308,
+        "md5": "4d132e964b95a0315a7ef8d8a1107afe",
+        "fileSize": 14883704,
+        "logicalFilename": "KS-23",
+        "updatePolicy": "exact",
+        "tag": "fEpTVw07axl"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Pump Shotgun - Attachments and Ammo",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31621,
+        "fileId": 152313,
+        "md5": "78367889a87060af59dc38aee1d0de5d",
+        "fileSize": 8667412,
+        "logicalFilename": "Pump Shotgun - Attachments and Ammo",
+        "updatePolicy": "exact",
+        "tag": "rOChdnnOqja"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Clothes - Main Store",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14210,
+        "fileId": 153060,
+        "md5": "6e38263134b66ddfd23f0888d938d334",
+        "fileSize": 17301,
+        "logicalFilename": "Clothes - Main Store",
+        "updatePolicy": "exact",
+        "tag": "AguNvUkePFc"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Accessories - Main Store",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14210,
+        "fileId": 153055,
+        "md5": "5ac3b28574c9a14f7419204dd2212d3b",
+        "fileSize": 13096,
+        "logicalFilename": "Accessories - Main Store",
+        "updatePolicy": "exact",
+        "tag": "iP-RMZoobB7"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "raem's Atelier Store - accessories - acc collection",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14210,
+        "fileId": 153054,
+        "md5": "e3cc7d9d95f1d954b40344f758eb6307",
+        "fileSize": 13422,
+        "logicalFilename": "accessories - acc collection",
+        "updatePolicy": "exact",
+        "tag": "Wb0GIFv4Wap"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "raem's Atelier Store - clothes - valentino outlet",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14210,
+        "fileId": 153057,
+        "md5": "6edd669d9b1c7975e2968bf697f0f9a6",
+        "fileSize": 19376,
+        "logicalFilename": "clothes - valentino outlet",
+        "updatePolicy": "exact",
+        "tag": "3UqdGiKGp3U"
+      },
+      "author": "raem",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Paul Night Suit",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 28050,
+        "fileId": 138751,
+        "md5": "26c9d84a901e2fd8e7d438f2cc75053f",
+        "fileSize": 83977283,
+        "logicalFilename": "Paul Night Suit",
+        "updatePolicy": "exact",
+        "tag": "tkxOtU6Ar15"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Busy Vampire Boutique for FemV",
+      "version": "3.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17075,
+        "fileId": 143097,
+        "md5": "789ec47a2b770867951d563c35338e99",
+        "fileSize": 18568,
+        "logicalFilename": "Busy Vampire Boutique for FemV",
+        "updatePolicy": "exact",
+        "tag": "p7zpQiC3037"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "LUT Switcher 3 (Realtime - Scanner - Weather - Menu) - LUTSwitcher 3.1.0",
+      "version": "3.3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16310,
+        "fileId": 157888,
+        "md5": "19f689688ce7775eed46a6ff37318e9f",
+        "fileSize": 3557941,
+        "logicalFilename": "LUTSwitcher",
+        "updatePolicy": "exact",
+        "tag": "wbpSUjncPta"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "LUT Switcher 3 (Realtime - Scanner - Weather - Menu) - LUT Pack - NCLM",
+      "version": "1.2.0nclm",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16310,
+        "fileId": 155074,
+        "md5": "a4eac804c15544c0f03253ca1fc8b2f5",
+        "fileSize": 1999496,
+        "logicalFilename": "LUT Pack - NCLM",
+        "updatePolicy": "exact",
+        "tag": "LPiWW0nwaOn"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "LUT Switcher 3 (Realtime - Scanner - Weather - Menu) - LUT Pack - Preem LUT",
+      "version": "1.3.0p",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16310,
+        "fileId": 154982,
+        "md5": "4b41a8a97283980db917b6f7ccdb387b",
+        "fileSize": 128953995,
+        "logicalFilename": "LUT Pack - Preem LUT",
+        "updatePolicy": "exact",
+        "tag": "bfSWlTe_c-6"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "LUT Switcher 3 (Realtime - Scanner - Weather - Menu) - LUT Pack - Nova LUT",
+      "version": "1.4.1n",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16310,
+        "fileId": 154976,
+        "md5": "441e5dd511ccd666f5a3ae1aee848907",
+        "fileSize": 62080035,
+        "logicalFilename": "LUT Pack - Nova LUT",
+        "updatePolicy": "exact",
+        "tag": "XRvie1taepV"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "LUT Switcher 3 (Realtime - Scanner - Weather - Menu) - LUT Pack - Edge LUT",
+      "version": "1.3.0e",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16310,
+        "fileId": 154978,
+        "md5": "484cd6e70be2268c85084014d7d5338a",
+        "fileSize": 8072433,
+        "logicalFilename": "LUT Pack - Edge LUT",
+        "updatePolicy": "exact",
+        "tag": "OiDvjVuWQpi"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Turtleneck Jacket",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31320,
+        "fileId": 154935,
+        "md5": "8522e7d696e91c053d2dffcb85aedebb",
+        "fileSize": 18304545,
+        "logicalFilename": "Zenitex Turtleneck Jacket",
+        "updatePolicy": "exact",
+        "tag": "RO-zqxwmcd5"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Combat Plate Carrier",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32081,
+        "fileId": 155150,
+        "md5": "36b03547ca9f4c20a2d6ad93defeeba5",
+        "fileSize": 75259560,
+        "logicalFilename": "Zenitex Combat Plate Carrier",
+        "updatePolicy": "exact",
+        "tag": "fu9bYwzYURn"
+      },
+      "author": "ScorpionTank",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SDH0 Vehicle Resources",
+      "version": "2.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20956,
+        "fileId": 164384,
+        "md5": "9aa67b5f126f59f424da3388442f3648",
+        "fileSize": 5071286,
+        "logicalFilename": "SDH0 Vehicle Resources",
+        "updatePolicy": "exact",
+        "tag": "QmLiaW4L6Bf"
+      },
+      "author": "SDH0",
+      "details": {
+        "category": "Modders Resources",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Night City Optics",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32776,
+        "fileId": 159396,
+        "md5": "c4569b3b371b0ba3bff5bcd66c169ccd",
+        "fileSize": 136861891,
+        "logicalFilename": "Night City Optics",
+        "updatePolicy": "exact",
+        "tag": "myd8Xz6bytq"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Pistol Pack 6 - USM AI",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32496,
+        "fileId": 155675,
+        "md5": "9a03ad61320793b94f19490c9f49a4cf",
+        "fileSize": 19625882,
+        "logicalFilename": "USM AI",
+        "updatePolicy": "exact",
+        "tag": "_XRywuP9ue0"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AlliekatIconEyeshadowAXL",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 33055,
+        "fileId": 157405,
+        "md5": "b09e46c2ec0e19d4c350481136f2c0a3",
+        "fileSize": 7799228,
+        "logicalFilename": "AlliekatIconEyeshadowAXL",
+        "updatePolicy": "exact",
+        "tag": "HGl2c236UF5"
+      },
+      "author": "XxAlliekat123xX",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AlliekatLipsAXLPink",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32479,
+        "fileId": 155581,
+        "md5": "bfebb1c633fcbe0356be45d9947e6deb",
+        "fileSize": 6733248,
+        "logicalFilename": "AlliekatLipsAXLPink",
+        "updatePolicy": "exact",
+        "tag": "hrIEHtGwEaK"
+      },
+      "author": "XxAlliekat123xX",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "PMU - Zwei x Rev - Fashion Set",
+      "version": "2.31",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7156,
+        "fileId": 123833,
+        "md5": "ce9d8bc6be2960f4a8fc4f624e433574",
+        "fileSize": 2463,
+        "logicalFilename": "PMU - Zwei x Rev - Fashion Set",
+        "updatePolicy": "exact",
+        "tag": "OXY5JE2Dx_a"
+      },
+      "author": "Zwei - Rev",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zwei Custom PMU Pose Packs Core",
+      "version": "2.31",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7165,
+        "fileId": 123736,
+        "md5": "c1a6bb0953cac755d899552cb9b1b641",
+        "fileSize": 4610862,
+        "logicalFilename": "Zwei Custom PMU Pose Packs Core",
+        "updatePolicy": "exact",
+        "tag": "aXv7YuTVX3Q"
+      },
+      "author": "Zwei",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Immersive Third Person   Best Of Both Worlds",
+      "version": "1.3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32203,
+        "fileId": 161480,
+        "md5": "94c5bca15a2b3a9daac20b44ebfcd815",
+        "fileSize": 239312141,
+        "logicalFilename": "Immersive Third Person   Best Of Both Worlds",
+        "updatePolicy": "exact",
+        "tag": "JrNNmfKIPss"
+      },
+      "author": "CybrDrake",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CORNMILF Lada Priora SE",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 33641,
+        "fileId": 159767,
+        "md5": "7efc9d4346ef9112498c455b846a833a",
+        "fileSize": 30073758,
+        "logicalFilename": "CORNMILF Lada Priora SE",
+        "updatePolicy": "exact",
+        "tag": "p1C3r4WhMz1"
+      },
+      "author": "Cornmilf",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Arasaka Kurogane Pack",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34053,
+        "fileId": 162032,
+        "md5": "fc64b8e6490fc6b7a499b7dbbfb70d7d",
+        "fileSize": 125960061,
+        "logicalFilename": "Arasaka Kurogane Pack",
+        "updatePolicy": "exact",
+        "tag": "wZW2AAd71Jh"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Okrasha Rolls Royce Cullinan Mansory",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34121,
+        "fileId": 161703,
+        "md5": "87fd7aa61ae0d31ac1a72249e8cbd3d9",
+        "fileSize": 53104590,
+        "logicalFilename": "Okrasha Rolls Royce Cullinan Mansory",
+        "updatePolicy": "exact",
+        "tag": "IrIqfjuGOcT"
+      },
+      "author": "Okrasha",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Cyber Hackclaw Outfit",
+      "version": "2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 33916,
+        "fileId": 161815,
+        "md5": "3900e0019ea7f7e001c19964f9081420",
+        "fileSize": 52539626,
+        "logicalFilename": "Cyber Hackclaw Outfit",
+        "updatePolicy": "exact",
+        "tag": "C0SLXtxUqWF"
+      },
+      "author": "Veegee",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hailey UltSuit2026 Archive XL",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34060,
+        "fileId": 161444,
+        "md5": "b1e7dd5250a9de478d0104eb012fc7f2",
+        "fileSize": 36125677,
+        "logicalFilename": "Hailey UltSuit2026 Archive XL",
+        "updatePolicy": "exact",
+        "tag": "YXKGnfTw7UE"
+      },
+      "author": "EzioMaverick",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Toyota Supra Mk3",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27955,
+        "fileId": 141485,
+        "md5": "a1e437f38286fa4694c85aa56a77774e",
+        "fileSize": 140884154,
+        "logicalFilename": "Toyota Supra Mk3",
+        "updatePolicy": "exact",
+        "tag": "2MCqBv4VZaAz"
+      },
+      "author": "cornmilf",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "BMW M1 - M1_MainFile",
+      "version": "0.9.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14567,
+        "fileId": 84115,
+        "md5": "7629e65ed7b24801ce097f1a98bec94b",
+        "fileSize": 13020146,
+        "logicalFilename": "M1_MainFile",
+        "updatePolicy": "exact",
+        "tag": "_m43ptPwvlE9"
+      },
+      "author": "SDH0",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Pontiac Trans AM GTA",
+      "version": "1.0.5-Minor",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16205,
+        "fileId": 141518,
+        "md5": "ed360c7d7f7f3c9e7165d80759eb67d0",
+        "fileSize": 57551649,
+        "logicalFilename": "Pontiac Trans AM GTA",
+        "updatePolicy": "exact",
+        "tag": "BW5U89Yn03CD"
+      },
+      "author": "Cornmilf",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Corpo SUV 2.0 (Ragnar With NCPD Styled Running Text) - Corpo SUV 2.0",
+      "version": "2.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17213,
+        "fileId": 89943,
+        "md5": "af21e763d6283c573c6cd839699f2af8",
+        "fileSize": 497505,
+        "logicalFilename": "Corpo SUV 2.0",
+        "updatePolicy": "exact",
+        "tag": "Ke2CWacrJw1Z"
+      },
+      "author": "BONeill",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SDH0 Car Dealer Previews",
+      "version": "0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17436,
+        "fileId": 90602,
+        "md5": "92c979b1818f1a09fcd7b6ca87eabd13",
+        "fileSize": 39603849,
+        "logicalFilename": "SDH0 Car Dealer Previews",
+        "updatePolicy": "exact",
+        "tag": "dEwmiDK00KuW"
+      },
+      "author": "Buzzler",
+      "details": {
+        "category": "Vehicles",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Clean car windows",
+      "version": "1.00",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 6302,
+        "fileId": 32765,
+        "md5": "08c964195fc742dde648dceed9bfc9b2",
+        "fileSize": 1591,
+        "logicalFilename": "Clean car windows",
+        "updatePolicy": "exact",
+        "tag": "jHSYb8_8Hgy4"
+      },
+      "author": "OrangeGuy",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Preem Water 2.0 - Pure",
+      "version": "2.1.1a",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8275,
+        "fileId": 49096,
+        "md5": "2af4d0c14b211b10540f0afa526fd452",
+        "fileSize": 4051952,
+        "logicalFilename": "Preem Water 2.0 - Pure",
+        "updatePolicy": "exact",
+        "tag": "LVz4KElf_Hex"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Praedy's 77 night sky - Moon 2K",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19448,
+        "fileId": 99985,
+        "md5": "1d5549904f7a13f18df897deba30a185",
+        "fileSize": 3969989,
+        "logicalFilename": "Praedy's 77 night sky - Moon 2K",
+        "updatePolicy": "exact",
+        "tag": "mcpFLa-hLqsJ"
+      },
+      "author": "Praedyth",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Window Utils (GUI Library - Animation - Grid Alignment) - Window Utils",
+      "version": "1.1.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26589,
+        "fileId": 163293,
+        "md5": "41a7d7fd60326bff5cc2cc04d542ac81",
+        "fileSize": 176427,
+        "logicalFilename": "Window Utils",
+        "updatePolicy": "exact",
+        "tag": "4Lzdgzm3UWLu"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Utilities",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Weather Switcher",
+      "version": "1.7.6",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18027,
+        "fileId": 144629,
+        "md5": "13652cfe2b9283576813576b43a24b06",
+        "fileSize": 51610,
+        "logicalFilename": "Weather Switcher",
+        "updatePolicy": "exact",
+        "tag": "m9ZPsYaP-zrF"
+      },
+      "author": "CyanideX",
+      "details": {
+        "category": "Utilities",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Benelli-M3-Gridbreaker",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34485,
+        "fileId": 163255,
+        "md5": "7f7ea5093a9286e83ef6a59c61f0d3ea",
+        "fileSize": 17126256,
+        "logicalFilename": "Benelli-M3-Gridbreaker",
+        "updatePolicy": "exact",
+        "tag": "qgsv30WNBsi0"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Arasaka Shinigami",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34378,
+        "fileId": 162819,
+        "md5": "ea1812def0fbafe6f74dca99a4e02f96",
+        "fileSize": 46548689,
+        "logicalFilename": "Arasaka Shinigami",
+        "updatePolicy": "exact",
+        "tag": "u2sXyxd6E_Qe"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AKM-Jackal-Killer",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34411,
+        "fileId": 163033,
+        "md5": "098e7172adb48e790a32e2f89ba7b93b",
+        "fileSize": 58920367,
+        "logicalFilename": "AKM-Jackal-Killer",
+        "updatePolicy": "exact",
+        "tag": "1-Gw3n1Wl_E8"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "VSS-Vintorez-Black-Wolf",
+      "version": "1.0.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34518,
+        "fileId": 163817,
+        "md5": "fe69b54c63cf0123a14d2b839997be16",
+        "fileSize": 53575611,
+        "logicalFilename": "VSS-Vintorez-Black-Wolf",
+        "updatePolicy": "exact",
+        "tag": "fVT9uWdGO6pU"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "SOCOM-Mk23",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34372,
+        "fileId": 163833,
+        "md5": "728b0992a7bfcff6bac27645cb3d56b6",
+        "fileSize": 23431416,
+        "logicalFilename": "SOCOM-Mk23",
+        "updatePolicy": "exact",
+        "tag": "OEDv1OFtUm6G"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "KRISS-Vector",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34358,
+        "fileId": 162808,
+        "md5": "9838a47b1a6f16ecd8d468b397ab70b0",
+        "fileSize": 38270870,
+        "logicalFilename": "KRISS-Vector",
+        "updatePolicy": "exact",
+        "tag": "Othwm98CuplN"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "AR15-Berserker",
+      "version": "1.0.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34327,
+        "fileId": 162826,
+        "md5": "533bf2ca35f3d0e5994155c78d04bd33",
+        "fileSize": 69680393,
+        "logicalFilename": "AR15-Berserker",
+        "updatePolicy": "exact",
+        "tag": "90ZD0KC2hu0g"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Arasaka 45",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34378,
+        "fileId": 162820,
+        "md5": "db95944c35e848936b4c5a8898c8963b",
+        "fileSize": 39391526,
+        "logicalFilename": "Arasaka 45",
+        "updatePolicy": "exact",
+        "tag": "iSvBHhcycbON"
+      },
+      "author": "sabbath7991",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "FN-SCAR-H",
+      "version": "1.0.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34686,
+        "fileId": 164149,
+        "md5": "dd3b51ce52e7cb4f064b17bc3d1985c5",
+        "fileSize": 33337196,
+        "logicalFilename": "FN-SCAR-H",
+        "updatePolicy": "exact",
+        "tag": "spFWRw_cjdIj"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Mk14-Necrovenator",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34729,
+        "fileId": 164340,
+        "md5": "4429eb860a4decf2cea22b194eeafbab",
+        "fileSize": 36732865,
+        "logicalFilename": "Mk14-Necrovenator",
+        "updatePolicy": "exact",
+        "tag": "TALPDl0x1q6P"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "DeadsAorta-Atelier-Store",
+      "version": "1.12.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34150,
+        "fileId": 164341,
+        "md5": "5b5aca2ef37f3d28ec98a3c3b477a0f0",
+        "fileSize": 249491,
+        "logicalFilename": "DeadsAorta-Atelier-Store",
+        "updatePolicy": "exact",
+        "tag": "6EU35nSipBwV"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Atelier Shop",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Not So Good Draw Distance",
+      "version": "4.5",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 11240,
+        "fileId": 152837,
+        "md5": "b3cd8b25ebd9529e193bb9f28848e079",
+        "fileSize": 129995,
+        "logicalFilename": "Not So Good Draw Distance",
+        "updatePolicy": "exact",
+        "tag": "T36VefyWUXqo"
+      },
+      "author": "sosuinepsixuyu",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CheyTac M200 Intervention Sniper Rifle - CheyTac-M200",
+      "version": "1.0.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 34309,
+        "fileId": 163043,
+        "md5": "5c29782d9c076ab753f8ea2cf4d18941",
+        "fileSize": 43473946,
+        "logicalFilename": "CheyTac-M200",
+        "updatePolicy": "exact",
+        "tag": "iYK2v2Hb5eFw"
+      },
+      "author": "argisht",
+      "details": {
+        "category": "Weapons",
+        "type": ""
+      },
+      "phase": 0
+    }
+  ],
+  "modRules": [],
+  "loadOrder": [],
+  "tools": [],
+  "collectionConfig": {
+    "recommendNewProfile": false,
+    "referenceTagScheme": "v1"
+  }
+}
