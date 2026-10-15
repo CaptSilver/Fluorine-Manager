@@ -104,6 +104,8 @@
 #include <libbsarch/bs_archive.h>
 
 #include "organizerproxy.h"
+#include "collections/collectionlink.h"
+#include "collections/collectionsession.h"
 
 using namespace MOShared;
 using namespace MOBase;
@@ -481,6 +483,8 @@ OrganizerCore::OrganizerCore(Settings& settings)
           [this](auto const&... args) {
             m_PluginSettingChanged(args...);
           });
+
+  m_CollectionSession = std::make_unique<CollectionSession>(*this);
 }
 
 OrganizerCore::~OrganizerCore()
@@ -598,6 +602,7 @@ void OrganizerCore::setUserInterface(IUserInterface* ui)
   m_Updater.setUserInterface(w);
   m_UILocker.setUserInterface(w);
   m_DownloadManager.setParentWidget(w);
+  m_CollectionSession->setUserInterface(ui);
 
   checkForUpdates();
 }
@@ -810,7 +815,11 @@ void OrganizerCore::downloadRequestedNXM(const QString& url)
 {
   log::debug("download requested: {}", url);
   if (nexusApi()) {
+    // Also holds collection links until the stored login has been checked;
+    // loginSuccessful() replays them through here.
     m_PendingDownloads.append(url);
+  } else if (const auto collection = CollectionLink::parse(url)) {
+    m_CollectionSession->request(*collection);
   } else {
     m_DownloadManager.addNXMDownload(url);
   }
@@ -819,6 +828,9 @@ void OrganizerCore::downloadRequestedNXM(const QString& url)
 void OrganizerCore::userInterfaceInitialized()
 {
   m_UserInterfaceInitialized(m_UserInterface->mainWindow());
+
+  // A collection link that started Fluorine waits for this point.
+  m_CollectionSession->userInterfaceInitialized();
 }
 
 void OrganizerCore::profileCreated(MOBase::IProfile* profile)
