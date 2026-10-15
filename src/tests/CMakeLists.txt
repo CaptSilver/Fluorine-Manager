@@ -1444,11 +1444,19 @@ add_executable(test_nexus_collections_qt EXCLUDE_FROM_ALL
     collections/test_main_qt.cpp
     collections/test_filehash.cpp
     collections/test_collectionmanifestfetcher.cpp
+    collections/test_collectiondialogs.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/filehash.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/filehashconcurrent.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmetatag.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionstate.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplan.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplacementmoves.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionreport.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifestfetcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionreviewdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionresultsdialog.cpp
 )
 set_target_properties(test_nexus_collections_qt PROPERTIES
     AUTOMOC ON CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
