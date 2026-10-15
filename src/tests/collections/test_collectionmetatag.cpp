@@ -6,6 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <QStringList>
+#include <QVariant>
+
 #include <map>
 
 using CollectionMetaTag::OwnersKey;
@@ -216,4 +219,13 @@ TEST(MetaTag, StopgapMetaHasNoOwnersAndTheInstalledPair)
   EXPECT_TRUE(CollectionMetaTag::readOwners(missing).empty());
   EXPECT_TRUE(CollectionMetaTag::readInstalledFiles(missing).empty());
   EXPECT_FALSE(QFile::exists(missing));
+}
+
+TEST(MetaTag, StoredStringJoinsTheListQSettingsReturnsForUnquotedCommas)
+{
+  EXPECT_EQ(CollectionMetaTag::storedString(QVariant(QStringList{"[1", "2]"})),
+            QStringLiteral("[1,2]"));
+  EXPECT_EQ(CollectionMetaTag::storedString(QVariant(QStringLiteral("[]"))),
+            QStringLiteral("[]"));
+  EXPECT_TRUE(CollectionMetaTag::storedString(QVariant()).isEmpty());
 }

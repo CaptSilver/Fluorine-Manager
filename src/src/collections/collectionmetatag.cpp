@@ -16,15 +16,6 @@ QString ownersPath()
       .arg(CollectionMetaTag::PluginName, CollectionMetaTag::OwnersKey);
 }
 
-// QSettings returns an unquoted value containing commas as a list.
-QString storedString(const QVariant& value)
-{
-  if (value.metaType().id() == QMetaType::QStringList) {
-    return value.toStringList().join(QLatin1Char(','));
-  }
-  return value.toString();
-}
-
 std::set<std::pair<int, int>> installedFilesOf(QSettings& settings)
 {
   std::set<std::pair<int, int>> files;
@@ -41,6 +32,14 @@ std::set<std::pair<int, int>> installedFilesOf(QSettings& settings)
 
 namespace CollectionMetaTag
 {
+QString storedString(const QVariant& value)
+{
+  if (value.metaType().id() == QMetaType::QStringList) {
+    return value.toStringList().join(QLatin1Char(','));
+  }
+  return value.toString();
+}
+
 QString encodeOwners(const std::vector<CollectionOwner>& owners)
 {
   QJsonArray array;

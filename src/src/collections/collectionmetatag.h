@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QVariant>
 
 #include <set>
 #include <utility>
@@ -27,6 +28,10 @@ namespace CollectionMetaTag
 {
 inline const QString PluginName = QStringLiteral("NexusCollections");
 inline const QString OwnersKey  = QStringLiteral("owners");
+
+// QSettings returns a QStringList for an unquoted value containing commas; this
+// joins it back so a hand-edited meta.ini value still decodes.
+QString storedString(const QVariant& value);
 
 QString encodeOwners(const std::vector<CollectionOwner>& owners);
 

@@ -26,16 +26,6 @@ using namespace MOBase;
 
 namespace
 {
-// The tag is one JSON string. QSettings only hands back a QStringList for an unquoted
-// value with commas; join it back so a hand-edited meta.ini still decodes.
-QString ownersText(const QVariant& value)
-{
-  if (value.metaType().id() == QMetaType::QStringList) {
-    return value.toStringList().join(QLatin1Char(','));
-  }
-  return value.toString();
-}
-
 QString matchProfileName(const QStringList& profiles, const QString& wanted)
 {
   for (const QString& name : profiles) {
@@ -61,8 +51,9 @@ void captureMods(OrganizerCore& core, CollectionState& state)
 
     InstalledMod mod;
     mod.folder = info->name();
-    mod.owners = CollectionMetaTag::decodeOwners(ownersText(info->pluginSetting(
-        CollectionMetaTag::PluginName, CollectionMetaTag::OwnersKey, QVariant())));
+    mod.owners = CollectionMetaTag::decodeOwners(
+        CollectionMetaTag::storedString(info->pluginSetting(
+            CollectionMetaTag::PluginName, CollectionMetaTag::OwnersKey, QVariant())));
     mod.installedFiles = info->installedFiles();
     state.mods.push_back(std::move(mod));
   }
@@ -174,8 +165,9 @@ bool addCollectionOwner(ModInfoRegular& mod, const CollectionOwner& owner, int m
                         int fileId)
 {
   const auto owners = CollectionMetaTag::withOwner(
-      CollectionMetaTag::decodeOwners(ownersText(mod.pluginSetting(
-          CollectionMetaTag::PluginName, CollectionMetaTag::OwnersKey, QVariant()))),
+      CollectionMetaTag::decodeOwners(
+          CollectionMetaTag::storedString(mod.pluginSetting(
+              CollectionMetaTag::PluginName, CollectionMetaTag::OwnersKey, QVariant()))),
       owner);
 
   // addInstalledFile only marks the mod dirty; setPluginSetting saves, so the order
