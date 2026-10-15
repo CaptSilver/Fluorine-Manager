@@ -1411,5 +1411,22 @@ target_sources(test_nexus_collections PRIVATE
     ${CMAKE_SOURCE_DIR}/src/src/collections/fomodreplay.cpp
     collections/test_fomodreplay.cpp)
 
+# FomodTreeTransform is also tested against a real ArchiveFileTree, so this target
+# compiles archivefiletree.cpp and links the archive library. archivefiletree.cpp
+# includes "log.h" without a directory; the -idirafter below is what resolves it to
+# uibase's log.h, so leave that include alone.
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/archivefiletree.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/fomodtreetransform.cpp
+    collections/test_fomodtreetransform.cpp)
+target_compile_options(test_nexus_collections PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_compile_definitions(test_nexus_collections PRIVATE
+    FLUORINE_COLLECTION_FOMOD_ZIP="${CMAKE_SOURCE_DIR}/src/tests/fixtures/collections/fomod_payload.zip")
+target_link_libraries(test_nexus_collections PRIVATE mo2::archive)
+add_dependencies(test_nexus_collections 7z)
+set_tests_properties(test_nexus_collections PROPERTIES
+    ENVIRONMENT "MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
+
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)
