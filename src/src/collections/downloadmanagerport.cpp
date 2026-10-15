@@ -294,6 +294,26 @@ void DownloadManagerPort::scanForStarted()
     }
   }
 
+  // DownloadManager pauses a transfer that stalls and, once its automatic retries are
+  // spent, leaves the row paused with only a toast. No completion or failure callback
+  // follows, and the progress dialog keeps the user out of the Downloads tab, so the run
+  // would wait for good. Pause and resume during the automatic retries happen within one
+  // call, so a row seen paused here is the final one. Errored and canceled rows already
+  // report through onDownloadFailed.
+  const auto stillUnfinished = m_unfinished;
+  for (const Pair& pair : stillUnfinished) {
+    if (find(pair.first, pair.second).state != PortRowState::Paused) {
+      continue;
+    }
+    settlePair(pair.first, pair.second);
+    markStarted(pair.first, pair.second);
+    if (m_listener != nullptr) {
+      m_listener->downloadFailed(
+          pair.first, pair.second,
+          tr("the download stalled repeatedly and was paused; retry"));
+    }
+  }
+
   if (m_unstarted.empty() && m_unfinished.empty()) {
     m_poll.stop();
   }
