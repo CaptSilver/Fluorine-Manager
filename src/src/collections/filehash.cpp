@@ -4,8 +4,7 @@
 #include <QCryptographicHash>
 #include <QFile>
 
-QString md5OfFile(const QString& path)
-{
+QString md5OfFile(const QString &path) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     return QString();

@@ -10,30 +10,27 @@
 #include <utility>
 #include <vector>
 
-// Readable QString output in gtest failure messages. Internal linkage so other test
-// files can define their own without a duplicate symbol.
-static void PrintTo(const QString& text, std::ostream* os)
-{
+// Readable QString output in gtest failure messages. Internal linkage so other
+// test files can define their own without a duplicate symbol.
+static void PrintTo(const QString &text, std::ostream *os) {
   *os << '"' << qPrintable(text) << '"';
 }
 
-namespace
-{
+namespace {
 using Ids = std::pair<int, int>;
 
-class FakePort : public DownloadPort
-{
+class FakePort : public DownloadPort {
 public:
-  void setListener(DownloadPortListener* newListener) override { listener = newListener; }
+  void setListener(DownloadPortListener *newListener) override {
+    listener = newListener;
+  }
 
-  PortRow find(int modId, int fileId) const override
-  {
+  PortRow find(int modId, int fileId) const override {
     const auto it = rows.find(Ids(modId, fileId));
     return it == rows.end() ? PortRow{} : it->second;
   }
 
-  void submit(const QString& domain, int modId, int fileId) override
-  {
+  void submit(const QString &domain, int modId, int fileId) override {
     submitted.push_back(Ids(modId, fileId));
     domains.push_back(domain);
     if (appearsAfterSubmit) {
@@ -41,8 +38,7 @@ public:
     }
   }
 
-  bool appeared(int modId, int fileId) const override
-  {
+  bool appeared(int modId, int fileId) const override {
     const Ids ids(modId, fileId);
     const auto row = rows.find(ids);
     return pending.count(ids) > 0 ||
@@ -51,15 +47,14 @@ public:
 
   void resume(int index) override { resumed.push_back(index); }
 
-  void remove(int index) override
-  {
+  void remove(int index) override {
     removed.push_back(index);
     for (auto it = rows.begin(); it != rows.end();) {
       it = it->second.index == index ? rows.erase(it) : std::next(it);
     }
   }
 
-  DownloadPortListener* listener = nullptr;
+  DownloadPortListener *listener = nullptr;
   std::map<Ids, PortRow> rows;
   std::set<Ids> pending;
   bool appearsAfterSubmit = true;
@@ -69,90 +64,82 @@ public:
   std::vector<int> removed;
 };
 
-class FakeBudget : public NexusBudgetPort
-{
+class FakeBudget : public NexusBudgetPort {
 public:
   int remainingRequests() const override { return remaining; }
   int remaining = 1000;
 };
 
 // Queues the callback so a test decides when a digest arrives.
-class FakeHasher : public FileHasher
-{
+class FakeHasher : public FileHasher {
 public:
-  void md5(const QString& path, std::function<void(const QString&)> done) override
-  {
+  void md5(const QString &path,
+           std::function<void(const QString &)> done) override {
     queue.emplace_back(path, std::move(done));
   }
-  std::vector<std::pair<QString, std::function<void(const QString&)>>> queue;
+  std::vector<std::pair<QString, std::function<void(const QString &)>>> queue;
 };
 
-struct Event
-{
+struct Event {
   int modId;
   int fileId;
   QString text;
 };
 
-PortRow row(PortRowState state, int index = 1, const QString& path = QString())
-{
+PortRow row(PortRowState state, int index = 1,
+            const QString &path = QString()) {
   PortRow result;
   result.state = state;
   result.index = index;
-  result.path  = path;
+  result.path = path;
   return result;
 }
 
 // Request i is mod 100 + i, file 1000 + i.
-Ids ids(int i)
-{
-  return Ids(100 + i, 1000 + i);
-}
+Ids ids(int i) { return Ids(100 + i, 1000 + i); }
 
-std::vector<DownloadRequest> requests(int count)
-{
+std::vector<DownloadRequest> requests(int count) {
   std::vector<DownloadRequest> result;
   for (int i = 0; i < count; ++i) {
     DownloadRequest request;
-    request.modId  = ids(i).first;
+    request.modId = ids(i).first;
     request.fileId = ids(i).second;
     result.push_back(request);
   }
   return result;
 }
 
-struct Fixture
-{
+struct Fixture {
   FakePort port;
   FakeBudget budget;
   FakeHasher hasher;
   qint64 now = 0;
   std::vector<Event> ready;
   std::vector<Event> failed;
-  CollectionDownloader downloader;  // last: it uses everything above
+  CollectionDownloader downloader; // last: it uses everything above
 
   Fixture()
       : downloader(
             port, budget, hasher, std::make_shared<std::atomic_bool>(false),
             [this] { return now; },
-            [this](int modId, int fileId, const QString& path) {
+            [this](int modId, int fileId, const QString &path) {
               ready.push_back({modId, fileId, path});
             },
-            [this](int modId, int fileId, const QString& reason) {
+            [this](int modId, int fileId, const QString &reason) {
               failed.push_back({modId, fileId, reason});
-            })
-  {}
+            }) {}
 };
 
-const QString BudgetReason = QStringLiteral(
-    "Nexus request budget used up, retry after the daily reset");
-const QString RefusedReason = QStringLiteral("download manager refused the request");
-}  // namespace
+const QString BudgetReason =
+    QStringLiteral("Nexus request budget used up, retry after the daily reset");
+const QString RefusedReason =
+    QStringLiteral("download manager refused the request");
+} // namespace
 
-// --- window ----------------------------------------------------------------------------
+// --- window
+// ----------------------------------------------------------------------------
 
-TEST(Downloader, SubmitsAtMostThreeBeforeTransferStarts)
-{
+TEST(Downloader, SubmitsAtMostThreeBeforeTransferStarts) {
   Fixture f;
   f.downloader.start("cyberpunk2077", requests(5));
   EXPECT_EQ(f.port.submitted, (std::vector<Ids>{ids(0), ids(1), ids(2)}));
@@ -165,8 +152,7 @@ TEST(Downloader, SubmitsAtMostThreeBeforeTransferStarts)
   EXPECT_FALSE(f.downloader.idle());
 }
 
-TEST(Downloader, TransferStartFreesWindowSlot)
-{
+TEST(Downloader, TransferStartFreesWindowSlot) {
   Fixture f;
   f.downloader.start("cyberpunk2077", requests(5));
   ASSERT_EQ(f.port.submitted.size(), 3u);
@@ -188,10 +174,10 @@ TEST(Downloader, TransferStartFreesWindowSlot)
   EXPECT_EQ(f.port.submitted.back(), ids(4));
 }
 
-// --- budget ------------------------------------------------------------------------------
+// --- budget
+// ------------------------------------------------------------------------------
 
-TEST(Downloader, NoSubmissionAtBudgetBoundary)
-{
+TEST(Downloader, NoSubmissionAtBudgetBoundary) {
   Fixture f;
   f.budget.remaining = 9;
   f.downloader.start("cyberpunk2077", requests(5));
@@ -204,8 +190,8 @@ TEST(Downloader, NoSubmissionAtBudgetBoundary)
   f.downloader.tick();
   EXPECT_EQ(f.port.submitted.size(), 3u);
 
-  // Between "can still afford one" (more than 3) and "can afford a full window": wait,
-  // do not fail.
+  // Between "can still afford one" (more than 3) and "can afford a full
+  // window": wait, do not fail.
   f.budget.remaining = 4;
   f.downloader.transferStarted(ids(0).first, ids(0).second);
   f.downloader.tick();
@@ -213,8 +199,7 @@ TEST(Downloader, NoSubmissionAtBudgetBoundary)
   EXPECT_TRUE(f.failed.empty());
 }
 
-TEST(Downloader, BudgetExhaustionFailsWaitingModsOnly)
-{
+TEST(Downloader, BudgetExhaustionFailsWaitingModsOnly) {
   Fixture f;
   f.budget.remaining = 3;
   f.port.rows[ids(0)] = row(PortRowState::Ready, 10, "/dl/a.7z");
@@ -241,8 +226,7 @@ TEST(Downloader, BudgetExhaustionFailsWaitingModsOnly)
   EXPECT_TRUE(f.downloader.idle());
 }
 
-TEST(Downloader, ReadyFilesOnDiskProceedWithoutBudget)
-{
+TEST(Downloader, ReadyFilesOnDiskProceedWithoutBudget) {
   Fixture f;
   f.budget.remaining = 0;
   f.port.rows[ids(0)] = row(PortRowState::Ready, 10, "/dl/a.7z");
@@ -259,8 +243,7 @@ TEST(Downloader, ReadyFilesOnDiskProceedWithoutBudget)
   EXPECT_TRUE(f.downloader.idle());
 }
 
-TEST(Downloader, SubmitWithoutRowFailsAtOnce)
-{
+TEST(Downloader, SubmitWithoutRowFailsAtOnce) {
   Fixture f;
   f.port.appearsAfterSubmit = false;
   f.downloader.start("cyberpunk2077", requests(2));
@@ -273,16 +256,16 @@ TEST(Downloader, SubmitWithoutRowFailsAtOnce)
   EXPECT_TRUE(f.downloader.idle());
 }
 
-// --- rows that already exist -------------------------------------------------------------
+// --- rows that already exist
+// -------------------------------------------------------------
 
-TEST(Downloader, ActiveExistingRowIsAwaitedNotResubmitted)
-{
+TEST(Downloader, ActiveExistingRowIsAwaitedNotResubmitted) {
   Fixture f;
   f.port.rows[ids(0)] = row(PortRowState::Active, 10);
   f.downloader.start("cyberpunk2077", requests(4));
 
-  // Request 0 was not submitted by this run, so it takes no window slot: the other
-  // three still go out together.
+  // Request 0 was not submitted by this run, so it takes no window slot: the
+  // other three still go out together.
   EXPECT_EQ(f.port.submitted, (std::vector<Ids>{ids(1), ids(2), ids(3)}));
   EXPECT_TRUE(f.ready.empty());
 
@@ -291,17 +274,15 @@ TEST(Downloader, ActiveExistingRowIsAwaitedNotResubmitted)
   EXPECT_EQ(f.ready[0].modId, ids(0).first);
 }
 
-TEST(Downloader, PendingRequestFromElsewhereIsAwaitedNotResubmitted)
-{
+TEST(Downloader, PendingRequestFromElsewhereIsAwaitedNotResubmitted) {
   Fixture f;
-  f.port.pending.insert(ids(0));  // queued by the user, no row yet
+  f.port.pending.insert(ids(0)); // queued by the user, no row yet
   f.downloader.start("cyberpunk2077", requests(1));
   EXPECT_TRUE(f.port.submitted.empty());
   EXPECT_FALSE(f.downloader.idle());
 }
 
-TEST(Downloader, PausedExistingRowIsResumed)
-{
+TEST(Downloader, PausedExistingRowIsResumed) {
   Fixture f;
   f.port.rows[ids(0)] = row(PortRowState::Paused, 7);
   f.downloader.start("cyberpunk2077", requests(1));
@@ -315,8 +296,7 @@ TEST(Downloader, PausedExistingRowIsResumed)
   EXPECT_TRUE(f.downloader.idle());
 }
 
-TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted)
-{
+TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted) {
   Fixture f;
   f.port.rows[ids(0)] = row(PortRowState::Failed, 9);
   f.downloader.start("cyberpunk2077", requests(1));
@@ -326,8 +306,7 @@ TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted)
   EXPECT_TRUE(f.failed.empty());
 }
 
-TEST(Downloader, CanceledExistingRowIsRemovedAndResubmitted)
-{
+TEST(Downloader, CanceledExistingRowIsRemovedAndResubmitted) {
   // The port reports both canceled and errored rows as Failed.
   Fixture f;
   f.port.rows[ids(0)] = row(PortRowState::Failed, 4);
@@ -338,33 +317,32 @@ TEST(Downloader, CanceledExistingRowIsRemovedAndResubmitted)
   EXPECT_EQ(f.port.submitted, (std::vector<Ids>{ids(0), ids(1)}));
 }
 
-TEST(Downloader, NeverSubmitsSamePairTwice)
-{
+TEST(Downloader, NeverSubmitsSamePairTwice) {
   Fixture f;
   std::vector<DownloadRequest> list = requests(2);
-  list.insert(list.begin() + 1, list[0]);  // the same Nexus file named twice
+  list.insert(list.begin() + 1, list[0]); // the same Nexus file named twice
   f.downloader.start("cyberpunk2077", list);
   f.downloader.tick();
   f.downloader.tick();
 
   EXPECT_EQ(f.port.submitted, (std::vector<Ids>{ids(0), ids(1)}));
 
-  // Still in flight: ticking again must not "Already Queued" the download manager.
+  // Still in flight: ticking again must not "Already Queued" the download
+  // manager.
   f.downloader.transferStarted(ids(0).first, ids(0).second);
   f.downloader.tick();
   EXPECT_EQ(f.port.submitted.size(), 2u);
 }
 
-TEST(Downloader, DestructionDetachesFromThePort)
-{
+TEST(Downloader, DestructionDetachesFromThePort) {
   FakePort port;
   FakeBudget budget;
   FakeHasher hasher;
   {
     CollectionDownloader downloader(
         port, budget, hasher, std::make_shared<std::atomic_bool>(false),
-        [] { return qint64(0); }, [](int, int, const QString&) {},
-        [](int, int, const QString&) {});
+        [] { return qint64(0); }, [](int, int, const QString &) {},
+        [](int, int, const QString &) {});
     EXPECT_NE(port.listener, nullptr);
   }
   EXPECT_EQ(port.listener, nullptr);

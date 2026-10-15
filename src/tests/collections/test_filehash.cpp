@@ -11,27 +11,24 @@
 
 #include <ostream>
 
-// Readable QString output in gtest failure messages. Internal linkage so other test
-// files can define their own without a duplicate symbol.
-static void PrintTo(const QString& text, std::ostream* os)
-{
+// Readable QString output in gtest failure messages. Internal linkage so other
+// test files can define their own without a duplicate symbol.
+static void PrintTo(const QString &text, std::ostream *os) {
   *os << '"' << qPrintable(text) << '"';
 }
 
-namespace
-{
-QString writeFile(const QTemporaryDir& dir, const QString& name, const QByteArray& bytes)
-{
+namespace {
+QString writeFile(const QTemporaryDir &dir, const QString &name,
+                  const QByteArray &bytes) {
   const QString path = dir.filePath(name);
   QFile file(path);
   EXPECT_TRUE(file.open(QIODevice::WriteOnly));
   file.write(bytes);
   return path;
 }
-}  // namespace
+} // namespace
 
-TEST(FileHash, Md5OfKnownBytes)
-{
+TEST(FileHash, Md5OfKnownBytes) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
   // Values from `printf ... | md5sum`.
@@ -43,29 +40,27 @@ TEST(FileHash, Md5OfKnownBytes)
             QString("6f5902ac237024bdd0c176cb93063dc4"));
 }
 
-TEST(FileHash, Md5SpansReadBuffers)
-{
+TEST(FileHash, Md5SpansReadBuffers) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
-  // Larger than any single read, with a length that is not a multiple of the buffer.
+  // Larger than any single read, with a length that is not a multiple of the
+  // buffer.
   QByteArray bytes;
   for (int i = 0; i < 3 * 1024 * 1024 + 123; ++i) {
     bytes.append(static_cast<char>(i * 31 + i / 7));
   }
-  const QString expected =
-      QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Md5).toHex());
+  const QString expected = QString::fromLatin1(
+      QCryptographicHash::hash(bytes, QCryptographicHash::Md5).toHex());
   EXPECT_EQ(md5OfFile(writeFile(dir, "big.bin", bytes)), expected);
 }
 
-TEST(FileHash, Md5OfMissingFileIsEmpty)
-{
+TEST(FileHash, Md5OfMissingFileIsEmpty) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
   EXPECT_TRUE(md5OfFile(dir.filePath("nope.bin")).isEmpty());
 }
 
-TEST(FileHash, ConcurrentHasherCallsBack)
-{
+TEST(FileHash, ConcurrentHasherCallsBack) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
   const QString present = writeFile(dir, "abc.bin", "abc");
@@ -75,17 +70,17 @@ TEST(FileHash, ConcurrentHasherCallsBack)
   QEventLoop loop;
   QString presentHex = "unset";
   QString missingHex = "unset";
-  int calls          = 0;
+  int calls = 0;
   const auto finishOne = [&] {
     if (++calls == 2) {
       loop.quit();
     }
   };
-  hasher.md5(present, [&](const QString& hex) {
+  hasher.md5(present, [&](const QString &hex) {
     presentHex = hex;
     finishOne();
   });
-  hasher.md5(missing, [&](const QString& hex) {
+  hasher.md5(missing, [&](const QString &hex) {
     missingHex = hex;
     finishOne();
   });
