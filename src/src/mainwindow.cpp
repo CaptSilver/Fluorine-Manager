@@ -1521,6 +1521,7 @@ void MainWindow::showEvent(QShowEvent* event)
 
     // notify plugins that the MO2 is ready
     m_PluginContainer.startPlugins(this);
+    m_OrganizerCore.mainWindowShown();
 
     // forces a log list refresh to display startup logs
     //

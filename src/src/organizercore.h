@@ -482,6 +482,9 @@ public slots:
 
   void userInterfaceInitialized();
 
+  // Called once the main window has been shown for the first time.
+  void mainWindowShown();
+
   void profileCreated(MOBase::IProfile* profile);
   void profileRenamed(MOBase::IProfile* profile, QString const& oldName,
                       QString const& newName);
