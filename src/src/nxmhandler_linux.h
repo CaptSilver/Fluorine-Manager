@@ -43,6 +43,9 @@ public:
 signals:
   void nxmReceived(NxmLink link);
   void directDownloadReceived(QString url, QString gameDomain);
+  // A website "Download collection" link; carries the raw line because the session
+  // parses it again and a collection has no mod or file id to put in an NxmLink.
+  void collectionReceived(QString url);
 
 private:
   void onNewConnection();

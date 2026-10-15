@@ -32,6 +32,11 @@ public:
   virtual void showNotification(const QString& title, const QString& message,
                                 QSystemTrayIcon::MessageIcon icon =
                                     QSystemTrayIcon::MessageIcon::Information) = 0;
+
+  // Selects the profile with exactly this name in the profile box, which runs the same
+  // handlers as a click on it. Returns false when no profile has that name or the
+  // switch did not happen.
+  virtual bool selectProfile(const QString& name) = 0;
 };
 
 #endif  // IUSERINTERFACE_H

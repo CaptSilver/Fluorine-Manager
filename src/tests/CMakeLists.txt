@@ -16,6 +16,7 @@ add_executable(test_xdgpaths EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/src/src/fluorinepaths.cpp
     ${CMAKE_SOURCE_DIR}/src/src/fluorineconfig.cpp
     ${CMAKE_SOURCE_DIR}/src/src/nxmhandler_linux.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
     ${CMAKE_SOURCE_DIR}/src/src/nxmhandler_linux.h)
 set_target_properties(test_xdgpaths PROPERTIES AUTOMOC ON CXX_STANDARD 23)
 target_include_directories(test_xdgpaths PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
@@ -1366,6 +1367,114 @@ add_test(NAME test_archive_extraction_containment COMMAND test_archive_extractio
 set_tests_properties(test_archive_extraction_containment PROPERTIES
     ENVIRONMENT "MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
 add_dependencies(fluorine-tests test_archive_extraction_containment)
+
+# ---------------------------------------------------------------------------
+# Nexus collections: the units that need no running organizer
+# ---------------------------------------------------------------------------
+add_executable(test_nexus_collections EXCLUDE_FROM_ALL
+    collections/test_collectionlink.cpp
+    collections/test_collectionmanifest.cpp
+    collections/test_collectionmetatag.cpp
+    collections/test_collectionplacementmoves.cpp
+    collections/test_collectionplan.cpp
+    collections/test_collectionstate.cpp
+    collections/test_fomodmodel.cpp
+    collections/test_nxmurl.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmetatag.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplacementmoves.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplan.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionreport.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionstate.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/fomodmodel.cpp
+)
+set_target_properties(test_nexus_collections PROPERTIES
+    AUTOMOC OFF
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+target_include_directories(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src
+)
+target_compile_definitions(test_nexus_collections PRIVATE
+    FLUORINE_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_nexus_collections PRIVATE
+    Qt6::Core
+    mo2::uibase
+    GTest::gtest
+    GTest::gtest_main
+)
+add_test(NAME test_nexus_collections COMMAND test_nexus_collections)
+add_dependencies(fluorine-tests test_nexus_collections)
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/collections/fomodreplay.cpp
+    collections/test_fomodreplay.cpp)
+
+# FomodTreeTransform is also tested against a real ArchiveFileTree, so this target
+# compiles archivefiletree.cpp and links the archive library. archivefiletree.cpp
+# includes "log.h" without a directory; the -idirafter below is what resolves it to
+# uibase's log.h, so leave that include alone.
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/archivefiletree.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/fomodtreetransform.cpp
+    collections/test_fomodtreetransform.cpp)
+target_compile_options(test_nexus_collections PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_compile_definitions(test_nexus_collections PRIVATE
+    FLUORINE_COLLECTION_FOMOD_ZIP="${CMAKE_SOURCE_DIR}/src/tests/fixtures/collections/fomod_payload.zip")
+target_link_libraries(test_nexus_collections PRIVATE mo2::archive)
+add_dependencies(test_nexus_collections 7z)
+set_tests_properties(test_nexus_collections PROPERTIES
+    ENVIRONMENT "MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
+
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionarchiveinstaller.cpp
+    collections/test_collectionarchiveinstaller.cpp)
+
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehash.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectiondownloader.cpp
+    collections/test_collectiondownloader.cpp)
+
+# Collections: the QObject and widget units (hasher, fetcher, dialogs). The pure units
+# live in test_nexus_collections; this one needs a QApplication, so it has its own main.
+find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent Test)
+add_executable(test_nexus_collections_qt EXCLUDE_FROM_ALL
+    collections/test_main_qt.cpp
+    collections/test_filehash.cpp
+    collections/test_collectionmanifestfetcher.cpp
+    collections/test_collectiondialogs.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehash.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehashconcurrent.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmetatag.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionstate.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplan.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionplacementmoves.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionreport.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifestfetcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionreviewdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionresultsdialog.cpp
+)
+set_target_properties(test_nexus_collections_qt PROPERTIES
+    AUTOMOC ON CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+target_include_directories(test_nexus_collections_qt PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src
+    ${CMAKE_SOURCE_DIR}/libs/uibase/include)
+target_compile_definitions(test_nexus_collections_qt PRIVATE
+    FLUORINE_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_nexus_collections_qt PRIVATE
+    mo2::uibase mo2::archive Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Test
+    GTest::gtest)
+add_dependencies(test_nexus_collections_qt 7z)
+add_test(NAME test_nexus_collections_qt COMMAND test_nexus_collections_qt)
+set_tests_properties(test_nexus_collections_qt PROPERTIES
+    TIMEOUT 180
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
+add_dependencies(fluorine-tests test_nexus_collections_qt)
 
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)

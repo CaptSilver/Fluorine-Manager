@@ -46,7 +46,8 @@ qt_standard_project_setup()
 file(GLOB ORGANIZER_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/shared/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/*.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/collections/*.cpp)
 
 # These files are compiled into libuibase.so (shared with plugins) — exclude from organizer.
 list(REMOVE_ITEM ORGANIZER_SOURCES
@@ -71,7 +72,8 @@ list(REMOVE_ITEM ORGANIZER_SOURCES
 file(GLOB ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/shared/*.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/*.h)
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/collections/*.h)
 list(REMOVE_ITEM ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/curatedfomod.h
     ${CMAKE_CURRENT_SOURCE_DIR}/curatedguidedialog.h

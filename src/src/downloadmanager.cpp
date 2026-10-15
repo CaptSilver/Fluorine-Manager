@@ -1100,6 +1100,14 @@ void DownloadManager::addNXMDownload(const QString& url)
 
   NXMUrl const nxmInfo(url);
 
+  // A collection link has no mod or file id (NXMUrl reports 0 for both), so letting it
+  // through would queue a download of mod 0. CollectionSession handles these.
+  if (nxmInfo.isCollection()) {
+    log::warn("not downloading a collection link as a mod file: {}",
+              log::safeUrlForLog(url));
+    return;
+  }
+
   QStringList validGames;
   const MOBase::IPluginGame* foundGame = nullptr;
   validGames.append(m_ManagedGame->gameShortName());

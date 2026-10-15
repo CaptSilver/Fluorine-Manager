@@ -139,6 +139,12 @@ void InstallationManager::setPluginContainer(const PluginContainer* pluginContai
 
 void InstallationManager::queryPassword()
 {
+  if (m_Unattended) {
+    // Nobody to ask. An empty password makes an encrypted archive fail to open
+    // (or to extract), which the caller reports.
+    m_Password.clear();
+    return;
+  }
   m_Password = QInputDialog::getText(m_ParentWidget, tr("Password required"),
                                      tr("Password"), QLineEdit::Password);
 }
@@ -158,33 +164,42 @@ bool InstallationManager::extractFiles(QString extractPath, QString title,
   // The future that will hold the result:
   QFuture<bool> future;
 
-  if (silent) {
+  // Unattended installs never take the blocking branch: waiting here would stop the
+  // GUI thread from serving downloads and sockets for the whole archive.
+  if (silent && !m_Unattended) {
     future = QtConcurrent::run([&]() -> bool {
       return m_ArchiveHandler->extract(extractPath.toStdWString(), nullptr, nullptr,
                                        errorCallback);
     });
     future.waitForFinished();
   } else {
-    QProgressDialog* installationProgress = new QProgressDialog(m_ParentWidget);
+    // Unattended installs run the same event loop but show no dialog, so this
+    // pointer is null for them and every use below checks it.
+    QProgressDialog* installationProgress =
+        m_Unattended ? nullptr : new QProgressDialog(m_ParentWidget);
     ON_BLOCK_EXIT([=]() {
-      installationProgress->cancel();
-      installationProgress->hide();
-      installationProgress->deleteLater();
+      if (installationProgress != nullptr) {
+        installationProgress->cancel();
+        installationProgress->hide();
+        installationProgress->deleteLater();
+      }
     });
-    installationProgress->setWindowFlags(installationProgress->windowFlags() &
-                                         (~Qt::WindowContextHelpButtonHint));
-    if (!title.isEmpty()) {
-      installationProgress->setWindowTitle(title);
-    }
-    installationProgress->setWindowModality(Qt::WindowModal);
-    installationProgress->setFixedSize(600, 100);
+    if (installationProgress != nullptr) {
+      installationProgress->setWindowFlags(installationProgress->windowFlags() &
+                                           (~Qt::WindowContextHelpButtonHint));
+      if (!title.isEmpty()) {
+        installationProgress->setWindowTitle(title);
+      }
+      installationProgress->setWindowModality(Qt::WindowModal);
+      installationProgress->setFixedSize(600, 100);
 
-    // Turn off auto-reset otherwize the progress dialog is reset before the end. This
-    // is kind of annoying because updateProgress consider percentage of progression
-    // through the archive (pack), while we are waiting for extracting archive entries,
-    // so the percentage of in updateProgress is not really related to the percentage of
-    // files extracted...
-    installationProgress->setAutoReset(false);
+      // Turn off auto-reset otherwize the progress dialog is reset before the end.
+      // This is kind of annoying because updateProgress consider percentage of
+      // progression through the archive (pack), while we are waiting for extracting
+      // archive entries, so the percentage of in updateProgress is not really related
+      // to the percentage of files extracted...
+      installationProgress->setAutoReset(false);
+    }
 
     // Note: Using a loop with a progressUpdate() that only wake-up the loop. The
     // event-loop will be used in a loop and not via exec() because connecting to
@@ -196,9 +211,11 @@ bool InstallationManager::extractFiles(QString extractPath, QString title,
 
     // Cancelling progress only cancel the extraction, we do not force exiting the
     // event-loop:
-    connect(installationProgress, &QProgressDialog::canceled, [this]() {
-      m_ArchiveHandler->cancel();
-    });
+    if (installationProgress != nullptr) {
+      connect(installationProgress, &QProgressDialog::canceled, [this]() {
+        m_ArchiveHandler->cancel();
+      });
+    }
 
     std::mutex mutex;
     int currentProgress = 0;
@@ -236,21 +253,27 @@ bool InstallationManager::extractFiles(QString extractPath, QString title,
                                        errorCallback);
     }));
 
-    installationProgress->setModal(true);
-    installationProgress->show();
+    if (installationProgress != nullptr) {
+      installationProgress->setModal(true);
+      installationProgress->show();
+    }
 
     while (!futureWatcher.isFinished()) {
       loop.processEvents(QEventLoop::AllEvents | QEventLoop::WaitForMoreEvents);
-      std::scoped_lock const guard(mutex);
-      if (currentProgress != installationProgress->value()) {
-        installationProgress->setValue(currentProgress);
-      }
-      if (currentFileName != installationProgress->labelText()) {
-        installationProgress->setLabelText(currentFileName);
+      if (installationProgress != nullptr) {
+        std::scoped_lock const guard(mutex);
+        if (currentProgress != installationProgress->value()) {
+          installationProgress->setValue(currentProgress);
+        }
+        if (currentFileName != installationProgress->labelText()) {
+          installationProgress->setLabelText(currentFileName);
+        }
       }
     }
 
-    installationProgress->hide();
+    if (installationProgress != nullptr) {
+      installationProgress->hide();
+    }
 
     future = futureWatcher.future();
   }
@@ -403,6 +426,42 @@ QString InstallationManager::generateBackupName(const QString& directoryName)
   return backupName;
 }
 
+void InstallationManager::resetModDirectory(const QString& modName,
+                                            const QString& targetDirectory)
+{
+  unsigned int const idx = ModInfo::getIndex(modName);
+  if (idx != UINT_MAX) {
+    auto modInfo = ModInfo::getByIndex(idx);
+    // mark the old install file as uninstalled
+    emit modReplaced(modInfo->installationFile());
+  }
+  // save original settings like categories. Because it makes sense
+  QString metaFilename = targetDirectory + "/meta.ini";
+  QFile settingsFile(metaFilename);
+  QByteArray originalSettings;
+  if (settingsFile.open(QIODevice::ReadOnly)) {
+    originalSettings = settingsFile.readAll();
+    settingsFile.close();
+  }
+
+  // remove the directory with all content, then recreate it empty
+  shellDelete(QStringList(targetDirectory));
+  if (!QDir().mkdir(targetDirectory)) {
+    // The retry exists because Windows can keep a directory around for a
+    // moment after delete. Linux doesn't have that problem; the sleep is
+    // kept for safety in case the underlying filesystem is slow.
+    QThread::msleep(100);
+    QDir().mkdir(targetDirectory);
+  }
+  // restore the saved settings
+  if (settingsFile.open(QIODevice::WriteOnly)) {
+    settingsFile.write(originalSettings);
+    settingsFile.close();
+  } else {
+    log::error("failed to restore original settings: {}", metaFilename);
+  }
+}
+
 InstallationResult InstallationManager::testOverwrite(GuessedValue<QString>& modName)
 {
   QString targetDirectory =
@@ -410,6 +469,18 @@ InstallationResult InstallationManager::testOverwrite(GuessedValue<QString>& mod
 
   // this is only returned on success
   InstallationResult result{IPluginInstaller::RESULT_SUCCESS};
+
+  if (m_Unattended && QDir(targetDirectory).exists()) {
+    // No dialog to ask merge, replace or rename: the caller decided up front.
+    if (!m_Unattended->replaceExistingFolder) {
+      m_Unattended->failureReason =
+          tr("folder \"%1\" already exists").arg(QString(modName));
+      return {IPluginInstaller::RESULT_FAILED};
+    }
+    result.m_replaced = true;
+    resetModDirectory(modName, targetDirectory);
+    return result;
+  }
 
   while (QDir(targetDirectory).exists()) {
     Settings& settings(Settings::instance());
@@ -446,37 +517,7 @@ InstallationResult InstallationManager::testOverwrite(GuessedValue<QString>& mod
           targetDirectory = QDir::fromNativeSeparators(m_ModsDirectory) + "/" + modName;
         }
       } else if (overwriteDialog.action() == QueryOverwriteDialog::ACT_REPLACE) {
-        unsigned int const idx = ModInfo::getIndex(modName);
-        if (idx != UINT_MAX) {
-          auto modInfo = ModInfo::getByIndex(idx);
-          // mark the old install file as uninstalled
-          emit modReplaced(modInfo->installationFile());
-        }
-        // save original settings like categories. Because it makes sense
-        QString metaFilename = targetDirectory + "/meta.ini";
-        QFile settingsFile(metaFilename);
-        QByteArray originalSettings;
-        if (settingsFile.open(QIODevice::ReadOnly)) {
-          originalSettings = settingsFile.readAll();
-          settingsFile.close();
-        }
-
-        // remove the directory with all content, then recreate it empty
-        shellDelete(QStringList(targetDirectory));
-        if (!QDir().mkdir(targetDirectory)) {
-          // The retry exists because Windows can keep a directory around for a
-          // moment after delete. Linux doesn't have that problem; the sleep is
-          // kept for safety in case the underlying filesystem is slow.
-          QThread::msleep(100);
-          QDir().mkdir(targetDirectory);
-        }
-        // restore the saved settings
-        if (settingsFile.open(QIODevice::WriteOnly)) {
-          settingsFile.write(originalSettings);
-          settingsFile.close();
-        } else {
-          log::error("failed to restore original settings: {}", metaFilename);
-        }
+        resetModDirectory(modName, targetDirectory);
         return result;
       } else if (overwriteDialog.action() == QueryOverwriteDialog::ACT_MERGE) {
         return result;
@@ -513,6 +554,10 @@ bool InstallationManager::ensureValidModName(GuessedValue<QString>& name) const
 
 InstallationResult InstallationManager::doInstall(ModInstallationInfo& info)
 {
+  if (m_Unattended && info.modName->isEmpty()) {
+    m_Unattended->failureReason = tr("the mod folder name is empty");
+    return {IPluginInstaller::RESULT_FAILED};
+  }
   if (!ensureValidModName(info.modName)) {
     return {IPluginInstaller::RESULT_FAILED};
   }
@@ -666,6 +711,14 @@ InstallationResult InstallationManager::install(const QString& fileName,
                                                 GuessedValue<QString>& modName,
                                                 int modID)
 {
+  // The extraction event loop lets other code run during an unattended install, a
+  // drag-and-drop install among it. Two installs would share one archive handler.
+  if (m_IsRunning && m_Unattended) {
+    log::warn("refusing to install \"{}\": another installation is still running",
+              fileName);
+    return {IPluginInstaller::RESULT_CANCELED};
+  }
+
   m_IsRunning = true;
   ON_BLOCK_EXIT([this]() {
     m_IsRunning = false;
@@ -716,8 +769,13 @@ InstallationResult InstallationManager::install(const QString& fileName,
     newestVersion              = metaFile.value("newestVersion", "").toString();
     category                   = metaFile.value("category", 0).toInt();
     unsigned int const categoryIndex = CategoryFactory::instance().resolveNexusID(category);
-    if (category != 0 && categoryIndex == 0U &&
-        Settings::instance().nexus().categoryMappings()) {
+    const bool unmappedCategory = category != 0 && categoryIndex == 0U &&
+                                  Settings::instance().nexus().categoryMappings();
+    if (unmappedCategory && m_Unattended) {
+      // Nobody can answer the mapping question, so the mod stays uncategorised.
+      log::debug("no category mapping for nexus category {}, installing without one",
+                 category);
+    } else if (unmappedCategory) {
       QMessageBox nexusQuery;
       nexusQuery.setWindowTitle(tr("No category found"));
       nexusQuery.setText(tr(
@@ -803,6 +861,56 @@ InstallationResult InstallationManager::install(const QString& fileName,
   std::shared_ptr<IFileTree> filesTree =
       archiveOpen ? ArchiveFileTree::makeTree(*m_ArchiveHandler) : nullptr;
 
+  if (m_Unattended) {
+    // Collection installs have nobody to answer prompts. Every refusal below is a
+    // reason string for the caller's report, and nothing after this block (the
+    // installer loop and its two message boxes) is reachable.
+    UnattendedInstall& hook = *m_Unattended;
+    hook.failureReason.clear();
+    InstallationResult hooked(IPluginInstaller::RESULT_FAILED);
+
+    if (filesTree == nullptr) {
+      hook.failureReason = tr("cannot open the archive (%1)")
+                               .arg(getErrorString(m_ArchiveHandler->getLastError()));
+      return hooked;
+    }
+    if (!hook.installer) {
+      hook.failureReason = tr("no installer was provided");
+      return hooked;
+    }
+
+    try {
+      QString reason;
+      // With unattended set, a silent extraction runs the dialog-free event loop.
+      const auto readFile = [this](std::shared_ptr<const FileTreeEntry> entry) {
+        return extractFile(entry, true);
+      };
+      hooked.m_result = hook.installer(modName, filesTree, readFile, reason);
+      if (!hooked) {
+        hook.failureReason =
+            reason.isEmpty() ? tr("the archive layout was not accepted") : reason;
+        return hooked;
+      }
+
+      ModInstallationInfo info{
+          modName,        gameName,   modID,  version,  newestVersion, categoryID,
+          fileCategoryID, repository, author, uploader, uploaderUrl};
+      hooked = completeSimpleInstall(filesTree, info);
+      if (hooked) {
+        auto iniTweakEntry = filesTree->find("INI Tweaks", FileTreeEntry::DIRECTORY);
+        hooked.m_iniTweaks =
+            iniTweakEntry != nullptr && !iniTweakEntry->astree()->empty();
+      } else if (hook.failureReason.isEmpty()) {
+        hook.failureReason = tr("the installation did not complete");
+      }
+    } catch (const std::exception& e) {
+      // Extraction errors are exceptions here. The caller reads a reason, not a throw.
+      hook.failureReason = QString::fromUtf8(e.what());
+      hooked             = InstallationResult(IPluginInstaller::RESULT_FAILED);
+    }
+    return hooked;
+  }
+
   auto installers = m_PluginContainer->plugins<IPluginInstaller>();
 
   std::sort(installers.begin(), installers.end(),
@@ -837,32 +945,13 @@ InstallationResult InstallationManager::install(const QString& fileName,
           installResult.m_result =
               installerSimple->install(modName, filesTree, version, modID);
           if (installResult) {
-
-            // Downcast to an actual ArchiveFileTree and map to the archive. Test if
-            // the tree is still an ArchiveFileTree, otherwize it means the installer
-            // did some bad stuff.
-            ArchiveFileTree* p = dynamic_cast<ArchiveFileTree*>(filesTree.get());
-            if (p == nullptr) {
-              throw IncompatibilityException(
-                  tr("Invalid file tree returned by plugin."));
-            }
-
-            // Detach the file tree (this ensure the parent is null and call to path()
-            // stops at this root):
-            p->detach();
-
-            p->mapToArchive(*m_ArchiveHandler);
-
-            // Clean the created files:
-            cleanCreatedFiles(filesTree);
-
             // the simple installer only prepares the installation, the rest
             // works the same for all installers
             ModInstallationInfo info{
                 modName,        gameName,   modID,  version,  newestVersion, categoryID,
                 fileCategoryID, repository, author, uploader, uploaderUrl};
 
-            installResult = doInstall(info);
+            installResult = completeSimpleInstall(filesTree, info);
           }
         }
       }
@@ -925,6 +1014,30 @@ InstallationResult InstallationManager::install(const QString& fileName,
   }
 
   return installResult;
+}
+
+InstallationResult
+InstallationManager::completeSimpleInstall(std::shared_ptr<IFileTree>& filesTree,
+                                           ModInstallationInfo& info)
+{
+  // Downcast to an actual ArchiveFileTree and map to the archive. Test if
+  // the tree is still an ArchiveFileTree, otherwize it means the installer
+  // did some bad stuff.
+  ArchiveFileTree* p = dynamic_cast<ArchiveFileTree*>(filesTree.get());
+  if (p == nullptr) {
+    throw IncompatibilityException(tr("Invalid file tree returned by plugin."));
+  }
+
+  // Detach the file tree (this ensure the parent is null and call to path()
+  // stops at this root):
+  p->detach();
+
+  p->mapToArchive(*m_ArchiveHandler);
+
+  // Clean the created files:
+  cleanCreatedFiles(filesTree);
+
+  return doInstall(info);
 }
 
 QString InstallationManager::getErrorString(Archive::Error errorCode)

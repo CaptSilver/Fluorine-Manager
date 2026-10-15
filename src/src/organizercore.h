@@ -45,6 +45,7 @@ class IUserInterface;
 class GameFeatures;
 class PluginContainer;
 class DirectoryRefresher;
+class CollectionSession;
 
 #include <memory>
 #include <vector>
@@ -615,6 +616,10 @@ private:
   FuseConnector m_USVFS;
 
   UILocker m_UILocker;
+
+  // Declared last so it is destroyed first: it uses the download and installation
+  // managers above.
+  std::unique_ptr<CollectionSession> m_CollectionSession;
 };
 
 #endif  // ORGANIZERCORE_H

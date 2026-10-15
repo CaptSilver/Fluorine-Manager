@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
@@ -281,6 +282,34 @@ TEST_F(XdgPaths, CustomDataHomeDoesNotExpandLegacyPrefixDeletionPermission)
   config.prefix_path = temp.filePath("home/.local/share/fluorine/Prefix/pfx");
   ASSERT_TRUE(QDir().mkpath(config.prefix_path + "/drive_c"));
   EXPECT_TRUE(config.canDestroyPrefix());
+}
+
+TEST_F(XdgPaths, CollectionLinkOnSocketIsForwardedAndModLinkStillIs)
+{
+  NxmHandlerLinux handler;
+  ASSERT_TRUE(handler.startListener());
+
+  QStringList collections;
+  int mods = 0;
+  QObject::connect(&handler, &NxmHandlerLinux::collectionReceived,
+                   [&](QString url) { collections << url; });
+  QObject::connect(&handler, &NxmHandlerLinux::nxmReceived,
+                   [&](NxmLink) { ++mods; });
+
+  const QString collection = "nxm://cyberpunk2077/collections/rcuccp/revisions/189";
+  ASSERT_TRUE(NxmHandlerLinux::sendToSocket(collection));
+  ASSERT_TRUE(NxmHandlerLinux::sendToSocket(
+      "nxm://cyberpunk2077/mods/107/files/1234?key=k&expires=1&user_id=2"));
+
+  // The server runs in this thread, so it only sees the connections once events spin.
+  QElapsedTimer waited;
+  waited.start();
+  while ((collections.isEmpty() || mods == 0) && waited.elapsed() < 5000) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+  }
+
+  EXPECT_EQ(collections, QStringList{collection});
+  EXPECT_EQ(mods, 1);
 }
 }  // namespace
 

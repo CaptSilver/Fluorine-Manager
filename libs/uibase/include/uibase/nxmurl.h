@@ -93,13 +93,13 @@ public:
 private:
   QString m_Game;
   QString m_Key;
-  int m_ModId;
-  int m_FileId;
-  int m_Expires;
-  int m_UserId;
-  bool m_Collection;
+  int m_ModId{0};
+  int m_FileId{0};
+  int m_Expires{0};
+  int m_UserId{0};
+  bool m_Collection{false};
   QString m_CollectionId;
-  int m_CollectionRevision;
+  int m_CollectionRevision{0};
 };
 
 #endif  // NXMURL_H

@@ -763,6 +763,39 @@ void ModList::changeModPriority(int sourceIndex, int newPriority)
   emit modPrioritiesChanged({index(sourceIndex, 0)});
 }
 
+void ModList::setPriorities(const std::vector<std::pair<int, int>>& indexAndPriority)
+{
+  if (m_Profile == nullptr || indexAndPriority.empty()) {
+    return;
+  }
+
+  emit layoutAboutToBeChanged();
+
+  QModelIndexList touched;
+  int moved = 0;
+  for (const auto& [modIndex, priority] : indexAndPriority) {
+    if (modIndex < 0 || static_cast<unsigned int>(modIndex) >= ModInfo::getNumMods()) {
+      log::warn("setPriorities: ignoring invalid mod index {}", modIndex);
+      continue;
+    }
+
+    // Profile::setModPriority clamps its argument in place, so hand it a copy.
+    int target            = priority;
+    const int oldPriority = m_Profile->getModPriority(modIndex);
+    if (m_Profile->setModPriority(modIndex, target)) {
+      ++moved;
+      m_ModMoved(ModInfo::getByIndex(modIndex)->name(), oldPriority, target);
+    }
+    touched.append(index(modIndex, 0, QModelIndex()));
+  }
+
+  emit layoutChanged();
+  emit modPrioritiesChanged(touched);
+
+  log::debug("setPriorities: {} of {} requested moves changed a priority", moved,
+             indexAndPriority.size());
+}
+
 void ModList::setPluginContainer(PluginContainer* pluginContianer)
 {
   m_PluginContainer = pluginContianer;

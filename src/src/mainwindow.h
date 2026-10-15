@@ -162,6 +162,7 @@ public:
 
   bool closeWindow() override;
   void setWindowEnabled(bool enabled) override;
+  bool selectProfile(const QString& name) override;
 
   MOBase::DelayedFileWriterBase& archivesWriter() override
   {

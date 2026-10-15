@@ -2001,6 +2001,34 @@ bool MainWindow::refreshProfiles(bool selectProfile, QString newProfile)
   return profileBox->count() > 0;
 }
 
+bool MainWindow::selectProfile(const QString& name)
+{
+  if (name.isEmpty()) {
+    return false;
+  }
+
+  const auto current = m_OrganizerCore.currentProfile();
+  if (current != nullptr && current->name() == name) {
+    return true;
+  }
+
+  // Look at the profiles directory rather than the combo box: a profile created a
+  // moment ago is not in the box yet, and refreshProfiles() falls back to the first
+  // entry for a name it cannot find, which would switch to the wrong profile.
+  const QDir profilesDir(Settings::instance().paths().profiles());
+  if (!profilesDir.entryList(QDir::AllDirs | QDir::NoDotAndDotDot).contains(name)) {
+    log::error("selectProfile: there is no profile named '{}'", name);
+    return false;
+  }
+
+  // Rebuilds the box and selects the entry, which fires on_profileBox_currentIndexChanged
+  // and with it saveCurrentLists, activateSelectedProfile and the profile feature hooks.
+  refreshProfiles(true, name);
+
+  const auto selected = m_OrganizerCore.currentProfile();
+  return selected != nullptr && selected->name() == name;
+}
+
 void MainWindow::refreshExecutablesList()
 {
   const QString previousTitle = ui->executablesListBox->currentText();

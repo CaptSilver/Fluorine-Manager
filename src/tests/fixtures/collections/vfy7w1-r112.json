@@ -1,0 +1,1012 @@
+{
+  "info": {
+    "author": "rVeinz",
+    "authorUrl": "",
+    "name": "NCR - Body Add-on (Adult)",
+    "description": "",
+    "installInstructions": "🔹Refer to our [Discord](https://discord.gg/jkcbbNbNkC) for any issues with the update and any other change logs. \n⚠️ You will encounter warning messages several times during installing this revision. Click \"Yes install to staging anyway\" on all warnings that appear.\n⚠️ Don't forget to install new revisions to a seperate profile, and remove old mods to prevent conflicts.\n⚠️ For stability, delete all files in Steam\\steamapps\\common\\Cyberpunk 2077\\r6\\cache with each update, verify game files, then deploy mods via Vortex\n⚠️ In Vortex, go to Settings on the left and then open V2077 Settings. Ensure the option \"Automatically convert old style 'archive' mods to REDmods on install\" is turned OFF. And \"Don't prompt when reaching the fallback installer\" is turned ON.\n⚠️ Our collections support Vortex only. The Nexus Mod App (NMA) is beta, use at your own risk. We do not support provided for NMA issues.\n⚠️ Blank screen after 2.3 update? Disable all mods, launch game vanilla, accept the EULA, then re-enable your mods.\n\nHave a good games! 🎮💜",
+    "domainName": "cyberpunk2077",
+    "gameVersions": [
+      "2.3.1.0"
+    ]
+  },
+  "mods": [
+    {
+      "name": "PL Vanilla Refit ENHANCED BIG BREAST WITH BIG BUTT",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 9461,
+        "fileId": 50544,
+        "md5": "6a741b1ff5d559ad557b2e56524a3557",
+        "fileSize": 18688184,
+        "logicalFilename": "PL Vanilla Refit ENHANCED BIG BREAST WITH BIG BUTT",
+        "updatePolicy": "exact",
+        "tag": "adPpL-91us"
+      },
+      "author": "SneakyBlackCat",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hotscenes - full mod",
+      "version": "5.40.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4590,
+        "fileId": 161606,
+        "md5": "ea7d90bcbedb4d0847a126605c6f1a6c",
+        "fileSize": 89559576,
+        "logicalFilename": "Hotscenes - full mod",
+        "updatePolicy": "exact",
+        "tag": "fUjgWSuRFQ"
+      },
+      "author": "anygoodname",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Romance Hangouts Enhanced",
+      "version": "2.5.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 11590,
+        "fileId": 154068,
+        "md5": "3006ef2ae77c094631e49e40dd8f0179",
+        "fileSize": 8982754,
+        "logicalFilename": "Romance Hangouts Enhanced",
+        "updatePolicy": "exact",
+        "tag": "ZDSH2yD2Hq"
+      },
+      "author": "Deceptious",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Really Want To Stay At Your House - Judy",
+      "version": "3.6.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8753,
+        "fileId": 147260,
+        "md5": "033881d19a3842618d2bf0f2018a067d",
+        "fileSize": 303069,
+        "logicalFilename": "Really Want To Stay At Your House - Judy",
+        "updatePolicy": "exact",
+        "tag": "Pop5ZRUoWu"
+      },
+      "author": "Deceptious",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Vanilla Refit - ENHANCED BIG BREAST WITH BIG BOOTY",
+      "version": "1.03",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 5408,
+        "fileId": 38119,
+        "md5": "492fbb7ef1260de6bfd4da2b29a19889",
+        "fileSize": 77937362,
+        "logicalFilename": "Vanilla Refit - ENHANCED BIG BREAST WITH BIG BOOTY",
+        "updatePolicy": "exact",
+        "tag": "iYgyAYNmxT"
+      },
+      "author": "SneakyBlackCat",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Always Equipped Unique V Rig",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29927,
+        "fileId": 146472,
+        "md5": "f27924959013b205669d168a49e0547b",
+        "fileSize": 1709,
+        "logicalFilename": "Always Equipped Unique V Rig",
+        "updatePolicy": "exact",
+        "tag": "7d3W1M01e0"
+      },
+      "author": "JohnsonsStuff - nutboy",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "TIRAMISU - Top Model Pose Pack",
+      "version": "3.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20223,
+        "fileId": 119169,
+        "md5": "5c2e42d08e74510cce747071f5c5c34b",
+        "fileSize": 58638,
+        "logicalFilename": "TIRAMISU - Top Model Pose Pack",
+        "updatePolicy": "exact",
+        "tag": "TalnJ85_Fj"
+      },
+      "author": "TIRAMISU",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hangout Romances",
+      "version": "1.08",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18972,
+        "fileId": 128450,
+        "md5": "ece8d251f0c96059b9e7c1169ed4abef",
+        "fileSize": 1719306,
+        "logicalFilename": "Hangout Romances",
+        "updatePolicy": "exact",
+        "tag": "E9evNN0xrZ"
+      },
+      "author": "ArmanIII",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Romanced Enhanced Showers Feature",
+      "version": "1.0.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23074,
+        "fileId": 115704,
+        "md5": "a9e13932249323614ac72a559e90f63b",
+        "fileSize": 2377,
+        "logicalFilename": "Romanced Enhanced Showers Feature",
+        "updatePolicy": "exact",
+        "tag": "cdKaVyR9uN"
+      },
+      "author": "Deceptious",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hot Fuzz",
+      "version": "3.1.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7832,
+        "fileId": 140937,
+        "md5": "88acda829e15b61c6b975922fb1b3f51",
+        "fileSize": 111823,
+        "logicalFilename": "Hot Fuzz",
+        "updatePolicy": "exact",
+        "tag": "AOpTm0s_cs"
+      },
+      "author": "Deceptious",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Encore",
+      "version": "3.2.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8413,
+        "fileId": 140934,
+        "md5": "3e317910ed43c7c39630090ddb76adb7",
+        "fileSize": 91929,
+        "logicalFilename": "Encore",
+        "updatePolicy": "exact",
+        "tag": "mR2Zn47Dwb"
+      },
+      "author": "Deceptious",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "panam selfie swap",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23376,
+        "fileId": 117140,
+        "md5": "ab6b87e4206c3fe4b26d95d0bcb4f594",
+        "fileSize": 11021521,
+        "logicalFilename": "panam selfie swap",
+        "updatePolicy": "exact",
+        "tag": "dYWRITb9fu"
+      },
+      "author": "cyberpsycosis12",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "BV - Obsessed Pose Pack",
+      "version": "2.2.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 14243,
+        "fileId": 98900,
+        "md5": "bb6d148ab56ccb19fc5eabee67e7b1b2",
+        "fileSize": 263210,
+        "logicalFilename": "BV - Obsessed Pose Pack",
+        "updatePolicy": "exact",
+        "tag": "sm2R62nnyj"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Woman in chains pt2 (EBBRB)",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16665,
+        "fileId": 95920,
+        "md5": "0b5d29a7c272e3567a59f58e06477edc",
+        "fileSize": 45459610,
+        "logicalFilename": "Woman in chains pt2 (EBBRB)",
+        "updatePolicy": "exact",
+        "tag": "SEKGM9useJ"
+      },
+      "author": "Tonydiz",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Heeled Leggings Outfit 1.1",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26461,
+        "fileId": 131840,
+        "md5": "c5720676f1852d2105d2324e643773dd",
+        "fileSize": 130035582,
+        "logicalFilename": "Heeled Leggings Outfit 1.1",
+        "updatePolicy": "exact",
+        "tag": "3CrvN5zyqO"
+      },
+      "author": "Tonydiz",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Dark Flow Outfit",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20099,
+        "fileId": 111780,
+        "md5": "6411f285e5edb210cd3e5fac22bac71a",
+        "fileSize": 21330859,
+        "logicalFilename": "Dark Flow Outfit",
+        "updatePolicy": "exact",
+        "tag": "wBx1fM9FQ_c"
+      },
+      "author": "Tonydiz",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hyst_BigBreastsBody v4.0 - BIG BOOTY (EBBRB)",
+      "version": "4.0.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4654,
+        "fileId": 98068,
+        "md5": "b12a5409e3c1353e63f1198075dcd26d",
+        "fileSize": 185126692,
+        "logicalFilename": "Hyst_BigBreastsBody v4.0 - BIG BOOTY (EBBRB)",
+        "updatePolicy": "exact",
+        "tag": "G6S1ww7gWEC"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "VTK Vanilla HD - Head",
+      "version": "3.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 7054,
+        "fileId": 91914,
+        "md5": "752cff50ce39478509c67f637e5ba071",
+        "fileSize": 39449180,
+        "logicalFilename": "VTK Vanilla HD - Head",
+        "updatePolicy": "exact",
+        "tag": "e9wCWja02rN"
+      },
+      "author": "xBaebsae",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Hotscenes Add-on",
+      "version": "5.25.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 11772,
+        "fileId": 156344,
+        "md5": "75bd3e07f4e33257a25b0b8a057aee5a",
+        "fileSize": 17596979,
+        "logicalFilename": "Hotscenes Add-on",
+        "updatePolicy": "exact",
+        "tag": "kMgxCQmADH1"
+      },
+      "author": "anygoodname",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "BV - EVERYTHING",
+      "version": "2.2.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16451,
+        "fileId": 98917,
+        "md5": "2ccca1192097ad64295792e5c0679f26",
+        "fileSize": 156100,
+        "logicalFilename": "BV - EVERYTHING",
+        "updatePolicy": "exact",
+        "tag": "GYyY6TY4ObB"
+      },
+      "author": "busyvampire",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "V's sexy piercings - Part 2 - (EBB_EBBRB)",
+      "version": "2.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 15975,
+        "fileId": 92255,
+        "md5": "cffcef686b6def4a7b57941a085d31bc",
+        "fileSize": 8889128,
+        "logicalFilename": "V's sexy piercings - Part 2 - (EBB_EBBRB)",
+        "updatePolicy": "exact",
+        "tag": "8Pz9EgCPSVh"
+      },
+      "author": "Tonydiz",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Tony's Nylon Tights",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 23926,
+        "fileId": 119855,
+        "md5": "68524c5af196d6e3b5fd2b828a6f4134",
+        "fileSize": 20240784,
+        "logicalFilename": "Tony's Nylon Tights",
+        "updatePolicy": "exact",
+        "tag": "9RHHKq3wV0e"
+      },
+      "author": "Tonydiz",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Judy Enhanced Body with 4K Texture",
+      "version": "1.0.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 10150,
+        "fileId": 96556,
+        "md5": "649a05b032e6127f0ee7cbd7ff48cff4",
+        "fileSize": 17556361,
+        "logicalFilename": "Judy Enhanced Body with 4K Texture",
+        "updatePolicy": "exact",
+        "tag": "CWf-7xF3ASq"
+      },
+      "author": "Hyst - Dr Hysto",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Tony's Adult Store (Virtual Atelier) v8.3",
+      "version": "8.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16036,
+        "fileId": 140725,
+        "md5": "6f5041f3797df4dc48a4b5d0dabd8422",
+        "fileSize": 58586,
+        "logicalFilename": "Tony's Adult Store (Virtual Atelier) v8.3",
+        "updatePolicy": "exact",
+        "tag": "_oQMbwbaCJC"
+      },
+      "author": "Tonydiz",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Eve x Elle - Lust and Amour Pose Pack 2.31",
+      "version": "2.31",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 17549,
+        "fileId": 124001,
+        "md5": "53b1be1e02ffac0b1c295a44a3c409db",
+        "fileSize": 196490,
+        "logicalFilename": "Eve x Elle - Lust and Amour Pose Pack 2.31",
+        "updatePolicy": "exact",
+        "tag": "4C3qC1wpp-A"
+      },
+      "author": "LadyValkyria",
+      "details": {
+        "category": "Animations",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "ResponsiveV",
+      "version": "1.4",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 22694,
+        "fileId": 133090,
+        "md5": "e38b71288bb9624ab7e3980db2dfedb9",
+        "fileSize": 144797,
+        "logicalFilename": "ResponsiveV",
+        "updatePolicy": "exact",
+        "tag": "HXqWTutN5M7"
+      },
+      "author": "MisterChedda",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "RIPPED - Male V muscular body",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21823,
+        "fileId": 110290,
+        "md5": "d57fa021d8851da81c9b4b62ae3f91a2",
+        "fileSize": 5161423,
+        "logicalFilename": "RIPPED - Male V muscular body",
+        "updatePolicy": "exact",
+        "tag": "KcY9U19W5LJ"
+      },
+      "author": "Kalenko",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Knife and bullet wounds",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 16053,
+        "fileId": 155647,
+        "md5": "eb457896087efbba36ab65cfa36f82b3",
+        "fileSize": 157772,
+        "logicalFilename": "Knife and bullet wounds",
+        "updatePolicy": "exact",
+        "tag": "67l0kVGMZIv"
+      },
+      "author": "Me",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Panam Enhanced Body",
+      "version": "2.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 4843,
+        "fileId": 96878,
+        "md5": "1a2daf11d13d0fd6d6c6cef051b526e8",
+        "fileSize": 5174182,
+        "logicalFilename": "Panam Enhanced Body",
+        "updatePolicy": "exact",
+        "tag": "3wxJ-8FkOTN"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Modest Body Rig Lite Vanilla Butt",
+      "version": "2.2.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 19382,
+        "fileId": 103857,
+        "md5": "695d0cf80bd3a0a6b38b7a4bd6d4fd61",
+        "fileSize": 131714,
+        "logicalFilename": "Modest Body Rig Lite Vanilla Butt",
+        "updatePolicy": "exact",
+        "tag": "nPEWMJIAPIU"
+      },
+      "author": "Fell13",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "EVE - Skin Texture - VTK Fem V Bodies",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27685,
+        "fileId": 136724,
+        "md5": "c80dae17e8cbbf1281b24dd37d0e69b8",
+        "fileSize": 35063018,
+        "logicalFilename": "EVE - Skin Texture - VTK Fem V Bodies",
+        "updatePolicy": "exact",
+        "tag": "ppS6d1_9HsY"
+      },
+      "author": "Hyst",
+      "details": {
+        "category": "Appearance",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Zenitex Swimsuit",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 29354,
+        "fileId": 146397,
+        "md5": "424db99dd3f330e0d538955394edab82",
+        "fileSize": 8112907,
+        "logicalFilename": "Zenitex Swimsuit",
+        "updatePolicy": "exact",
+        "tag": "T0ccWz18P7A"
+      },
+      "author": "ScorpionTank - NotMayoSan",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Rosa's Sweet Summer Bikini",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 30346,
+        "fileId": 148069,
+        "md5": "123156c6bfc9a9baddb52502fc4a6280",
+        "fileSize": 36243540,
+        "logicalFilename": "Rosa's Sweet Summer Bikini",
+        "updatePolicy": "exact",
+        "tag": "4e_5DNWmYcF"
+      },
+      "author": "Rosapexa",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "FPP Hands Clipping Fix - VTK",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 21913,
+        "fileId": 110909,
+        "md5": "9c32e213e89dbbc41c6cbb71bc7da619",
+        "fileSize": 2104358,
+        "logicalFilename": "VTK",
+        "updatePolicy": "exact",
+        "tag": "MLRrrQCtOoG"
+      },
+      "author": "glek39",
+      "details": {
+        "category": "Visuals and Graphics",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Photomode NPCs Extended",
+      "version": "1.3",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 18837,
+        "fileId": 156063,
+        "md5": "34387ca4ad3b0ed860fbf7d4d8daf613",
+        "fileSize": 101944835,
+        "logicalFilename": "Photomode NPCs Extended",
+        "updatePolicy": "exact",
+        "tag": "PmLKRUSHu-H"
+      },
+      "author": "xBaebsae",
+      "details": {
+        "category": "Characters",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Panam Conversations Addon",
+      "version": "1.1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32507,
+        "fileId": 160131,
+        "md5": "07bbecc328eebec7854e23c234f071d5",
+        "fileSize": 27403143,
+        "logicalFilename": "Panam Conversations Addon",
+        "updatePolicy": "exact",
+        "tag": "SyzlhrwwLXB"
+      },
+      "author": "GetTenSO",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Judy Conversations Addon",
+      "version": "1.0.9",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31463,
+        "fileId": 163434,
+        "md5": "dcabf810c101525605c28d55fc28e5d8",
+        "fileSize": 31486540,
+        "logicalFilename": "Judy Conversations Addon",
+        "updatePolicy": "exact",
+        "tag": "UFJaTbWeANv"
+      },
+      "author": "GetTenSO",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Really Want To Stay At Your House - Panam",
+      "version": "3.5.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 8775,
+        "fileId": 149719,
+        "md5": "06c3ac0651ebc311e8684ff08449005a",
+        "fileSize": 186903,
+        "logicalFilename": "Really Want To Stay At Your House - Panam",
+        "updatePolicy": "exact",
+        "tag": "b1YbjNRUvwu"
+      },
+      "author": "Deceptious",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Dancing Night Outfit",
+      "version": "1.1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 27707,
+        "fileId": 146302,
+        "md5": "a4c1d024c0c44498f06b8b259402b3ec",
+        "fileSize": 24755544,
+        "logicalFilename": "Dancing Night Outfit",
+        "updatePolicy": "exact",
+        "tag": "0NuuPGIYV2J"
+      },
+      "author": "Atomiic",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "CeleXstar - Gley Outfit",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26843,
+        "fileId": 133729,
+        "md5": "a71f4a05b8c3dfbef6fbb2e35483f53f",
+        "fileSize": 29990622,
+        "logicalFilename": "CeleXstar - Gley Outfit",
+        "updatePolicy": "exact",
+        "tag": "3DryCujaY5w"
+      },
+      "author": "Atomiic",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Urban Sprinter Outfit",
+      "version": "1.2",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26350,
+        "fileId": 131925,
+        "md5": "c6076d009944483a72f41d5f2e9e392e",
+        "fileSize": 30145575,
+        "logicalFilename": "Urban Sprinter Outfit",
+        "updatePolicy": "exact",
+        "tag": "Ivy4BHl-Vb_"
+      },
+      "author": "Atomiic",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "A-Girls - Valby Outfit",
+      "version": "1.0",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 26845,
+        "fileId": 133082,
+        "md5": "8fb9620b9874f3b2e52792524fc3df0e",
+        "fileSize": 38418906,
+        "logicalFilename": "A-Girls - Valby Outfit",
+        "updatePolicy": "exact",
+        "tag": "cmDxMKasMS2"
+      },
+      "author": "Atomiic",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Atomiic Sunglasses Pack",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 31918,
+        "fileId": 154215,
+        "md5": "049a49efbecbe55a93c84804ca327a71",
+        "fileSize": 11384304,
+        "logicalFilename": "Atomiic Sunglasses Pack",
+        "updatePolicy": "exact",
+        "tag": "9v0rt_3y9mo"
+      },
+      "author": "AtomiicTV",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Atomiic Task Force Outfit Serena XL",
+      "version": "1",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 32674,
+        "fileId": 156163,
+        "md5": "bb9933ace18d7b569f1bea23ae3d6398",
+        "fileSize": 67298213,
+        "logicalFilename": "Atomiic Task Force Outfit Serena XL",
+        "updatePolicy": "exact",
+        "tag": "a2CTdAVA5JV"
+      },
+      "author": "AtomiicTV",
+      "details": {
+        "category": "Armour and Clothing",
+        "type": ""
+      },
+      "phase": 0
+    },
+    {
+      "name": "Atomiic Shop",
+      "version": "3.12",
+      "optional": false,
+      "domainName": "cyberpunk2077",
+      "source": {
+        "type": "nexus",
+        "modId": 20058,
+        "fileId": 162556,
+        "md5": "ab816cf19ffe7c98c7ae8c2385bee440",
+        "fileSize": 55881,
+        "logicalFilename": "Atomiic Shop",
+        "updatePolicy": "exact",
+        "tag": "3Tbm5sd1-Ak"
+      },
+      "author": "Atomiic",
+      "details": {
+        "category": "Gameplay",
+        "type": ""
+      },
+      "phase": 0
+    }
+  ],
+  "modRules": [],
+  "loadOrder": [],
+  "tools": [],
+  "collectionConfig": {
+    "recommendNewProfile": false,
+    "referenceTagScheme": "v1"
+  }
+}

@@ -1,4 +1,5 @@
 #include "nxmhandler_linux.h"
+#include "collections/collectionlink.h"
 #include "fluorinepaths.h"
 
 #include <log.h>
@@ -655,6 +656,13 @@ void NxmHandlerLinux::processSocketData(QLocalSocket* socket)
         emit directDownloadReceived(downloadUrl, gameDomain);
         continue;
       }
+    }
+
+    // nxm://<game>/collections/<slug>/revisions/<n>: NxmLink::parse rejects the path
+    // above, so it lands here instead of in the "unrecognized" warning.
+    if (CollectionLink::parse(line)) {
+      emit collectionReceived(line);
+      continue;
     }
 
     log::warn("received unrecognized url on socket: {}", line);
