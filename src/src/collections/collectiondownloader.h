@@ -91,6 +91,7 @@ private:
   int inFlight() const;
 
   void classifyExisting();
+  bool adoptExistingRow(File &file);
   void submitNext();
   void submit(File &file);
   void failWaiting(const QString &reason);

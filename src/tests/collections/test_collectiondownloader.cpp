@@ -296,6 +296,58 @@ TEST(Downloader, PausedExistingRowIsResumed) {
   EXPECT_TRUE(f.downloader.idle());
 }
 
+// A file still waiting for a window slot can gain a row after the first look,
+// from the user or a browser link. Submitting it then pops an "Already Queued"
+// or "Already Started" box, so the row is adopted instead.
+TEST(Downloader, RowAppearingWhileWaitingForASlotIsAwaitedNotResubmitted) {
+  Fixture f;
+  f.downloader.start("cyberpunk2077", requests(4));
+  ASSERT_EQ(f.port.submitted.size(), 3u);
+
+  f.port.rows[ids(3)] = row(PortRowState::Active, 20);
+  f.downloader.transferStarted(ids(0).first, ids(0).second);
+  f.downloader.tick();
+
+  EXPECT_EQ(f.port.submitted.size(), 3u);
+  EXPECT_FALSE(f.downloader.idle());
+  f.downloader.downloadCompleted(ids(3).first, ids(3).second, "/dl/d.7z");
+  ASSERT_EQ(f.ready.size(), 1u);
+  EXPECT_EQ(f.ready[0].modId, ids(3).first);
+}
+
+TEST(Downloader, PendingRequestAppearingWhileWaitingIsAwaitedNotResubmitted) {
+  Fixture f;
+  f.downloader.start("cyberpunk2077", requests(4));
+  f.port.pending.insert(ids(3));
+  f.downloader.transferStarted(ids(0).first, ids(0).second);
+  f.downloader.tick();
+  EXPECT_EQ(f.port.submitted.size(), 3u);
+  EXPECT_FALSE(f.downloader.idle());
+}
+
+TEST(Downloader, PausedRowAppearingWhileWaitingIsResumed) {
+  Fixture f;
+  f.downloader.start("cyberpunk2077", requests(4));
+  f.port.rows[ids(3)] = row(PortRowState::Paused, 21);
+  f.downloader.transferStarted(ids(0).first, ids(0).second);
+  f.downloader.tick();
+
+  EXPECT_EQ(f.port.resumed, std::vector<int>{21});
+  EXPECT_EQ(f.port.submitted.size(), 3u);
+}
+
+TEST(Downloader, ReadyRowAppearingWhileWaitingIsReportedWithoutSubmitting) {
+  Fixture f;
+  f.downloader.start("cyberpunk2077", requests(4));
+  f.port.rows[ids(3)] = row(PortRowState::Ready, 22, "/dl/d.7z");
+  f.downloader.transferStarted(ids(0).first, ids(0).second);
+  f.downloader.tick();
+
+  EXPECT_EQ(f.port.submitted.size(), 3u);
+  ASSERT_EQ(f.ready.size(), 1u);
+  EXPECT_EQ(f.ready[0].text, "/dl/d.7z");
+}
+
 TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted) {
   Fixture f;
   f.port.rows[ids(0)] = row(PortRowState::Failed, 9);

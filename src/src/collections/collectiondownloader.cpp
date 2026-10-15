@@ -103,45 +103,53 @@ int CollectionDownloader::inFlight() const {
 
 // Looks once at what the download manager already holds for each file. Files
 // already on disk never need the budget; rows someone else started are only
-// waited for.
+// waited for. submit() looks again for the files that wait longer.
 void CollectionDownloader::classifyExisting() {
   for (File &file : m_files) {
     if (file.phase != Phase::Queued || file.classified) {
       continue;
     }
     file.classified = true;
-
-    const int modId = file.request.modId;
-    const int fileId = file.request.fileId;
-    const PortRow row = m_port.find(modId, fileId);
-    switch (row.state) {
-    case PortRowState::Ready:
-      fileDownloaded(file, row.path);
-      break;
-    case PortRowState::Active:
-      // Not submitted by this run, so it takes no slot in the submission
-      // window: the window bounds the API requests we have in flight, and this
-      // row's are not ours.
-      enterTransfer(file);
-      break;
-    case PortRowState::Paused:
-      m_port.resume(row.index);
-      enterTransfer(file);
-      break;
-    case PortRowState::Failed:
-      // A failed or canceled row would make addNXMDownload ask the user; clear
-      // it and let the file be submitted fresh.
-      m_port.remove(row.index);
-      break;
-    case PortRowState::Missing:
-      // A request queued by someone else has no row yet; submitting it again
-      // would pop an "Already Queued" box.
-      if (m_port.appeared(modId, fileId)) {
-        enterTransfer(file);
-      }
-      break;
-    }
+    adoptExistingRow(file);
   }
+}
+
+// Takes over whatever the download manager already holds for the file. Returns
+// true when the file left the queue (settled or awaited), false when it still
+// needs to be submitted.
+bool CollectionDownloader::adoptExistingRow(File &file) {
+  const int modId = file.request.modId;
+  const int fileId = file.request.fileId;
+  const PortRow row = m_port.find(modId, fileId);
+  switch (row.state) {
+  case PortRowState::Ready:
+    fileDownloaded(file, row.path);
+    return true;
+  case PortRowState::Active:
+    // Not submitted by this run, so it takes no slot in the submission
+    // window: the window bounds the API requests we have in flight, and this
+    // row's are not ours.
+    enterTransfer(file);
+    return true;
+  case PortRowState::Paused:
+    m_port.resume(row.index);
+    enterTransfer(file);
+    return true;
+  case PortRowState::Failed:
+    // A failed or canceled row would make addNXMDownload ask the user; clear
+    // it and let the file be submitted fresh.
+    m_port.remove(row.index);
+    return false;
+  case PortRowState::Missing:
+    // A request queued by someone else has no row yet; submitting it again
+    // would pop an "Already Queued" box.
+    if (m_port.appeared(modId, fileId)) {
+      enterTransfer(file);
+      return true;
+    }
+    return false;
+  }
+  return false;
 }
 
 void CollectionDownloader::submitNext() {
@@ -166,6 +174,12 @@ void CollectionDownloader::submitNext() {
 }
 
 void CollectionDownloader::submit(File &file) {
+  // A file can wait a long time for its slot, and the user or an nxm link may
+  // have queued it meanwhile; submitting it then would show a message box.
+  if (adoptExistingRow(file)) {
+    return;
+  }
+
   file.phase = Phase::Submitted;
   file.lastChangeMs = m_nowMs();
 
