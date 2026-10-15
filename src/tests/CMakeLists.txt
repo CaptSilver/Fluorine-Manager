@@ -1407,6 +1407,9 @@ target_link_libraries(test_nexus_collections PRIVATE
 )
 add_test(NAME test_nexus_collections COMMAND test_nexus_collections)
 add_dependencies(fluorine-tests test_nexus_collections)
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/collections/fomodreplay.cpp
+    collections/test_fomodreplay.cpp)
 
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)
