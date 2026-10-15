@@ -138,6 +138,12 @@ public:
   void changeModPriority(int sourceIndex, int newPriority);
   void changeModPriority(std::vector<int> sourceIndices, int newPriority);
 
+  // Applies (mod index, priority) pairs in the given order as one batch: a single
+  // layoutAboutToBeChanged/layoutChanged pair and one modPrioritiesChanged for all
+  // touched rows. Each pair is a Profile::setModPriority call, so it shifts every mod
+  // between the old and the new slot and later pairs see the layout earlier ones left.
+  void setPriorities(const std::vector<std::pair<int, int>>& indexAndPriority);
+
   void setPluginContainer(PluginContainer* pluginContainer);
 
   bool modInfoAboutToChange(ModInfo::Ptr info);
