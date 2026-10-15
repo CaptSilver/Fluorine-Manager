@@ -16,6 +16,7 @@ add_executable(test_xdgpaths EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/src/src/fluorinepaths.cpp
     ${CMAKE_SOURCE_DIR}/src/src/fluorineconfig.cpp
     ${CMAKE_SOURCE_DIR}/src/src/nxmhandler_linux.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
     ${CMAKE_SOURCE_DIR}/src/src/nxmhandler_linux.h)
 set_target_properties(test_xdgpaths PROPERTIES AUTOMOC ON CXX_STANDARD 23)
 target_include_directories(test_xdgpaths PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
