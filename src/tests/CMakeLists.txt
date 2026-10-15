@@ -1432,5 +1432,24 @@ target_sources(test_nexus_collections PRIVATE
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionarchiveinstaller.cpp
     collections/test_collectionarchiveinstaller.cpp)
 
+# Collections: the QObject and widget units (hasher, fetcher, dialogs). The pure units
+# live in test_nexus_collections; this one needs a QApplication, so it has its own main.
+find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent Test)
+add_executable(test_nexus_collections_qt EXCLUDE_FROM_ALL
+    collections/test_main_qt.cpp
+    collections/test_filehash.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehash.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehashconcurrent.cpp)
+set_target_properties(test_nexus_collections_qt PROPERTIES
+    AUTOMOC ON CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+target_include_directories(test_nexus_collections_qt PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src ${CMAKE_SOURCE_DIR}/libs/uibase/include)
+target_link_libraries(test_nexus_collections_qt PRIVATE
+    mo2::uibase Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Test GTest::gtest)
+add_test(NAME test_nexus_collections_qt COMMAND test_nexus_collections_qt)
+set_tests_properties(test_nexus_collections_qt PROPERTIES
+    TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+add_dependencies(fluorine-tests test_nexus_collections_qt)
+
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)
