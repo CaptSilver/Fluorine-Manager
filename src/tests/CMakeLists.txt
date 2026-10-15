@@ -1443,17 +1443,28 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent Test)
 add_executable(test_nexus_collections_qt EXCLUDE_FROM_ALL
     collections/test_main_qt.cpp
     collections/test_filehash.cpp
+    collections/test_collectionmanifestfetcher.cpp
     ${CMAKE_SOURCE_DIR}/src/src/collections/filehash.cpp
-    ${CMAKE_SOURCE_DIR}/src/src/collections/filehashconcurrent.cpp)
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehashconcurrent.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionlink.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectionmanifestfetcher.cpp
+)
 set_target_properties(test_nexus_collections_qt PROPERTIES
     AUTOMOC ON CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
 target_include_directories(test_nexus_collections_qt PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/src ${CMAKE_SOURCE_DIR}/libs/uibase/include)
+    ${CMAKE_SOURCE_DIR}/src/src
+    ${CMAKE_SOURCE_DIR}/libs/uibase/include)
+target_compile_definitions(test_nexus_collections_qt PRIVATE
+    FLUORINE_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_nexus_collections_qt PRIVATE
-    mo2::uibase Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Test GTest::gtest)
+    mo2::uibase mo2::archive Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Test
+    GTest::gtest)
+add_dependencies(test_nexus_collections_qt 7z)
 add_test(NAME test_nexus_collections_qt COMMAND test_nexus_collections_qt)
 set_tests_properties(test_nexus_collections_qt PROPERTIES
-    TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    TIMEOUT 180
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
 add_dependencies(fluorine-tests test_nexus_collections_qt)
 
 add_test(NAME test_stalkeranomaly_save_fallback
