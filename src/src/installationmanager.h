@@ -30,8 +30,10 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #include <QObject>
 #include <QProgressDialog>
 
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
 #include "modinfo.h"
@@ -80,6 +82,30 @@ private:
   bool m_backup{false};
   bool m_merged{false};
   bool m_replaced{false};
+};
+
+// Switches InstallationManager::install into a mode with nobody to answer prompts.
+// Instead of trying the installer plugins, install() calls `installer` once. Every
+// refusal on the way (folder exists, archive cannot be opened, extraction fails)
+// becomes a failed result plus `failureReason`; no dialog is opened.
+struct UnattendedInstall
+{
+  // Decides the final layout: edits `tree` in place and returns RESULT_SUCCESS, or
+  // fills `reason` and returns a failure. `readFile` extracts one entry of the open
+  // archive to a temporary file and returns its path (empty on failure).
+  std::function<MOBase::IPluginInstaller::EInstallResult(
+      MOBase::GuessedValue<QString>& name, std::shared_ptr<MOBase::IFileTree>& tree,
+      const std::function<QString(std::shared_ptr<const MOBase::FileTreeEntry>)>&
+          readFile,
+      QString& reason)>
+      installer;
+
+  // An existing mod folder of the same name is emptied and reused (its meta.ini is
+  // kept) instead of being a failure.
+  bool replaceExistingFolder = false;
+
+  // Why the manager refused or failed. Written by the manager, read by the caller.
+  QString failureReason;
 };
 
 class InstallationManager : public QObject, public MOBase::IInstallationManager
@@ -166,6 +192,19 @@ public:
    * @return true if an installation is currently in progress
    **/
   bool isRunning() const;
+
+  /**
+   * @brief Turn unattended installs on (a value) or off (std::nullopt).
+   *
+   * While set, install() never opens a dialog and a second install() started while
+   * one is running is refused. Prefer UnattendedInstallGuard to calling this.
+   */
+  void setUnattended(std::optional<UnattendedInstall> unattended)
+  {
+    m_Unattended = std::move(unattended);
+  }
+
+  const std::optional<UnattendedInstall>& unattended() const { return m_Unattended; }
 
   /**
    * @brief retrieve a string describing the specified error code
@@ -285,6 +324,16 @@ private:
   //
   InstallationResult doInstall(ModInstallationInfo& info);
 
+  // Maps the tree an installer returned back onto the open archive, then runs
+  // doInstall. This is the tail every simple installer shares. Throws
+  // IncompatibilityException when the tree is no longer an ArchiveFileTree.
+  InstallationResult completeSimpleInstall(std::shared_ptr<MOBase::IFileTree>& filesTree,
+                                           ModInstallationInfo& info);
+
+  // Empties an existing mod folder for a replace install. The old meta.ini is put
+  // back afterwards so categories and notes survive.
+  void resetModDirectory(const QString& modName, const QString& targetDirectory);
+
   /**
    * @brief Clean the list of created files by removing all entries that are not
    *     in the given tree.
@@ -350,6 +399,9 @@ private:
 
   bool m_IsRunning{false};
 
+  // Set while a collection install runs; see UnattendedInstall.
+  std::optional<UnattendedInstall> m_Unattended;
+
   QWidget* m_ParentWidget{nullptr};
 
   QString m_ModsDirectory;
@@ -365,6 +417,33 @@ private:
   std::map<std::shared_ptr<const MOBase::FileTreeEntry>, QString> m_CreatedFiles;
   std::set<QString> m_TempFilesToDelete;
   std::unique_ptr<QTemporaryDir> m_TempExtractionDirectory;
+};
+
+// Turns unattended installs on for the guard's lifetime. failureReason() has to be
+// read before the guard goes out of scope: the destructor clears the setting along
+// with the reason.
+class UnattendedInstallGuard
+{
+public:
+  UnattendedInstallGuard(InstallationManager& manager, UnattendedInstall unattended)
+      : m_manager(manager)
+  {
+    m_manager.setUnattended(std::move(unattended));
+  }
+
+  ~UnattendedInstallGuard() { m_manager.setUnattended(std::nullopt); }
+
+  UnattendedInstallGuard(const UnattendedInstallGuard&)            = delete;
+  UnattendedInstallGuard& operator=(const UnattendedInstallGuard&) = delete;
+
+  QString failureReason() const
+  {
+    const auto& current = m_manager.unattended();
+    return current ? current->failureReason : QString();
+  }
+
+private:
+  InstallationManager& m_manager;
 };
 
 #endif  // INSTALLATIONMANAGER_H
