@@ -1,5 +1,7 @@
 #include "collectionresultsdialog.h"
 
+#include <algorithm>
+
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -168,12 +170,18 @@ CollectionResultsDialog::CollectionResultsDialog(const CollectionReport &report,
   if (!report.droppedFolders.empty()) {
     QStringList folders;
     for (const QString &folder : report.droppedFolders) {
-      folders << folder;
+      // Placement only runs after a completed session, so a cancelled or
+      // failed run disabled nothing.
+      const bool disabled =
+          report.placed && std::find(report.disabledFolders.begin(),
+                                     report.disabledFolders.end(),
+                                     folder) != report.disabledFolders.end();
+      folders << (disabled ? tr("%1 (disabled)") : tr("%1 (left as it was)"))
+                     .arg(folder);
     }
-    auto *dropped = new QLabel(
-        tr("Left as they were, because this revision no longer lists them: %1")
-            .arg(folders.join(QStringLiteral(", "))),
-        this);
+    auto *dropped = new QLabel(tr("No longer in this revision: %1")
+                                   .arg(folders.join(QStringLiteral(", "))),
+                               this);
     dropped->setObjectName(QStringLiteral("droppedLabel"));
     dropped->setWordWrap(true);
     root->addWidget(dropped);

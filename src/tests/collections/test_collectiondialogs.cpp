@@ -400,6 +400,30 @@ TEST(ResultsDialog, NoRetryButtonWhenNothingCanBeRetried) {
   EXPECT_EQ(dialog.findChild<QPushButton *>("retryButton"), nullptr);
 }
 
+TEST(ResultsDialog, DroppedFoldersAreWordedByWhatHappenedToThem) {
+  CollectionReport report = makeReport();
+  report.droppedFolders = {QStringLiteral("Gone"), QStringLiteral("Shared")};
+  report.disabledFolders = {QStringLiteral("Gone")};
+
+  {
+    CollectionResultsDialog dialog(report);
+    const auto *label = dialog.findChild<QLabel *>("droppedLabel");
+    ASSERT_NE(label, nullptr);
+    EXPECT_TRUE(label->text().contains(QStringLiteral("Gone (disabled)")))
+        << label->text().toStdString();
+    EXPECT_TRUE(
+        label->text().contains(QStringLiteral("Shared (left as it was)")))
+        << label->text().toStdString();
+  }
+
+  report.placed = false;
+  CollectionResultsDialog notPlaced(report);
+  const auto *label = notPlaced.findChild<QLabel *>("droppedLabel");
+  ASSERT_NE(label, nullptr);
+  EXPECT_FALSE(label->text().contains(QStringLiteral("disabled")))
+      << "nothing is disabled when placement did not run";
+}
+
 TEST(ResultsDialog, FolderExistsRowsOfferReplace) {
   CollectionResultsDialog dialog(makeReport());
 

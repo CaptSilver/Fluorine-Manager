@@ -60,6 +60,7 @@ CollectionReport seedReport(const CollectionManifest& manifest, const Collection
   report.collectionName = manifest.info.name;
   report.revision       = link.revision;
   report.droppedFolders = plan.droppedFolders;
+  report.disabledFolders = plan.toDisable;
   for (const PlannedMod& planned : plan.mods)
     report.rows.push_back(rowFor(planned));
   return report;

@@ -38,6 +38,7 @@ struct CollectionReport
   int revision = 0;
   std::vector<CollectionReportRow> rows;
   std::vector<QString> droppedFolders;
+  std::vector<QString> disabledFolders; // dropped folders a placed Full sync disables
   bool cancelled = false;
   bool placed = false;
   QString sessionError;

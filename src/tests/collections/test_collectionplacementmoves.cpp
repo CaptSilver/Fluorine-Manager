@@ -292,6 +292,7 @@ TEST(Report, SeedMarksRefusedRowsWithReasons)
 
   CollectionPlan plan;
   plan.droppedFolders = {"Gone"};
+  plan.toDisable      = {"Gone"};
   const std::vector<std::pair<Action, QString>> actions = {
       {Action::Install, {}},
       {Action::AlreadyInstalled, {}},
@@ -313,6 +314,7 @@ TEST(Report, SeedMarksRefusedRowsWithReasons)
   EXPECT_EQ(report.collectionName, "Core");
   EXPECT_EQ(report.revision, 7);
   EXPECT_EQ(report.droppedFolders, std::vector<QString>{"Gone"});
+  EXPECT_EQ(report.disabledFolders, std::vector<QString>{"Gone"});
   EXPECT_FALSE(report.cancelled);
   EXPECT_FALSE(report.placed);
   ASSERT_EQ(report.rows.size(), 6u);
