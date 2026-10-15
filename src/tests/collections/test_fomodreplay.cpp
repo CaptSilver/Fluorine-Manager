@@ -9,42 +9,36 @@
 #include <ostream>
 #include <vector>
 
-// Readable QString output in gtest failure messages. Internal linkage so other test
-// files can define their own without a duplicate symbol.
-static void PrintTo(const QString& text, std::ostream* os)
-{
+// Readable QString output in gtest failure messages. Internal linkage so other
+// test files can define their own without a duplicate symbol.
+static void PrintTo(const QString &text, std::ostream *os) {
   *os << '"' << qPrintable(text) << '"';
 }
 
-namespace
-{
-struct Pick
-{
+namespace {
+struct Pick {
   QString plugin;
-  int idx = -1;  // negative: the manifest recorded no idx
+  int idx = -1; // negative: the manifest recorded no idx
 };
 
-struct GroupPicks
-{
+struct GroupPicks {
   QString group;
   std::vector<Pick> picks;
 };
 
-struct StepPicks
-{
+struct StepPicks {
   QString step;
   std::vector<GroupPicks> groups;
 };
 
 // The shape the manifest stores under "choices".
-QJsonObject choiceFor(const std::vector<StepPicks>& steps)
-{
+QJsonObject choiceFor(const std::vector<StepPicks> &steps) {
   QJsonArray options;
-  for (const StepPicks& step : steps) {
+  for (const StepPicks &step : steps) {
     QJsonArray groups;
-    for (const GroupPicks& group : step.groups) {
+    for (const GroupPicks &group : step.groups) {
       QJsonArray picks;
-      for (const Pick& pick : group.picks) {
+      for (const Pick &pick : group.picks) {
         QJsonObject choice{{"name", pick.plugin}};
         if (pick.idx >= 0) {
           choice.insert("idx", pick.idx);
@@ -58,23 +52,21 @@ QJsonObject choiceFor(const std::vector<StepPicks>& steps)
   return QJsonObject{{"type", "fomod"}, {"options", options}};
 }
 
-FomodModel parseModel(const QString& xml)
-{
+FomodModel parseModel(const QString &xml) {
   QString error;
-  const std::optional<FomodModel> model = FomodModel::parse(xml.toUtf8(), error);
+  const std::optional<FomodModel> model =
+      FomodModel::parse(xml.toUtf8(), error);
   EXPECT_TRUE(model.has_value()) << qPrintable(error);
   return model.value_or(FomodModel{});
 }
 
-struct Outcome
-{
+struct Outcome {
   FomodSelection selection;
   QStringList warnings;
   QString error;
 };
 
-Outcome replay(const QString& xml, const QJsonObject& choices)
-{
+Outcome replay(const QString &xml, const QJsonObject &choices) {
   Outcome outcome;
   const FomodModel model = parseModel(xml);
   outcome.selection =
@@ -82,53 +74,50 @@ Outcome replay(const QString& xml, const QJsonObject& choices)
   return outcome;
 }
 
-QStringList sourcesOf(const FomodSelection& selection)
-{
+QStringList sourcesOf(const FomodSelection &selection) {
   QStringList sources;
-  for (const FileRule& rule : selection.rules) {
+  for (const FileRule &rule : selection.rules) {
     sources << rule.source;
   }
   return sources;
 }
 
 // A choice that picks plugin "P" of group "G" in step "S".
-QJsonObject pickP()
-{
-  return choiceFor({{"S", {{"G", {{"P", 0}}}}}});
-}
+QJsonObject pickP() { return choiceFor({{"S", {{"G", {{"P", 0}}}}}}); }
 
-QString config(const QString& body)
-{
+QString config(const QString &body) {
   return QStringLiteral("<config>") + body + QStringLiteral("</config>");
 }
 
-// Step "S", group "G", plugin "P" with the given <file>/<folder> elements and flags.
-QString oneStep(const QString& filesXml, const QString& flagsXml = QString())
-{
+// Step "S", group "G", plugin "P" with the given <file>/<folder> elements and
+// flags.
+QString oneStep(const QString &filesXml, const QString &flagsXml = QString()) {
   return QStringLiteral(
              "<installSteps><installStep name=\"S\"><optionalFileGroups>"
-             "<group name=\"G\"><plugins><plugin name=\"P\"><files>%1</files>%2</plugin>"
-             "</plugins></group></optionalFileGroups></installStep></installSteps>")
+             "<group name=\"G\"><plugins><plugin "
+             "name=\"P\"><files>%1</files>%2</plugin>"
+             "</plugins></group></optionalFileGroups></installStep></"
+             "installSteps>")
       .arg(filesXml, flagsXml);
 }
 
-QString flagged(const QString& flagElements)
-{
-  return oneStep(QString(), "<conditionFlags>" + flagElements + "</conditionFlags>");
+QString flagged(const QString &flagElements) {
+  return oneStep(QString(),
+                 "<conditionFlags>" + flagElements + "</conditionFlags>");
 }
 
 const QString DefaultPatternFile = QStringLiteral(
     R"(<file source="a.archive" destination="archive\pc\mod\p.archive"/>)");
 
-QString pattern(const QString& dependencies, const QString& filesXml = DefaultPatternFile)
-{
-  return QStringLiteral("<conditionalFileInstalls><patterns><pattern>%1<files>%2</files>"
-                        "</pattern></patterns></conditionalFileInstalls>")
+QString pattern(const QString &dependencies,
+                const QString &filesXml = DefaultPatternFile) {
+  return QStringLiteral(
+             "<conditionalFileInstalls><patterns><pattern>%1<files>%2</files>"
+             "</pattern></patterns></conditionalFileInstalls>")
       .arg(dependencies, filesXml);
 }
 
-QString carXml()
-{
+QString carXml() {
   return QString::fromUtf8(R"xml(<config>
  <requiredInstallFiles><folder source="core" destination="archive\pc\mod"/></requiredInstallFiles>
  <installSteps>
@@ -150,8 +139,7 @@ QString carXml()
 </config>)xml");
 }
 
-FomodCondition flagCondition(const QString& name, const QString& value)
-{
+FomodCondition flagCondition(const QString &name, const QString &value) {
   FomodCondition condition;
   condition.kind = FomodCondition::Kind::Flag;
   condition.name = name;
@@ -159,26 +147,24 @@ FomodCondition flagCondition(const QString& name, const QString& value)
   return condition;
 }
 
-FomodCondition leafCondition(FomodCondition::Kind kind)
-{
+FomodCondition leafCondition(FomodCondition::Kind kind) {
   FomodCondition condition;
   condition.kind = kind;
   return condition;
 }
 
-FomodCondition combine(FomodCondition::Kind kind, std::vector<FomodCondition> children)
-{
+FomodCondition combine(FomodCondition::Kind kind,
+                       std::vector<FomodCondition> children) {
   FomodCondition condition;
   condition.kind = kind;
   condition.children = std::move(children);
   return condition;
 }
-}  // namespace
+} // namespace
 
 // --- selection ---------------------------------------------------------------
 
-TEST(FomodReplay, SelectsRecordedPluginAndMatchingPattern)
-{
+TEST(FomodReplay, SelectsRecordedPluginAndMatchingPattern) {
   const Outcome outcome =
       replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {{"sp01", 1}}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
@@ -193,8 +179,7 @@ TEST(FomodReplay, SelectsRecordedPluginAndMatchingPattern)
             QString("archive/pc/mod/sp01.archive"));
 }
 
-TEST(FomodReplay, SequenceCountsUpAcrossRequiredPluginAndPatternRules)
-{
+TEST(FomodReplay, SequenceCountsUpAcrossRequiredPluginAndPatternRules) {
   const Outcome outcome =
       replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {{"sp01", 1}}}}}}));
   ASSERT_EQ(outcome.selection.rules.size(), 3u);
@@ -203,24 +188,23 @@ TEST(FomodReplay, SequenceCountsUpAcrossRequiredPluginAndPatternRules)
   EXPECT_EQ(outcome.selection.rules[2].sequence, 2);
 }
 
-TEST(FomodReplay, PatternNotAppliedWhenFlagNotSet)
-{
+TEST(FomodReplay, PatternNotAppliedWhenFlagNotSet) {
   const Outcome outcome =
       replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {{"sp02", 2}}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
-  EXPECT_EQ(sourcesOf(outcome.selection), (QStringList{"core", "opt/sp02.archive"}));
+  EXPECT_EQ(sourcesOf(outcome.selection),
+            (QStringList{"core", "opt/sp02.archive"}));
 }
 
-TEST(FomodReplay, EmptySelectionInstallsOnlyRequired)
-{
-  const Outcome outcome = replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {}}}}}));
+TEST(FomodReplay, EmptySelectionInstallsOnlyRequired) {
+  const Outcome outcome =
+      replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.pluginNames.isEmpty());
   EXPECT_EQ(sourcesOf(outcome.selection), QStringList{"core"});
 }
 
-TEST(FomodReplay, EmptyOptionSkipped)
-{
+TEST(FomodReplay, EmptyOptionSkipped) {
   // An option with no picks is not looked up, so a step the installer does not
   // have is not an error.
   const Outcome outcome =
@@ -229,12 +213,12 @@ TEST(FomodReplay, EmptyOptionSkipped)
   EXPECT_EQ(sourcesOf(outcome.selection), QStringList{"core"});
 
   const Outcome noGroups = replay(
-      carXml(), QJsonObject{{"options", QJsonArray{QJsonObject{{"name", "Parts"}}}}});
+      carXml(),
+      QJsonObject{{"options", QJsonArray{QJsonObject{{"name", "Parts"}}}}});
   EXPECT_TRUE(noGroups.error.isEmpty()) << qPrintable(noGroups.error);
 }
 
-TEST(FomodReplay, UnmatchedPluginNameIsError)
-{
+TEST(FomodReplay, UnmatchedPluginNameIsError) {
   const Outcome outcome =
       replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {{"sp99", 1}}}}}}));
   EXPECT_NE(outcome.error.indexOf("sp99"), -1) << qPrintable(outcome.error);
@@ -242,8 +226,7 @@ TEST(FomodReplay, UnmatchedPluginNameIsError)
   EXPECT_TRUE(outcome.selection.pluginNames.isEmpty());
 }
 
-TEST(FomodReplay, UnmatchedStepOrGroupIsError)
-{
+TEST(FomodReplay, UnmatchedStepOrGroupIsError) {
   const Outcome badStep =
       replay(carXml(), choiceFor({{"Nope", {{"Spoiler", {{"sp01", 1}}}}}}));
   EXPECT_NE(badStep.error.indexOf("Nope"), -1) << qPrintable(badStep.error);
@@ -255,8 +238,7 @@ TEST(FomodReplay, UnmatchedStepOrGroupIsError)
   EXPECT_TRUE(badGroup.selection.rules.empty());
 }
 
-TEST(FomodReplay, FoldedNameLookupForStepAndGroup)
-{
+TEST(FomodReplay, FoldedNameLookupForStepAndGroup) {
   // Case and spacing differ from the XML at every level, plugin name included.
   const Outcome outcome =
       replay(carXml(), choiceFor({{"parts", {{"  SPOILER ", {{"SP01", 1}}}}}}));
@@ -264,50 +246,61 @@ TEST(FomodReplay, FoldedNameLookupForStepAndGroup)
   EXPECT_EQ(outcome.selection.pluginNames, QStringList{"sp01"});
 }
 
-TEST(FomodReplay, AmbiguousFoldedMatchIsError)
-{
+TEST(FomodReplay, AmbiguousFoldedMatchIsError) {
   const QString twoSteps = config(
       "<installSteps>"
-      "<installStep name=\"Style\"><optionalFileGroups><group name=\"G\"><plugins>"
-      "<plugin name=\"P\"><files/></plugin></plugins></group></optionalFileGroups>"
+      "<installStep name=\"Style\"><optionalFileGroups><group "
+      "name=\"G\"><plugins>"
+      "<plugin "
+      "name=\"P\"><files/></plugin></plugins></group></optionalFileGroups>"
       "</installStep>"
-      "<installStep name=\"STYLE\"><optionalFileGroups><group name=\"G\"><plugins>"
-      "<plugin name=\"P\"><files/></plugin></plugins></group></optionalFileGroups>"
+      "<installStep name=\"STYLE\"><optionalFileGroups><group "
+      "name=\"G\"><plugins>"
+      "<plugin "
+      "name=\"P\"><files/></plugin></plugins></group></optionalFileGroups>"
       "</installStep></installSteps>");
-  const Outcome step = replay(twoSteps, choiceFor({{"style", {{"G", {{"P", 0}}}}}}));
+  const Outcome step =
+      replay(twoSteps, choiceFor({{"style", {{"G", {{"P", 0}}}}}}));
   EXPECT_NE(step.error.indexOf("ambiguous"), -1) << qPrintable(step.error);
 
-  const QString twoGroups = config(
-      "<installSteps><installStep name=\"S\"><optionalFileGroups>"
-      "<group name=\"Opt\"><plugins><plugin name=\"P\"><files/></plugin></plugins></group>"
-      "<group name=\"OPT\"><plugins><plugin name=\"P\"><files/></plugin></plugins></group>"
-      "</optionalFileGroups></installStep></installSteps>");
-  const Outcome group = replay(twoGroups, choiceFor({{"S", {{"opt", {{"P", 0}}}}}}));
+  const QString twoGroups =
+      config("<installSteps><installStep name=\"S\"><optionalFileGroups>"
+             "<group name=\"Opt\"><plugins><plugin "
+             "name=\"P\"><files/></plugin></plugins></group>"
+             "<group name=\"OPT\"><plugins><plugin "
+             "name=\"P\"><files/></plugin></plugins></group>"
+             "</optionalFileGroups></installStep></installSteps>");
+  const Outcome group =
+      replay(twoGroups, choiceFor({{"S", {{"opt", {{"P", 0}}}}}}));
   EXPECT_NE(group.error.indexOf("ambiguous"), -1) << qPrintable(group.error);
 }
 
-TEST(FomodReplay, ExactNameBeatsFoldedMatch)
-{
+TEST(FomodReplay, ExactNameBeatsFoldedMatch) {
   // "Opt" is an exact match, so "OPT" is not a competing candidate.
-  const QString twoGroups = config(
-      "<installSteps><installStep name=\"S\"><optionalFileGroups>"
-      "<group name=\"Opt\"><plugins><plugin name=\"P\"><files>"
-      "<file source=\"a.archive\" destination=\"a.archive\"/></files></plugin></plugins></group>"
-      "<group name=\"OPT\"><plugins><plugin name=\"P\"><files>"
-      "<file source=\"b.archive\" destination=\"b.archive\"/></files></plugin></plugins></group>"
-      "</optionalFileGroups></installStep></installSteps>");
-  const Outcome outcome = replay(twoGroups, choiceFor({{"S", {{"Opt", {{"P", 0}}}}}}));
+  const QString twoGroups =
+      config("<installSteps><installStep name=\"S\"><optionalFileGroups>"
+             "<group name=\"Opt\"><plugins><plugin name=\"P\"><files>"
+             "<file source=\"a.archive\" "
+             "destination=\"a.archive\"/></files></plugin></plugins></group>"
+             "<group name=\"OPT\"><plugins><plugin name=\"P\"><files>"
+             "<file source=\"b.archive\" "
+             "destination=\"b.archive\"/></files></plugin></plugins></group>"
+             "</optionalFileGroups></installStep></installSteps>");
+  const Outcome outcome =
+      replay(twoGroups, choiceFor({{"S", {{"Opt", {{"P", 0}}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_EQ(sourcesOf(outcome.selection), QStringList{"a.archive"});
 }
 
-TEST(FomodReplay, DuplicatePluginNamesDisambiguatedByIdx)
-{
+TEST(FomodReplay, DuplicatePluginNamesDisambiguatedByIdx) {
   const QString xml = config(
-      "<installSteps><installStep name=\"S\"><optionalFileGroups><group name=\"G\"><plugins>"
-      "<plugin name=\"Dup\"><files><file source=\"a.archive\" destination=\"a.archive\"/>"
+      "<installSteps><installStep name=\"S\"><optionalFileGroups><group "
+      "name=\"G\"><plugins>"
+      "<plugin name=\"Dup\"><files><file source=\"a.archive\" "
+      "destination=\"a.archive\"/>"
       "</files></plugin>"
-      "<plugin name=\"Dup\"><files><file source=\"b.archive\" destination=\"b.archive\"/>"
+      "<plugin name=\"Dup\"><files><file source=\"b.archive\" "
+      "destination=\"b.archive\"/>"
       "</files></plugin>"
       "</plugins></group></optionalFileGroups></installStep></installSteps>");
 
@@ -323,89 +316,98 @@ TEST(FomodReplay, DuplicatePluginNamesDisambiguatedByIdx)
   const Outcome noIdx = replay(xml, choiceFor({{"S", {{"G", {{"Dup", -1}}}}}}));
   EXPECT_NE(noIdx.error.indexOf("ambiguous"), -1) << qPrintable(noIdx.error);
 
-  const Outcome outOfRange = replay(xml, choiceFor({{"S", {{"G", {{"Dup", 5}}}}}}));
-  EXPECT_NE(outOfRange.error.indexOf("ambiguous"), -1) << qPrintable(outOfRange.error);
+  const Outcome outOfRange =
+      replay(xml, choiceFor({{"S", {{"G", {{"Dup", 5}}}}}}));
+  EXPECT_NE(outOfRange.error.indexOf("ambiguous"), -1)
+      << qPrintable(outOfRange.error);
 }
 
-TEST(FomodReplay, IdxMismatchWarnsButSelectsByName)
-{
+TEST(FomodReplay, IdxMismatchWarnsButSelectsByName) {
   const Outcome outcome =
       replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {{"sp01", 2}}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_EQ(outcome.selection.pluginNames, QStringList{"sp01"});
   ASSERT_EQ(outcome.warnings.size(), 1);
-  EXPECT_NE(outcome.warnings[0].indexOf("idx"), -1) << qPrintable(outcome.warnings[0]);
+  EXPECT_NE(outcome.warnings[0].indexOf("idx"), -1)
+      << qPrintable(outcome.warnings[0]);
 }
 
-TEST(FomodReplay, MissingIdxOnUniqueNameIsNotAWarning)
-{
+TEST(FomodReplay, MissingIdxOnUniqueNameIsNotAWarning) {
   const Outcome outcome =
       replay(carXml(), choiceFor({{"Parts", {{"Spoiler", {{"sp01", -1}}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.warnings.isEmpty());
 }
 
-// --- flags and patterns --------------------------------------------------------
+// --- flags and patterns
+// --------------------------------------------------------
 
-TEST(FomodReplay, FlagsAcrossStepsLastWriteWins)
-{
+TEST(FomodReplay, FlagsAcrossStepsLastWriteWins) {
   const QString xml = config(
       "<installSteps>"
       "<installStep name=\"S1\"><optionalFileGroups><group name=\"G\"><plugins>"
-      "<plugin name=\"P1\"><files/><conditionFlags><flag name=\"x\">1</flag></conditionFlags>"
+      "<plugin name=\"P1\"><files/><conditionFlags><flag "
+      "name=\"x\">1</flag></conditionFlags>"
       "</plugin></plugins></group></optionalFileGroups></installStep>"
       "<installStep name=\"S2\"><optionalFileGroups><group name=\"G\"><plugins>"
-      "<plugin name=\"P2\"><files/><conditionFlags><flag name=\"x\">2</flag></conditionFlags>"
+      "<plugin name=\"P2\"><files/><conditionFlags><flag "
+      "name=\"x\">2</flag></conditionFlags>"
       "</plugin></plugins></group></optionalFileGroups></installStep>"
       "</installSteps>" +
-      pattern(R"(<dependencies><flagDependency flag="x" value="2"/></dependencies>)"));
+      pattern(
+          R"(<dependencies><flagDependency flag="x" value="2"/></dependencies>)"));
 
-  // The choices list the later step first. Flags still follow document order, so
-  // the second step's write is the last one and the pattern applies.
-  const Outcome outcome =
-      replay(xml, choiceFor({{"S2", {{"G", {{"P2", 0}}}}}, {"S1", {{"G", {{"P1", 0}}}}}}));
+  // The choices list the later step first. Flags still follow document order,
+  // so the second step's write is the last one and the pattern applies.
+  const Outcome outcome = replay(
+      xml,
+      choiceFor({{"S2", {{"G", {{"P2", 0}}}}}, {"S1", {{"G", {{"P1", 0}}}}}}));
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_EQ(outcome.selection.pluginNames, (QStringList{"P1", "P2"}));
   EXPECT_EQ(sourcesOf(outcome.selection), QStringList{"a.archive"});
 }
 
-TEST(FomodReplay, FlagLastWriteWinsWithinOnePlugin)
-{
+TEST(FomodReplay, FlagLastWriteWinsWithinOnePlugin) {
   const QString xml = config(
       flagged(R"(<flag name="x">1</flag><flag name="x">2</flag>)") +
-      pattern(R"(<dependencies><flagDependency flag="x" value="2"/></dependencies>)"));
+      pattern(
+          R"(<dependencies><flagDependency flag="x" value="2"/></dependencies>)"));
   const Outcome outcome = replay(xml, pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_EQ(sourcesOf(outcome.selection), QStringList{"a.archive"});
 }
 
-TEST(FomodReplay, FlagValuesAndNamesMatchExactly)
-{
+TEST(FomodReplay, FlagValuesAndNamesMatchExactly) {
   const std::map<QString, QString> flags{{"f", "On"}, {"Foo", "1"}};
-  EXPECT_EQ(FomodReplay::evaluate(flagCondition("f", "on"), flags), FomodTriState::False);
-  EXPECT_EQ(FomodReplay::evaluate(flagCondition("foo", "1"), flags), FomodTriState::False);
-  EXPECT_EQ(FomodReplay::evaluate(flagCondition("f", "On"), flags), FomodTriState::True);
+  EXPECT_EQ(FomodReplay::evaluate(flagCondition("f", "on"), flags),
+            FomodTriState::False);
+  EXPECT_EQ(FomodReplay::evaluate(flagCondition("foo", "1"), flags),
+            FomodTriState::False);
+  EXPECT_EQ(FomodReplay::evaluate(flagCondition("f", "On"), flags),
+            FomodTriState::True);
   // A flag nobody set reads as the empty string.
-  EXPECT_EQ(FomodReplay::evaluate(flagCondition("unset", ""), flags), FomodTriState::True);
+  EXPECT_EQ(FomodReplay::evaluate(flagCondition("unset", ""), flags),
+            FomodTriState::True);
   EXPECT_EQ(FomodReplay::evaluate(flagCondition("unset", "1"), flags),
             FomodTriState::False);
 
   // The same through a whole replay: "On" set, "on" required.
   const QString xml = config(
       flagged(R"(<flag name="f">On</flag>)") +
-      pattern(R"(<dependencies><flagDependency flag="f" value="on"/></dependencies>)"));
+      pattern(
+          R"(<dependencies><flagDependency flag="f" value="on"/></dependencies>)"));
   const Outcome outcome = replay(xml, pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.rules.empty());
 }
 
-TEST(FomodReplay, OrAndNestedDependencies)
-{
+TEST(FomodReplay, OrAndNestedDependencies) {
   const QString xml = config(
       flagged(R"(<flag name="x">1</flag>)") +
-      pattern(R"(<dependencies operator="Or"><flagDependency flag="y" value="1"/>)"
-              R"(<dependencies operator="And"><flagDependency flag="x" value="1"/>)"
-              R"(</dependencies></dependencies>)"));
+      pattern(
+          R"(<dependencies operator="Or"><flagDependency flag="y" value="1"/>)"
+          R"(<dependencies operator="And"><flagDependency flag="x" value="1"/>)"
+          R"(</dependencies></dependencies>)"));
   const Outcome outcome = replay(xml, pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   ASSERT_EQ(outcome.selection.rules.size(), 1u);
@@ -413,48 +415,50 @@ TEST(FomodReplay, OrAndNestedDependencies)
             QString("archive/pc/mod/p.archive"));
 }
 
-TEST(FomodReplay, AndWithUnmetFlagSkipped)
-{
+TEST(FomodReplay, AndWithUnmetFlagSkipped) {
   const QString xml = config(
       flagged(R"(<flag name="x">1</flag>)") +
-      pattern(R"(<dependencies operator="And"><flagDependency flag="x" value="1"/>)"
-              R"(<flagDependency flag="y" value="1"/></dependencies>)"));
+      pattern(
+          R"(<dependencies operator="And"><flagDependency flag="x" value="1"/>)"
+          R"(<flagDependency flag="y" value="1"/></dependencies>)"));
   const Outcome outcome = replay(xml, pickP());
   EXPECT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.rules.empty());
 }
 
-TEST(FomodReplay, PatternWithoutDependenciesAlwaysApplies)
-{
-  const QString xml = config(
-      oneStep(QString()) +
-      QStringLiteral("<conditionalFileInstalls><patterns><pattern><files>%1</files>"
-                     "</pattern></patterns></conditionalFileInstalls>")
-          .arg(DefaultPatternFile));
+TEST(FomodReplay, PatternWithoutDependenciesAlwaysApplies) {
+  const QString xml =
+      config(oneStep(QString()) +
+             QStringLiteral(
+                 "<conditionalFileInstalls><patterns><pattern><files>%1</files>"
+                 "</pattern></patterns></conditionalFileInstalls>")
+                 .arg(DefaultPatternFile));
   const Outcome outcome = replay(xml, pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   EXPECT_EQ(sourcesOf(outcome.selection), QStringList{"a.archive"});
 }
 
-TEST(FomodReplay, UnknownLeafThatMattersIsError)
-{
+TEST(FomodReplay, UnknownLeafThatMattersIsError) {
   const QString xml = config(
       flagged(R"(<flag name="x">1</flag>)") +
-      pattern(R"(<dependencies operator="And"><flagDependency flag="x" value="1"/>)"
-              R"(<fileDependency file="Other.esp" state="Active"/></dependencies>)"));
+      pattern(
+          R"(<dependencies operator="And"><flagDependency flag="x" value="1"/>)"
+          R"(<fileDependency file="Other.esp" state="Active"/></dependencies>)"));
   const Outcome outcome = replay(xml, pickP());
-  EXPECT_NE(outcome.error.indexOf("pattern #1"), -1) << qPrintable(outcome.error);
-  EXPECT_NE(outcome.error.indexOf("game version"), -1) << qPrintable(outcome.error);
+  EXPECT_NE(outcome.error.indexOf("pattern #1"), -1)
+      << qPrintable(outcome.error);
+  EXPECT_NE(outcome.error.indexOf("game version"), -1)
+      << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.rules.empty());
 }
 
-TEST(FomodReplay, UnknownLeafIrrelevantWhenFlagDecides)
-{
+TEST(FomodReplay, UnknownLeafIrrelevantWhenFlagDecides) {
   // And with a False flag is False whatever the file dependency says.
   const QString decidedFalse = config(
       flagged(R"(<flag name="x">1</flag>)") +
-      pattern(R"(<dependencies operator="And"><flagDependency flag="x" value="9"/>)"
-              R"(<fileDependency file="Other.esp" state="Active"/></dependencies>)"));
+      pattern(
+          R"(<dependencies operator="And"><flagDependency flag="x" value="9"/>)"
+          R"(<fileDependency file="Other.esp" state="Active"/></dependencies>)"));
   const Outcome skipped = replay(decidedFalse, pickP());
   EXPECT_TRUE(skipped.error.isEmpty()) << qPrintable(skipped.error);
   EXPECT_TRUE(skipped.selection.rules.empty());
@@ -462,24 +466,25 @@ TEST(FomodReplay, UnknownLeafIrrelevantWhenFlagDecides)
   // Or with a True flag is True whatever the file dependency says.
   const QString decidedTrue = config(
       flagged(R"(<flag name="x">1</flag>)") +
-      pattern(R"(<dependencies operator="Or"><flagDependency flag="x" value="1"/>)"
-              R"(<fileDependency file="Other.esp" state="Active"/></dependencies>)"));
+      pattern(
+          R"(<dependencies operator="Or"><flagDependency flag="x" value="1"/>)"
+          R"(<fileDependency file="Other.esp" state="Active"/></dependencies>)"));
   const Outcome applied = replay(decidedTrue, pickP());
   EXPECT_TRUE(applied.error.isEmpty()) << qPrintable(applied.error);
   EXPECT_EQ(sourcesOf(applied.selection), QStringList{"a.archive"});
 }
 
-TEST(FomodReplay, GameDependencyIsError)
-{
+TEST(FomodReplay, GameDependencyIsError) {
   const QString xml = config(
       oneStep(QString()) +
-      pattern(R"(<dependencies><gameDependency version="2.0"/></dependencies>)"));
+      pattern(
+          R"(<dependencies><gameDependency version="2.0"/></dependencies>)"));
   const Outcome outcome = replay(xml, pickP());
-  EXPECT_NE(outcome.error.indexOf("pattern #1"), -1) << qPrintable(outcome.error);
+  EXPECT_NE(outcome.error.indexOf("pattern #1"), -1)
+      << qPrintable(outcome.error);
 }
 
-TEST(FomodReplay, EvaluateUsesThreeValuedLogic)
-{
+TEST(FomodReplay, EvaluateUsesThreeValuedLogic) {
   const std::map<QString, QString> flags{{"x", "1"}};
   const FomodCondition met = flagCondition("x", "1");
   const FomodCondition unmet = flagCondition("x", "2");
@@ -498,18 +503,20 @@ TEST(FomodReplay, EvaluateUsesThreeValuedLogic)
             FomodTriState::Unknown);
   EXPECT_EQ(FomodReplay::evaluate(combine(Kind::Or, {unmet, unmet}), flags),
             FomodTriState::False);
-  EXPECT_EQ(FomodReplay::evaluate(combine(Kind::And, {}), flags), FomodTriState::True);
-  EXPECT_EQ(FomodReplay::evaluate(combine(Kind::Or, {}), flags), FomodTriState::False);
+  EXPECT_EQ(FomodReplay::evaluate(combine(Kind::And, {}), flags),
+            FomodTriState::True);
+  EXPECT_EQ(FomodReplay::evaluate(combine(Kind::Or, {}), flags),
+            FomodTriState::False);
   EXPECT_EQ(FomodReplay::evaluate(leafCondition(Kind::Game), flags),
             FomodTriState::Unknown);
   EXPECT_EQ(FomodReplay::evaluate(leafCondition(Kind::Fomm), flags),
             FomodTriState::Unknown);
 }
 
-// --- destinations ----------------------------------------------------------------
+// --- destinations
+// ----------------------------------------------------------------
 
-TEST(FomodReplay, FileWithoutDestinationKeepsSourcePath)
-{
+TEST(FomodReplay, FileWithoutDestinationKeepsSourcePath) {
   const Outcome outcome =
       replay(config(oneStep(R"(<file source="dir\x.archive"/>)")), pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
@@ -519,9 +526,9 @@ TEST(FomodReplay, FileWithoutDestinationKeepsSourcePath)
   EXPECT_FALSE(outcome.selection.rules[0].isFolder);
 }
 
-TEST(FomodReplay, FolderWithoutDestinationAtRoot)
-{
-  const Outcome outcome = replay(config(oneStep(R"(<folder source="dir"/>)")), pickP());
+TEST(FomodReplay, FolderWithoutDestinationAtRoot) {
+  const Outcome outcome =
+      replay(config(oneStep(R"(<folder source="dir"/>)")), pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   ASSERT_EQ(outcome.selection.rules.size(), 1u);
   EXPECT_TRUE(outcome.selection.rules[0].isFolder);
@@ -529,115 +536,119 @@ TEST(FomodReplay, FolderWithoutDestinationAtRoot)
   EXPECT_EQ(outcome.selection.rules[0].destination, QString(""));
 }
 
-TEST(FomodReplay, FolderWithDestinationIsTheTargetDirectory)
-{
+TEST(FomodReplay, FolderWithDestinationIsTheTargetDirectory) {
   const Outcome outcome = replay(
-      config(oneStep(R"(<folder source="dir" destination="r6\tweaks"/>)")), pickP());
+      config(oneStep(R"(<folder source="dir" destination="r6\tweaks"/>)")),
+      pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   ASSERT_EQ(outcome.selection.rules.size(), 1u);
   EXPECT_EQ(outcome.selection.rules[0].destination, QString("r6/tweaks"));
 }
 
-TEST(FomodReplay, DestinationEndingInSlashIsDirectory)
-{
+TEST(FomodReplay, DestinationEndingInSlashIsDirectory) {
   const Outcome outcome = replay(
-      config(oneStep(R"(<file source="a.archive" destination="archive\pc\mod\"/>)")),
+      config(oneStep(
+          R"(<file source="a.archive" destination="archive\pc\mod\"/>)")),
       pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   ASSERT_EQ(outcome.selection.rules.size(), 1u);
   EXPECT_EQ(outcome.selection.rules[0].destination, QString("archive/pc/mod/"));
 }
 
-TEST(FomodReplay, EmptyDestinationAtModRoot)
-{
-  const Outcome empty = replay(
-      config(oneStep(R"(<file source="r6\keep.reds" destination=""/>)")), pickP());
+TEST(FomodReplay, EmptyDestinationAtModRoot) {
+  const Outcome empty =
+      replay(config(oneStep(R"(<file source="r6\keep.reds" destination=""/>)")),
+             pickP());
   ASSERT_TRUE(empty.error.isEmpty()) << qPrintable(empty.error);
   ASSERT_EQ(empty.selection.rules.size(), 1u);
   EXPECT_EQ(empty.selection.rules[0].destination, QString(""));
 
   const Outcome slashOnly = replay(
-      config(oneStep(R"(<file source="r6\keep.reds" destination="\"/>)")), pickP());
+      config(oneStep(R"(<file source="r6\keep.reds" destination="\"/>)")),
+      pickP());
   ASSERT_TRUE(slashOnly.error.isEmpty()) << qPrintable(slashOnly.error);
   ASSERT_EQ(slashOnly.selection.rules.size(), 1u);
   EXPECT_EQ(slashOnly.selection.rules[0].destination, QString(""));
 }
 
-TEST(FomodReplay, PriorityAndSequenceAreCarried)
-{
-  const Outcome outcome = replay(
-      config(oneStep(R"(<file source="a.archive" destination="z" priority="5"/>)"
-                     R"(<file source="b.archive" destination="z"/>)")),
-      pickP());
+TEST(FomodReplay, PriorityAndSequenceAreCarried) {
+  const Outcome outcome =
+      replay(config(oneStep(
+                 R"(<file source="a.archive" destination="z" priority="5"/>)"
+                 R"(<file source="b.archive" destination="z"/>)")),
+             pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   ASSERT_EQ(outcome.selection.rules.size(), 2u);
   EXPECT_EQ(outcome.selection.rules[0].priority, 5);
   EXPECT_EQ(outcome.selection.rules[1].priority, 0);
-  EXPECT_LT(outcome.selection.rules[0].sequence, outcome.selection.rules[1].sequence);
+  EXPECT_LT(outcome.selection.rules[0].sequence,
+            outcome.selection.rules[1].sequence);
 }
 
-// --- unsafe paths ----------------------------------------------------------------
+// --- unsafe paths
+// ----------------------------------------------------------------
 
-TEST(FomodReplay, RefusesDotDotSourcePath)
-{
+TEST(FomodReplay, RefusesDotDotSourcePath) {
   const Outcome outcome = replay(
-      config(oneStep(R"(<file source="..\..\etc\passwd" destination="archive\pc\mod\n"/>)")),
+      config(oneStep(
+          R"(<file source="..\..\etc\passwd" destination="archive\pc\mod\n"/>)")),
       pickP());
   EXPECT_NE(outcome.error.indexOf("unsafe"), -1) << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.rules.empty());
 }
 
-TEST(FomodReplay, RefusesDotDotDestinationPath)
-{
+TEST(FomodReplay, RefusesDotDotDestinationPath) {
   const Outcome outcome = replay(
-      config(oneStep(R"(<file source="a.archive" destination="..\..\evil.archive"/>)")),
+      config(oneStep(
+          R"(<file source="a.archive" destination="..\..\evil.archive"/>)")),
       pickP());
   EXPECT_NE(outcome.error.indexOf("unsafe"), -1) << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.rules.empty());
 }
 
-TEST(FomodReplay, RefusesUnsafePathInRequiredFiles)
-{
+TEST(FomodReplay, RefusesUnsafePathInRequiredFiles) {
   const Outcome outcome = replay(
-      config(R"(<requiredInstallFiles><file source="a.archive" destination="..\x"/>)"
-             R"(</requiredInstallFiles>)"),
+      config(
+          R"(<requiredInstallFiles><file source="a.archive" destination="..\x"/>)"
+          R"(</requiredInstallFiles>)"),
       choiceFor({}));
   EXPECT_NE(outcome.error.indexOf("unsafe"), -1) << qPrintable(outcome.error);
 }
 
-TEST(FomodReplay, RefusesEmptySourcePath)
-{
-  const Outcome outcome =
-      replay(config(oneStep(R"(<file source="" destination="x.archive"/>)")), pickP());
-  EXPECT_NE(outcome.error.indexOf("empty source"), -1) << qPrintable(outcome.error);
+TEST(FomodReplay, RefusesEmptySourcePath) {
+  const Outcome outcome = replay(
+      config(oneStep(R"(<file source="" destination="x.archive"/>)")), pickP());
+  EXPECT_NE(outcome.error.indexOf("empty source"), -1)
+      << qPrintable(outcome.error);
   EXPECT_TRUE(outcome.selection.rules.empty());
 }
 
-TEST(FomodReplay, BackslashPathsSplit)
-{
-  const Outcome outcome = replay(
-      config(oneStep(R"(<file source="a\b/c\\d.txt" destination="x\y/z.txt"/>)")),
-      pickP());
+TEST(FomodReplay, BackslashPathsSplit) {
+  const Outcome outcome =
+      replay(config(oneStep(
+                 R"(<file source="a\b/c\\d.txt" destination="x\y/z.txt"/>)")),
+             pickP());
   ASSERT_TRUE(outcome.error.isEmpty()) << qPrintable(outcome.error);
   ASSERT_EQ(outcome.selection.rules.size(), 1u);
   EXPECT_EQ(outcome.selection.rules[0].source, QString("a/b/c/d.txt"));
   EXPECT_EQ(outcome.selection.rules[0].destination, QString("x/y/z.txt"));
 }
 
-TEST(FomodReplay, SafeRelativeNormalisesSeparatorsAndDots)
-{
-  const std::optional<QString> path = FomodReplay::safeRelative("a\\b//./c", false);
+TEST(FomodReplay, SafeRelativeNormalisesSeparatorsAndDots) {
+  const std::optional<QString> path =
+      FomodReplay::safeRelative("a\\b//./c", false);
   ASSERT_TRUE(path.has_value());
   EXPECT_EQ(*path, QString("a/b/c"));
 
-  // A leading separator does not make the path absolute: it is read relative to the root.
-  const std::optional<QString> rooted = FomodReplay::safeRelative("/etc/x", false);
+  // A leading separator does not make the path absolute: it is read relative to
+  // the root.
+  const std::optional<QString> rooted =
+      FomodReplay::safeRelative("/etc/x", false);
   ASSERT_TRUE(rooted.has_value());
   EXPECT_EQ(*rooted, QString("etc/x"));
 }
 
-TEST(FomodReplay, SafeRelativeRefusesDotDotAndEmptySource)
-{
+TEST(FomodReplay, SafeRelativeRefusesDotDotAndEmptySource) {
   EXPECT_FALSE(FomodReplay::safeRelative("a/../b", true).has_value());
   EXPECT_FALSE(FomodReplay::safeRelative("..", false).has_value());
   EXPECT_FALSE(FomodReplay::safeRelative("", false).has_value());
