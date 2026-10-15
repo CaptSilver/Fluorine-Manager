@@ -61,7 +61,7 @@ public:
   // Called by OrganizerCore::setUserInterface; null when the window goes away.
   void setUserInterface(IUserInterface* ui);
 
-  // Called by OrganizerCore::userInterfaceInitialized; releases a buffered link.
+  // Called by OrganizerCore::mainWindowShown; releases a buffered link.
   void userInterfaceInitialized();
 
   void request(const CollectionLink& link);

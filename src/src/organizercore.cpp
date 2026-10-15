@@ -828,8 +828,14 @@ void OrganizerCore::downloadRequestedNXM(const QString& url)
 void OrganizerCore::userInterfaceInitialized()
 {
   m_UserInterfaceInitialized(m_UserInterface->mainWindow());
+}
 
-  // A collection link that started Fluorine waits for this point.
+void OrganizerCore::mainWindowShown()
+{
+  // Plugins are notified through their proxies in PluginContainer::startPlugins(),
+  // so MainWindow calling userInterfaceInitialized() would fire their callback
+  // twice. Collection links that arrived during startup wait for this first
+  // show instead.
   m_CollectionSession->userInterfaceInitialized();
 }
 
