@@ -21,6 +21,7 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #include "envmodule.h"
 #include "applicationappearance.h"
 #include "curatedguidenxmbroker.h"
+#include "collections/collectionlink.h"
 #include "commandline.h"
 #include "instancemanager.h"
 #include "loglist.h"
@@ -609,7 +610,11 @@ void MOApplication::externalMessage(const QString& message)
       log::info("queueing external download link until instance setup completes");
       m_pendingExternalLinks.append(message);
     } else {
-      MessageDialog::showMessage(tr("Download started"), qApp->activeWindow(), false);
+      // The session shows its own progress; "Download started" would be a lie for a
+      // collection whose first step is fetching a manifest.
+      if (!CollectionLink::parse(message)) {
+        MessageDialog::showMessage(tr("Download started"), qApp->activeWindow(), false);
+      }
       m_core->downloadRequestedNXM(message);
     }
   } else {

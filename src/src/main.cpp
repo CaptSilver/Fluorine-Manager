@@ -214,6 +214,13 @@ int run(int argc, char* argv[])
                     .arg(link.user_id));
             });
 
+        // Collection links carry no mod or file id; the whole line goes down the same
+        // route as a mod link and OrganizerCore hands it to the collection session.
+        QObject::connect(&nxmHandler, &NxmHandlerLinux::collectionReceived, &app,
+                         [&](const QString& url) {
+                           app.routeNxmMessage(url);
+                         });
+
         QObject::connect(&nxmHandler, &NxmHandlerLinux::directDownloadReceived,
                          &app.core(), [&](const QString& url, const QString&) {
                            QMetaObject::invokeMethod(
