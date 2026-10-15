@@ -390,3 +390,19 @@ TEST(Plan, BytesToDownloadCountsOnlyNeededFiles) {
   EXPECT_EQ(plan.bytesToDownload, 500);
   EXPECT_EQ(plan.archivesOnDisk, 1);
 }
+
+TEST(Plan, InstallOntoFolderClaimedByRefusedEntryIsRefused) {
+  const CollectionManifest manifest = manifestOf(
+      {modOf("Alpha", 1, 10, 100, true), modOf("Beta", 2, 20, 200)});
+  const CollectionState state = stateWith({folderOf("Beta", {{1, 10}})});
+
+  const CollectionPlan plan =
+      planCollection(coreLink(), manifest, state, PlanChoices{});
+
+  ASSERT_EQ(plan.mods.size(), 2u);
+  EXPECT_EQ(plan.mods[0].action, Action::Refused);
+  EXPECT_EQ(plan.mods[1].action, Action::Refused);
+  EXPECT_EQ(plan.mods[1].reason, PlanReason::FolderNameCollides);
+  EXPECT_EQ(plan.bytesToDownload, 0);
+  EXPECT_EQ(plan.apiRequests, 0);
+}

@@ -249,8 +249,11 @@ CollectionPlan planCollection(const CollectionLink &link,
   std::map<QString, std::vector<std::size_t>> byFolder;
   for (std::size_t i = 0; i < count; ++i) {
     const PlannedMod &planned = plan.mods[i];
-    if (planned.action != PlannedMod::Action::Refused &&
-        !planned.folder.isEmpty())
+    // A refused entry still owns the folder it matched, so an install that
+    // lands there would hit an existing directory.
+    const bool claimsFolder = planned.action != PlannedMod::Action::Refused ||
+                              existing[i].folder != nullptr;
+    if (claimsFolder && !planned.folder.isEmpty())
       byFolder[planned.folder.toCaseFolded()].push_back(i);
   }
   for (const auto &entry : byFolder) {
