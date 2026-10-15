@@ -5,6 +5,7 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 
 QString foldCollectionName(const QString &name) {
@@ -28,6 +29,8 @@ enum class Kind {
   OwnedChanged, // this collection's tag, same mod, another file
   OtherSame,    // another collection's tag, same file
   OtherChanged, // another collection's tag, same mod, another file
+  AdoptSame,    // untagged folder from the earlier script installer, same file
+  AdoptChanged, // the same, holding another file of the mod
   UserExact,    // untagged folder holding exactly this file
   AtName,       // untagged folder sitting on the planned name
   TaggedAtName // tagged folder sitting on the planned name, for a different mod
@@ -88,6 +91,41 @@ pickByName(const std::vector<const InstalledMod *> &candidates,
   return candidates.empty() ? nullptr : candidates.front();
 }
 
+bool holdsMod(const InstalledMod &mod, int modId) {
+  const auto first =
+      mod.installedFiles.lower_bound({modId, std::numeric_limits<int>::min()});
+  return first != mod.installedFiles.end() && first->first == modId;
+}
+
+// collection_install.py wrote folders with no owner tag, only an installedFiles
+// pair. An untagged folder that lists this mod and whose name folds to the
+// manifest name is treated as this collection's. The names are compared folded
+// because that script and fixDirectoryName disagree on repeated spaces,
+// trailing dots and device names.
+Existing findAdoptable(const CollectionState &state, const CollectionMod &mod,
+                       const Claimed &claimed) {
+  const QString wanted = foldCollectionName(mod.name);
+  if (wanted.isEmpty())
+    return {};
+
+  std::vector<const InstalledMod *> sameFile;
+  std::vector<const InstalledMod *> otherFile;
+  for (const InstalledMod &installed : state.mods) {
+    if (claimed.count(&installed) || !installed.owners.empty() ||
+        foldCollectionName(installed.folder) != wanted)
+      continue;
+    if (holdsFile(installed, {mod.source.modId, mod.source.fileId}))
+      sameFile.push_back(&installed);
+    else if (holdsMod(installed, mod.source.modId))
+      otherFile.push_back(&installed);
+  }
+  if (!sameFile.empty())
+    return {Kind::AdoptSame, sameFile.front(), {}};
+  if (!otherFile.empty())
+    return {Kind::AdoptChanged, otherFile.front(), {}};
+  return {};
+}
+
 // Looks for the folder a manifest entry already lives in, first match wins.
 Existing findExisting(const CollectionLink &link, const CollectionState &state,
                       const CollectionMod &mod, const QString &plannedName,
@@ -122,6 +160,11 @@ Existing findExisting(const CollectionLink &link, const CollectionState &state,
       }
     }
   }
+
+  // An untagged folder from the earlier script installer.
+  if (const Existing adopted = findAdoptable(state, mod, claimed);
+      adopted.folder)
+    return adopted;
 
   // A folder the user installed by hand that holds exactly this file.
   for (const InstalledMod &installed : state.mods) {
@@ -217,7 +260,12 @@ CollectionPlan planCollection(const CollectionLink &link,
       planned.action = PlannedMod::Action::AlreadyInstalled;
       planned.addOwner = true;
       break;
+    case Kind::AdoptSame:
+      planned.action = PlannedMod::Action::Adopt;
+      planned.addOwner = true;
+      break;
     case Kind::OwnedChanged:
+    case Kind::AdoptChanged:
       planned.action = PlannedMod::Action::Replace;
       break;
     case Kind::OtherChanged:
@@ -263,6 +311,33 @@ CollectionPlan planCollection(const CollectionLink &link,
       if (plan.mods[i].action == PlannedMod::Action::Install)
         refuse(plan.mods[i], PlanReason::FolderNameCollides);
     }
+  }
+
+  // A folder tagged with this collection that no manifest entry claims was
+  // dropped by this revision. Claims were made before the optional and
+  // unsupported checks, so an owned optional mod that is merely unticked is not
+  // reported.
+  for (const InstalledMod &installed : state.mods) {
+    if (claimed.count(&installed) || !ownerOf(installed, link.slug))
+      continue;
+    plan.droppedFolders.push_back(installed.folder);
+    const bool sharedWithOther = std::any_of(
+        installed.owners.begin(), installed.owners.end(),
+        [&](const CollectionOwner &owner) { return owner.slug != link.slug; });
+    if (choices.mode == PlanChoices::Mode::FullSync && !sharedWithOther)
+      plan.toDisable.push_back(installed.folder);
+  }
+
+  // Any folder already tied to this collection, tagged or adoptable, makes this
+  // a top-up.
+  plan.firstInstall = true;
+  for (const InstalledMod &installed : state.mods) {
+    if (ownerOf(installed, link.slug))
+      plan.firstInstall = false;
+  }
+  for (const Existing &found : existing) {
+    if (found.kind == Kind::AdoptSame || found.kind == Kind::AdoptChanged)
+      plan.firstInstall = false;
   }
 
   // Tally what the run has to fetch.
