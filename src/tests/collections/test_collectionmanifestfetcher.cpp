@@ -32,12 +32,16 @@ class ScriptedReply : public QNetworkReply {
 public:
   ScriptedReply(const QNetworkRequest &request,
                 QNetworkAccessManager::Operation operation, QByteArray bytes,
-                int status, qint64 declaredLength, bool hang, QObject *parent)
+                int status, qint64 declaredLength, bool hang,
+                const QUrl &redirect, QObject *parent)
       : QNetworkReply(parent), m_bytes(std::move(bytes)) {
     setRequest(request);
     setUrl(request.url());
     setOperation(operation);
     setAttribute(QNetworkRequest::HttpStatusCodeAttribute, status);
+    if (redirect.isValid()) {
+      setAttribute(QNetworkRequest::RedirectionTargetAttribute, redirect);
+    }
     if (declaredLength >= 0) {
       setHeader(QNetworkRequest::ContentLengthHeader,
                 QVariant::fromValue<qlonglong>(declaredLength));
@@ -97,6 +101,7 @@ public:
     int status = 200;
     qint64 declaredLength = -1;
     bool hang = false;
+    QUrl redirect;
   };
 
   std::deque<Answer> answers;
@@ -117,7 +122,8 @@ protected:
       answers.pop_front();
     }
     return new ScriptedReply(request, operation, answer.bytes, answer.status,
-                             answer.declaredLength, answer.hang, this);
+                             answer.declaredLength, answer.hang,
+                             answer.redirect, this);
   }
 };
 
@@ -130,6 +136,13 @@ ScriptedNetwork::Answer jsonAnswer(const QByteArray &json) {
 ScriptedNetwork::Answer statusAnswer(int status) {
   ScriptedNetwork::Answer answer;
   answer.status = status;
+  return answer;
+}
+
+ScriptedNetwork::Answer redirectAnswer(const QString &target) {
+  ScriptedNetwork::Answer answer;
+  answer.status = 302;
+  answer.redirect = QUrl(target);
   return answer;
 }
 
@@ -471,6 +484,124 @@ TEST(Fetcher, OversizeArchiveRefused) {
   EXPECT_FALSE(
       QFile::exists(rig.expectedCacheDir() + QStringLiteral("/collection.7z")))
       << "a refused download leaves no partial archive behind";
+}
+
+TEST(Fetcher, RedirectToHttpsFollowedWithRelativeLocation) {
+  Rig rig;
+  rig.queueApi({QStringLiteral("https://cdn.example.test/dir/c.7z")});
+  rig.mirrors.answers.push_back(
+      redirectAnswer(QStringLiteral("https://other.example.test/moved.7z")));
+  rig.mirrors.answers.push_back(redirectAnswer(QStringLiteral("final.7z")));
+  rig.queueArchive();
+
+  rig.fetcher.fetch(rig.link);
+
+  ASSERT_TRUE(spinUntil([&] { return rig.finished(); }));
+  ASSERT_EQ(rig.readyCount, 1) << rig.failure.toStdString();
+  ASSERT_EQ(rig.mirrors.requests.size(), 3);
+  EXPECT_EQ(rig.mirrors.requests[1].url().toString().toStdString(),
+            "https://other.example.test/moved.7z");
+  EXPECT_EQ(rig.mirrors.requests[2].url().toString().toStdString(),
+            "https://other.example.test/final.7z")
+      << "a relative Location resolves against the URL that answered";
+  EXPECT_FALSE(rig.mirrors.requests[2].hasRawHeader("Authorization"));
+}
+
+TEST(Fetcher, RedirectToUnusableTargetSkipsMirror) {
+  const QStringList targets = {
+      QStringLiteral("http://plain.example.test/c.7z"),
+      QStringLiteral("https://user:pw@evil.example.test/c.7z"),
+      QStringLiteral("https:///c.7z"),
+  };
+  for (const QString &target : targets) {
+    Rig rig;
+    rig.queueApi({QStringLiteral("https://first.example.test/c.7z"),
+                  QStringLiteral("https://second.example.test/c.7z")});
+    rig.mirrors.answers.push_back(redirectAnswer(target));
+    rig.queueArchive();
+
+    rig.fetcher.fetch(rig.link);
+
+    ASSERT_TRUE(spinUntil([&] { return rig.finished(); }));
+    EXPECT_EQ(rig.readyCount, 1)
+        << target.toStdString() << ": " << rig.failure.toStdString();
+    ASSERT_EQ(rig.mirrors.requests.size(), 2) << target.toStdString();
+    EXPECT_EQ(rig.mirrors.requests[1].url().host().toStdString(),
+              "second.example.test")
+        << "the unusable target is never requested";
+  }
+}
+
+TEST(Fetcher, RedirectWithNoLocationSkipsMirror) {
+  Rig rig;
+  rig.queueApi({QStringLiteral("https://first.example.test/c.7z"),
+                QStringLiteral("https://second.example.test/c.7z")});
+  ScriptedNetwork::Answer bare;
+  bare.status = 302;
+  rig.mirrors.answers.push_back(bare);
+  rig.queueArchive();
+
+  rig.fetcher.fetch(rig.link);
+
+  ASSERT_TRUE(spinUntil([&] { return rig.finished(); }));
+  EXPECT_EQ(rig.readyCount, 1) << rig.failure.toStdString();
+  ASSERT_EQ(rig.mirrors.requests.size(), 2);
+  EXPECT_EQ(rig.mirrors.requests[1].url().host().toStdString(),
+            "second.example.test");
+}
+
+TEST(Fetcher, FifthRedirectFollowedSixthSkipsMirror) {
+  {
+    Rig rig;
+    rig.queueApi({QStringLiteral("https://first.example.test/c.7z")});
+    for (int i = 0; i < 5; ++i) {
+      rig.mirrors.answers.push_back(redirectAnswer(
+          QStringLiteral("https://hop%1.example.test/c.7z").arg(i)));
+    }
+    rig.queueArchive();
+
+    rig.fetcher.fetch(rig.link);
+
+    ASSERT_TRUE(spinUntil([&] { return rig.finished(); }));
+    EXPECT_EQ(rig.readyCount, 1) << rig.failure.toStdString();
+    EXPECT_EQ(rig.mirrors.requests.size(), 6);
+  }
+  {
+    Rig rig;
+    rig.queueApi({QStringLiteral("https://first.example.test/c.7z"),
+                  QStringLiteral("https://second.example.test/c.7z")});
+    for (int i = 0; i < 6; ++i) {
+      rig.mirrors.answers.push_back(redirectAnswer(
+          QStringLiteral("https://hop%1.example.test/c.7z").arg(i)));
+    }
+    rig.queueArchive();
+
+    rig.fetcher.fetch(rig.link);
+
+    ASSERT_TRUE(spinUntil([&] { return rig.finished(); }));
+    EXPECT_EQ(rig.readyCount, 1) << rig.failure.toStdString();
+    ASSERT_EQ(rig.mirrors.requests.size(), 7)
+        << "five hops followed, the sixth refused, then the next mirror";
+    EXPECT_EQ(rig.mirrors.requests[6].url().host().toStdString(),
+              "second.example.test");
+  }
+}
+
+TEST(Fetcher, RunningByteCountEnforcesArchiveCapWithoutDeclaredLength) {
+  Rig rig;
+  rig.fetcher.setArchiveLimitForTesting(16);
+  rig.queueApi({QStringLiteral("https://first.example.test/c.7z")});
+  ScriptedNetwork::Answer flood;
+  flood.bytes = QByteArray(64, 'x');
+  rig.mirrors.answers.push_back(flood);
+
+  rig.fetcher.fetch(rig.link);
+
+  ASSERT_TRUE(spinUntil([&] { return rig.finished(); }));
+  EXPECT_EQ(rig.failedCount, 1);
+  EXPECT_TRUE(rig.failure.contains(QStringLiteral("4 GiB")));
+  EXPECT_FALSE(
+      QFile::exists(rig.expectedCacheDir() + QStringLiteral("/collection.7z")));
 }
 
 // ---- result ----

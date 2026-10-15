@@ -345,7 +345,7 @@ void CollectionManifestFetcher::startTransfer(const QUrl &url) {
 
 void CollectionManifestFetcher::checkDeclaredSize(QNetworkReply *reply) {
   const QVariant declared = reply->header(QNetworkRequest::ContentLengthHeader);
-  if (declared.isValid() && declared.toLongLong() > MaxArchiveBytes) {
+  if (declared.isValid() && declared.toLongLong() > m_maxArchiveBytes) {
     abortTransfer(
         reply,
         QStringLiteral("%1 offers a collection.7z larger than the 4 GiB limit")
@@ -375,7 +375,7 @@ void CollectionManifestFetcher::readTransfer(QNetworkReply *reply) {
 
   const QByteArray bytes = reply->readAll();
   m_received += bytes.size();
-  if (m_received > MaxArchiveBytes) {
+  if (m_received > m_maxArchiveBytes) {
     abortTransfer(reply, QStringLiteral("%1 sent more than the 4 GiB limit")
                              .arg(reply->url().host()));
     return;
@@ -410,11 +410,15 @@ void CollectionManifestFetcher::onTransferFinished(QNetworkReply *reply,
   const int status =
       reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
   if (status >= 300 && status < 400) {
-    const QUrl target = url.resolved(
-        reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl());
+    // Resolving an absent Location would hand back the current URL and spend
+    // the redirect budget re-requesting it.
+    const QUrl location =
+        reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+    const QUrl target = url.resolved(location);
     m_archive.reset();
-    if (target.scheme() != QLatin1String("https") || target.host().isEmpty() ||
-        !target.userInfo().isEmpty() || ++m_redirects > MaxRedirects) {
+    if (location.isEmpty() || target.scheme() != QLatin1String("https") ||
+        target.host().isEmpty() || !target.userInfo().isEmpty() ||
+        ++m_redirects > MaxRedirects) {
       m_mirrorProblem =
           QStringLiteral("%1 redirected somewhere unusable").arg(url.host());
       tryNextMirror();

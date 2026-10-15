@@ -51,6 +51,9 @@ public:
   // running.
   void cancel();
 
+  // Lowers the archive size cap so tests can reach it without 4 GiB of data.
+  void setArchiveLimitForTesting(qint64 bytes) { m_maxArchiveBytes = bytes; }
+
   static QByteArray graphqlBody(const CollectionLink &link);
 
   // The package location the revision answer names. It is appended to the API
@@ -98,5 +101,6 @@ private:
 
   std::unique_ptr<QSaveFile> m_archive;
   qint64 m_received = 0;
+  qint64 m_maxArchiveBytes = MaxArchiveBytes;
   QString m_transferProblem; // set when this class aborts a transfer itself
 };
