@@ -1432,6 +1432,11 @@ target_sources(test_nexus_collections PRIVATE
     ${CMAKE_SOURCE_DIR}/src/src/collections/collectionarchiveinstaller.cpp
     collections/test_collectionarchiveinstaller.cpp)
 
+target_sources(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src/collections/filehash.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/collections/collectiondownloader.cpp
+    collections/test_collectiondownloader.cpp)
+
 # Collections: the QObject and widget units (hasher, fetcher, dialogs). The pure units
 # live in test_nexus_collections; this one needs a QApplication, so it has its own main.
 find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent Test)
