@@ -11,43 +11,39 @@
 #include <utility>
 #include <vector>
 
-namespace
-{
+namespace {
 
-const QString Domain  = QStringLiteral("cyberpunk2077");
+const QString Domain = QStringLiteral("cyberpunk2077");
 const QString GoodMd5 = QStringLiteral("0123456789abcdef0123456789abcdef");
-const QString BadMd5  = QStringLiteral("fedcba9876543210fedcba9876543210");
+const QString BadMd5 = QStringLiteral("fedcba9876543210fedcba9876543210");
 const std::string BudgetReason =
     "Nexus request budget used up, retry after the daily reset";
 
-class FakeDownloadPort : public DownloadPort
-{
+class FakeDownloadPort : public DownloadPort {
 public:
-  struct Submission
-  {
+  struct Submission {
     QString domain;
-    int modId  = 0;
+    int modId = 0;
     int fileId = 0;
   };
 
-  void setListener(DownloadPortListener* listener) override { m_listener = listener; }
+  void setListener(DownloadPortListener *listener) override {
+    m_listener = listener;
+  }
 
-  PortRow find(int modId, int fileId) const override
-  {
+  PortRow find(int modId, int fileId) const override {
     const auto it = rows.find({modId, fileId});
     return it == rows.end() ? PortRow{} : it->second;
   }
 
-  void submit(const QString& domain, int modId, int fileId) override
-  {
+  void submit(const QString &domain, int modId, int fileId) override {
     submissions.push_back({domain, modId, fileId});
     if (rowsAppear) {
       addRow(modId, fileId, PortRowState::Active);
     }
   }
 
-  bool appeared(int modId, int fileId) const override
-  {
+  bool appeared(int modId, int fileId) const override {
     if (pending.count({modId, fileId}) > 0) {
       return true;
     }
@@ -57,8 +53,7 @@ public:
 
   void resume(int index) override { resumed.push_back(index); }
 
-  void remove(int index) override
-  {
+  void remove(int index) override {
     removed.push_back(index);
     for (auto it = rows.begin(); it != rows.end(); ++it) {
       if (it->second.index == index) {
@@ -68,43 +63,41 @@ public:
     }
   }
 
-  void addRow(int modId, int fileId, PortRowState state, const QString& path = QString())
-  {
+  void addRow(int modId, int fileId, PortRowState state,
+              const QString &path = QString()) {
     PortRow row;
     row.index = nextIndex++;
     row.state = state;
-    row.path  = path;
+    row.path = path;
     rows[{modId, fileId}] = row;
   }
 
-  DownloadPortListener* listener() const { return m_listener; }
+  DownloadPortListener *listener() const { return m_listener; }
 
   std::map<std::pair<int, int>, PortRow> rows;
-  std::set<std::pair<int, int>> pending;  // queued by someone else, no row yet
+  std::set<std::pair<int, int>> pending; // queued by someone else, no row yet
   std::vector<Submission> submissions;
   std::vector<int> resumed;
   std::vector<int> removed;
   bool rowsAppear = true;
-  int nextIndex   = 100;
+  int nextIndex = 100;
 
 private:
-  DownloadPortListener* m_listener = nullptr;
+  DownloadPortListener *m_listener = nullptr;
 };
 
-class FakeBudget : public NexusBudgetPort
-{
+class FakeBudget : public NexusBudgetPort {
 public:
   int remainingRequests() const override { return remaining; }
   int remaining = 1000;
 };
 
-// Answers at once by default. With `deferred` set the answers wait in `pending` until
-// flush(), which lets a test act between a hash request and its result.
-class FakeHasher : public FileHasher
-{
+// Answers at once by default. With `deferred` set the answers wait in `pending`
+// until flush(), which lets a test act between a hash request and its result.
+class FakeHasher : public FileHasher {
 public:
-  void md5(const QString& path, std::function<void(const QString&)> done) override
-  {
+  void md5(const QString &path,
+           std::function<void(const QString &)> done) override {
     requested.push_back(path);
     if (deferred) {
       pending.emplace_back(path, std::move(done));
@@ -113,49 +106,45 @@ public:
     done(hexFor(path));
   }
 
-  void flush()
-  {
+  void flush() {
     auto jobs = std::move(pending);
     pending.clear();
-    for (auto& job : jobs) {
+    for (auto &job : jobs) {
       job.second(hexFor(job.first));
     }
   }
 
-  QString hexFor(const QString& path) const
-  {
+  QString hexFor(const QString &path) const {
     const auto it = hashes.find(path);
     return it == hashes.end() ? QString() : it->second;
   }
 
   std::map<QString, QString> hashes;
   std::vector<QString> requested;
-  std::vector<std::pair<QString, std::function<void(const QString&)>>> pending;
+  std::vector<std::pair<QString, std::function<void(const QString &)>>> pending;
   bool deferred = false;
 };
 
-struct Event
-{
-  int modId  = 0;
+struct Event {
+  int modId = 0;
   int fileId = 0;
   QString text;
 };
 
-struct Harness
-{
+struct Harness {
   Harness()
       : cancel(std::make_shared<std::atomic_bool>(false)),
         downloader(
             port, budget, hasher, cancel, [this] { return now; },
-            [this](int modId, int fileId, const QString& path) {
+            [this](int modId, int fileId, const QString &path) {
               ready.push_back({modId, fileId, path});
             },
-            [this](int modId, int fileId, const QString& reason) {
+            [this](int modId, int fileId, const QString &reason) {
               failed.push_back({modId, fileId, reason});
-            })
-  {}
+            }) {}
 
-  // Declaration order matters: the downloader's callbacks use the members above it.
+  // Declaration order matters: the downloader's callbacks use the members above
+  // it.
   FakeDownloadPort port;
   FakeBudget budget;
   FakeHasher hasher;
@@ -167,14 +156,14 @@ struct Harness
 };
 
 // Requests (1, 10), (2, 20), ... so a test can name a file by its position.
-std::vector<DownloadRequest> numbered(int count, const QString& md5 = QString())
-{
+std::vector<DownloadRequest> numbered(int count,
+                                      const QString &md5 = QString()) {
   std::vector<DownloadRequest> requests;
   for (int i = 1; i <= count; ++i) {
     DownloadRequest request;
-    request.modId    = i;
-    request.fileId   = i * 10;
-    request.md5      = md5;
+    request.modId = i;
+    request.fileId = i * 10;
+    request.md5 = md5;
     request.fileSize = 1000;
     requests.push_back(request);
   }
@@ -183,12 +172,11 @@ std::vector<DownloadRequest> numbered(int count, const QString& md5 = QString())
 
 constexpr qint64 Minute = 60LL * 1000;
 
-}  // namespace
+} // namespace
 
 // ---- submission window and budget ----
 
-TEST(Downloader, SubmitsAtMostThreeBeforeTransferStarts)
-{
+TEST(Downloader, SubmitsAtMostThreeBeforeTransferStarts) {
   Harness h;
   h.downloader.start(Domain, numbered(5));
   h.downloader.tick();
@@ -203,8 +191,7 @@ TEST(Downloader, SubmitsAtMostThreeBeforeTransferStarts)
   EXPECT_EQ(h.port.submissions.size(), 3u);
 }
 
-TEST(Downloader, TransferStartFreesWindowSlot)
-{
+TEST(Downloader, TransferStartFreesWindowSlot) {
   Harness h;
   h.downloader.start(Domain, numbered(4));
   ASSERT_EQ(h.port.submissions.size(), 3u);
@@ -215,16 +202,16 @@ TEST(Downloader, TransferStartFreesWindowSlot)
   EXPECT_EQ(h.port.submissions[3].modId, 4);
 }
 
-TEST(Downloader, NoSubmissionAtBudgetBoundary)
-{
+TEST(Downloader, NoSubmissionAtBudgetBoundary) {
   Harness h;
-  // One file in flight reserves its three requests (file info, download link, mod
-  // description), and the next one needs three more, so the second submission needs
-  // strictly more than 6 remaining.
+  // One file in flight reserves its three requests (file info, download link,
+  // mod description), and the next one needs three more, so the second
+  // submission needs strictly more than 6 remaining.
   h.budget.remaining = 6;
   h.downloader.start(Domain, numbered(3));
   EXPECT_EQ(h.port.submissions.size(), 1u);
-  EXPECT_TRUE(h.failed.empty()) << "a file in flight may still free budget, nobody fails yet";
+  EXPECT_TRUE(h.failed.empty())
+      << "a file in flight may still free budget, nobody fails yet";
 
   h.downloader.tick();
   EXPECT_EQ(h.port.submissions.size(), 1u);
@@ -233,7 +220,7 @@ TEST(Downloader, NoSubmissionAtBudgetBoundary)
   h.downloader.tick();
   EXPECT_EQ(h.port.submissions.size(), 2u);
 
-  h.budget.remaining = 9;  // two in flight now: the third needs more than 9
+  h.budget.remaining = 9; // two in flight now: the third needs more than 9
   h.downloader.tick();
   EXPECT_EQ(h.port.submissions.size(), 2u);
 
@@ -243,8 +230,7 @@ TEST(Downloader, NoSubmissionAtBudgetBoundary)
   EXPECT_TRUE(h.failed.empty());
 }
 
-TEST(Downloader, BudgetExhaustionFailsWaitingModsOnly)
-{
+TEST(Downloader, BudgetExhaustionFailsWaitingModsOnly) {
   Harness h;
   h.budget.remaining = 3;
   h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/one.zip"));
@@ -268,8 +254,7 @@ TEST(Downloader, BudgetExhaustionFailsWaitingModsOnly)
   EXPECT_TRUE(h.downloader.idle());
 }
 
-TEST(Downloader, ReadyFilesOnDiskProceedWithoutBudget)
-{
+TEST(Downloader, ReadyFilesOnDiskProceedWithoutBudget) {
   Harness h;
   h.budget.remaining = 0;
   h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/one.zip"));
@@ -283,8 +268,7 @@ TEST(Downloader, ReadyFilesOnDiskProceedWithoutBudget)
   EXPECT_TRUE(h.downloader.idle());
 }
 
-TEST(Downloader, SubmitWithoutRowFailsAtOnce)
-{
+TEST(Downloader, SubmitWithoutRowFailsAtOnce) {
   Harness h;
   h.port.rowsAppear = false;
 
@@ -292,15 +276,16 @@ TEST(Downloader, SubmitWithoutRowFailsAtOnce)
 
   ASSERT_EQ(h.failed.size(), 2u);
   EXPECT_EQ(h.failed[0].modId, 1);
-  EXPECT_EQ(h.failed[0].text.toStdString(), "download manager refused the request");
-  EXPECT_EQ(h.failed[1].modId, 2) << "a refused file does not hold a window slot";
+  EXPECT_EQ(h.failed[0].text.toStdString(),
+            "download manager refused the request");
+  EXPECT_EQ(h.failed[1].modId, 2)
+      << "a refused file does not hold a window slot";
   EXPECT_TRUE(h.downloader.idle());
 }
 
 // ---- rows that already exist ----
 
-TEST(Downloader, ActiveExistingRowIsAwaitedNotResubmitted)
-{
+TEST(Downloader, ActiveExistingRowIsAwaitedNotResubmitted) {
   Harness h;
   h.port.addRow(1, 10, PortRowState::Active);
 
@@ -315,10 +300,9 @@ TEST(Downloader, ActiveExistingRowIsAwaitedNotResubmitted)
   EXPECT_EQ(h.ready[0].text.toStdString(), "/dl/one.zip");
 }
 
-TEST(Downloader, PendingRequestFromElsewhereIsAwaitedNotResubmitted)
-{
+TEST(Downloader, PendingRequestFromElsewhereIsAwaitedNotResubmitted) {
   Harness h;
-  h.port.pending.insert({1, 10});  // queued by the user, no row yet
+  h.port.pending.insert({1, 10}); // queued by the user, no row yet
 
   h.downloader.start(Domain, numbered(1));
 
@@ -329,10 +313,9 @@ TEST(Downloader, PendingRequestFromElsewhereIsAwaitedNotResubmitted)
   EXPECT_EQ(h.ready.size(), 1u);
 }
 
-TEST(Downloader, PausedExistingRowIsResumed)
-{
+TEST(Downloader, PausedExistingRowIsResumed) {
   Harness h;
-  h.port.addRow(1, 10, PortRowState::Paused);  // gets index 100
+  h.port.addRow(1, 10, PortRowState::Paused); // gets index 100
 
   h.downloader.start(Domain, numbered(1));
 
@@ -344,10 +327,9 @@ TEST(Downloader, PausedExistingRowIsResumed)
   EXPECT_EQ(h.ready.size(), 1u);
 }
 
-TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted)
-{
+TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted) {
   Harness h;
-  h.port.addRow(1, 10, PortRowState::Failed);  // an errored row, index 100
+  h.port.addRow(1, 10, PortRowState::Failed); // an errored row, index 100
 
   h.downloader.start(Domain, numbered(1));
 
@@ -358,8 +340,7 @@ TEST(Downloader, ErrorExistingRowIsRemovedAndResubmitted)
   EXPECT_TRUE(h.failed.empty()) << "the old failure is not this run's failure";
 }
 
-TEST(Downloader, CanceledExistingRowIsRemovedAndResubmitted)
-{
+TEST(Downloader, CanceledExistingRowIsRemovedAndResubmitted) {
   // The port reports a canceled row in the same Failed state as an errored one.
   Harness h;
   h.port.addRow(1, 10, PortRowState::Failed);
@@ -375,11 +356,10 @@ TEST(Downloader, CanceledExistingRowIsRemovedAndResubmitted)
   EXPECT_TRUE(h.failed.empty());
 }
 
-TEST(Downloader, NeverSubmitsSamePairTwice)
-{
+TEST(Downloader, NeverSubmitsSamePairTwice) {
   Harness h;
   std::vector<DownloadRequest> requests = numbered(2);
-  requests.insert(requests.begin() + 1, requests[0]);  // (1, 10) listed twice
+  requests.insert(requests.begin() + 1, requests[0]); // (1, 10) listed twice
 
   h.downloader.start(Domain, requests);
   h.downloader.tick();
@@ -392,11 +372,11 @@ TEST(Downloader, NeverSubmitsSamePairTwice)
   EXPECT_EQ(h.ready.size(), 1u) << "a pair listed twice is reported once";
 }
 
-TEST(Downloader, OnDiskFilesAreClassifiedBeforeAnythingIsSubmitted)
-{
+TEST(Downloader, OnDiskFilesAreClassifiedBeforeAnythingIsSubmitted) {
   Harness h;
-  // File 1 is on disk but stale, so it goes back out. File 2 is on disk and fine; it must
-  // not be submitted just because file 1's re-download happened first.
+  // File 1 is on disk but stale, so it goes back out. File 2 is on disk and
+  // fine; it must not be submitted just because file 1's re-download happened
+  // first.
   h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/one.zip"));
   h.port.addRow(2, 20, PortRowState::Ready, QStringLiteral("/dl/two.zip"));
   h.hasher.hashes[QStringLiteral("/dl/one.zip")] = BadMd5;
@@ -413,8 +393,7 @@ TEST(Downloader, OnDiskFilesAreClassifiedBeforeAnythingIsSubmitted)
 
 // ---- completion and failure ----
 
-TEST(Downloader, CompletionMatchedByIds)
-{
+TEST(Downloader, CompletionMatchedByIds) {
   Harness h;
   h.downloader.start(Domain, numbered(2));
 
@@ -431,8 +410,7 @@ TEST(Downloader, CompletionMatchedByIds)
   EXPECT_TRUE(h.failed.empty());
 }
 
-TEST(Downloader, FailureMatchedByIds)
-{
+TEST(Downloader, FailureMatchedByIds) {
   Harness h;
   h.downloader.start(Domain, numbered(2));
 
@@ -450,8 +428,7 @@ TEST(Downloader, FailureMatchedByIds)
 
 // ---- MD5 verification ----
 
-TEST(Downloader, FreshFileWithBadMd5Fails)
-{
+TEST(Downloader, FreshFileWithBadMd5Fails) {
   Harness h;
   h.hasher.hashes[QStringLiteral("/dl/a.zip")] = BadMd5;
   h.downloader.start(Domain, numbered(1, GoodMd5));
@@ -465,8 +442,7 @@ TEST(Downloader, FreshFileWithBadMd5Fails)
   EXPECT_EQ(h.port.submissions.size(), 1u);
 }
 
-TEST(Downloader, FreshFileWithGoodMd5IsReady)
-{
+TEST(Downloader, FreshFileWithGoodMd5IsReady) {
   Harness h;
   // The manifest spells the hash in upper case, the hasher in lower case.
   h.hasher.hashes[QStringLiteral("/dl/a.zip")] = GoodMd5;
@@ -479,8 +455,7 @@ TEST(Downloader, FreshFileWithGoodMd5IsReady)
   EXPECT_TRUE(h.failed.empty());
 }
 
-TEST(Downloader, NoMd5SkipsHash)
-{
+TEST(Downloader, NoMd5SkipsHash) {
   Harness h;
   h.downloader.start(Domain, numbered(1));
 
@@ -490,10 +465,10 @@ TEST(Downloader, NoMd5SkipsHash)
   EXPECT_EQ(h.ready.size(), 1u);
 }
 
-TEST(Downloader, ReusedFileWithBadMd5IsDownloadedOnceMore)
-{
+TEST(Downloader, ReusedFileWithBadMd5IsDownloadedOnceMore) {
   Harness h;
-  h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/old.zip"));  // index 100
+  h.port.addRow(1, 10, PortRowState::Ready,
+                QStringLiteral("/dl/old.zip")); // index 100
   h.hasher.hashes[QStringLiteral("/dl/old.zip")] = BadMd5;
   h.hasher.hashes[QStringLiteral("/dl/new.zip")] = GoodMd5;
 
@@ -513,8 +488,7 @@ TEST(Downloader, ReusedFileWithBadMd5IsDownloadedOnceMore)
   EXPECT_EQ(h.port.submissions.size(), 1u);
 }
 
-TEST(Downloader, SecondMismatchFailsTheMod)
-{
+TEST(Downloader, SecondMismatchFailsTheMod) {
   Harness h;
   h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/old.zip"));
   h.hasher.hashes[QStringLiteral("/dl/old.zip")] = BadMd5;
@@ -527,15 +501,15 @@ TEST(Downloader, SecondMismatchFailsTheMod)
   ASSERT_EQ(h.failed.size(), 1u);
   EXPECT_TRUE(h.failed[0].text.contains(QStringLiteral("again")));
   EXPECT_TRUE(h.ready.empty());
-  EXPECT_EQ(h.port.submissions.size(), 1u) << "one extra download, never a third";
+  EXPECT_EQ(h.port.submissions.size(), 1u)
+      << "one extra download, never a third";
   EXPECT_EQ(h.port.removed.size(), 1u);
 }
 
-TEST(Downloader, ResubmissionCountsAgainstBudget)
-{
+TEST(Downloader, ResubmissionCountsAgainstBudget) {
   {
-    // Nothing left to spend: the stale file is removed and the mod fails with the
-    // budget reason instead of waiting for a reset that may be hours away.
+    // Nothing left to spend: the stale file is removed and the mod fails with
+    // the budget reason instead of waiting for a reset that may be hours away.
     Harness h;
     h.budget.remaining = 3;
     h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/old.zip"));
@@ -550,7 +524,7 @@ TEST(Downloader, ResubmissionCountsAgainstBudget)
   }
   {
     Harness h;
-    h.budget.remaining = 4;  // more than the 3 requests one file costs
+    h.budget.remaining = 4; // more than the 3 requests one file costs
     h.port.addRow(1, 10, PortRowState::Ready, QStringLiteral("/dl/old.zip"));
     h.hasher.hashes[QStringLiteral("/dl/old.zip")] = BadMd5;
 
@@ -563,8 +537,7 @@ TEST(Downloader, ResubmissionCountsAgainstBudget)
 
 // ---- stall backstop ----
 
-TEST(Downloader, StallAfterTenMinutesFailsRetryable)
-{
+TEST(Downloader, StallAfterTenMinutesFailsRetryable) {
   Harness h;
   h.downloader.start(Domain, numbered(1));
   ASSERT_EQ(h.port.submissions.size(), 1u);
@@ -576,18 +549,19 @@ TEST(Downloader, StallAfterTenMinutesFailsRetryable)
   h.now = CollectionDownloader::StallMs;
   h.downloader.tick();
   ASSERT_EQ(h.failed.size(), 1u);
-  EXPECT_TRUE(h.failed[0].text.contains(QStringLiteral("Nexus did not answer")));
+  EXPECT_TRUE(
+      h.failed[0].text.contains(QStringLiteral("Nexus did not answer")));
   EXPECT_TRUE(h.failed[0].text.contains(QStringLiteral("request limit")))
       << "the reason names the limit that probably caused the silence";
 
   h.downloader.downloadCompleted(1, 10, QStringLiteral("/dl/late.zip"));
-  EXPECT_TRUE(h.ready.empty()) << "a failed file is not revived by a late answer";
+  EXPECT_TRUE(h.ready.empty())
+      << "a failed file is not revived by a late answer";
 }
 
-TEST(Downloader, ReusedActiveRowStallsAfterTenMinutes)
-{
-  // A row somebody else started, whose description request was wiped with the queue,
-  // would otherwise leave the run waiting for good.
+TEST(Downloader, ReusedActiveRowStallsAfterTenMinutes) {
+  // A row somebody else started, whose description request was wiped with the
+  // queue, would otherwise leave the run waiting for good.
   Harness h;
   h.port.addRow(1, 10, PortRowState::Active);
   h.downloader.start(Domain, numbered(1));
@@ -607,14 +581,14 @@ TEST(Downloader, ReusedActiveRowStallsAfterTenMinutes)
   EXPECT_TRUE(h.ready.empty());
 }
 
-TEST(Downloader, StateChangeResetsStallClock)
-{
+TEST(Downloader, StateChangeResetsStallClock) {
   Harness h;
-  h.downloader.start(Domain, numbered(4));  // 1, 2 and 3 go out at t = 0
+  h.downloader.start(Domain, numbered(4)); // 1, 2 and 3 go out at t = 0
   ASSERT_EQ(h.port.submissions.size(), 3u);
 
   h.now = 9 * Minute;
-  h.downloader.transferStarted(1, 10);  // file 1 leaves the stall watch; file 4 goes out
+  h.downloader.transferStarted(
+      1, 10); // file 1 leaves the stall watch; file 4 goes out
   ASSERT_EQ(h.port.submissions.size(), 4u);
 
   h.now = CollectionDownloader::StallMs;
@@ -625,7 +599,8 @@ TEST(Downloader, StateChangeResetsStallClock)
 
   h.now = 9 * Minute + CollectionDownloader::StallMs;
   h.downloader.tick();
-  ASSERT_EQ(h.failed.size(), 3u) << "file 4 is measured from its own submission";
+  ASSERT_EQ(h.failed.size(), 3u)
+      << "file 4 is measured from its own submission";
   EXPECT_EQ(h.failed[2].modId, 4);
 
   h.now = 60 * Minute;
@@ -636,8 +611,7 @@ TEST(Downloader, StateChangeResetsStallClock)
 
 // ---- cancel ----
 
-TEST(Downloader, CancelStopsSubmissions)
-{
+TEST(Downloader, CancelStopsSubmissions) {
   Harness h;
   h.downloader.start(Domain, numbered(5));
   ASSERT_EQ(h.port.submissions.size(), 3u);
@@ -654,8 +628,7 @@ TEST(Downloader, CancelStopsSubmissions)
   EXPECT_TRUE(h.downloader.idle());
 }
 
-TEST(Downloader, CancelIgnoresLateHashResults)
-{
+TEST(Downloader, CancelIgnoresLateHashResults) {
   Harness h;
   h.hasher.deferred = true;
   h.hasher.hashes[QStringLiteral("/dl/a.zip")] = GoodMd5;
@@ -671,8 +644,7 @@ TEST(Downloader, CancelIgnoresLateHashResults)
   EXPECT_TRUE(h.downloader.idle());
 }
 
-TEST(Downloader, IdleAfterAllSettled)
-{
+TEST(Downloader, IdleAfterAllSettled) {
   Harness h;
   EXPECT_TRUE(h.downloader.idle()) << "nothing started, nothing outstanding";
 
@@ -686,16 +658,15 @@ TEST(Downloader, IdleAfterAllSettled)
   EXPECT_TRUE(h.downloader.idle());
 }
 
-TEST(Downloader, DestructionDetachesFromThePort)
-{
+TEST(Downloader, DestructionDetachesFromThePort) {
   FakeDownloadPort port;
   FakeBudget budget;
   FakeHasher hasher;
   {
     CollectionDownloader downloader(
         port, budget, hasher, std::make_shared<std::atomic_bool>(false),
-        [] { return qint64(0); }, [](int, int, const QString&) {},
-        [](int, int, const QString&) {});
+        [] { return qint64(0); }, [](int, int, const QString &) {},
+        [](int, int, const QString &) {});
     EXPECT_NE(port.listener(), nullptr);
   }
   EXPECT_EQ(port.listener(), nullptr);
