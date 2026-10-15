@@ -23,7 +23,10 @@ namespace CollectionPlacement {
 //  `plan.toDisable`,
 //  6. writes modlist.txt now and refreshes again.
 //
-// `presentFolders` is parallel to `plan.mods`. On failure `error` says why and
+// `plan` must be the plan as it ran, `planAsRun(plan, report)`: a Replace whose
+// download failed has to be passed as AlreadyInstalled, or placement moves and
+// enables a folder the run never touched. `presentFolders` is parallel to
+// `plan.mods`. On failure `error` says why and
 // nothing after the failing step is touched.
 bool place(OrganizerCore &core, IUserInterface *ui, const CollectionLink &link,
            const CollectionPlan &plan, const CollectionState &state,
