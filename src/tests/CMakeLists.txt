@@ -1367,5 +1367,31 @@ set_tests_properties(test_archive_extraction_containment PROPERTIES
     ENVIRONMENT "MO2_LIBS_DIR=$<TARGET_FILE_DIR:7z>")
 add_dependencies(fluorine-tests test_archive_extraction_containment)
 
+# ---------------------------------------------------------------------------
+# Nexus collections: the units that need no running organizer
+# ---------------------------------------------------------------------------
+add_executable(test_nexus_collections EXCLUDE_FROM_ALL
+    collections/test_nxmurl.cpp
+)
+set_target_properties(test_nexus_collections PROPERTIES
+    AUTOMOC OFF
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+target_include_directories(test_nexus_collections PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src
+)
+target_compile_definitions(test_nexus_collections PRIVATE
+    FLUORINE_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_nexus_collections PRIVATE
+    Qt6::Core
+    mo2::uibase
+    GTest::gtest
+    GTest::gtest_main
+)
+add_test(NAME test_nexus_collections COMMAND test_nexus_collections)
+add_dependencies(fluorine-tests test_nexus_collections)
+
 add_test(NAME test_stalkeranomaly_save_fallback
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_stalkeranomaly_save_fallback.py)

@@ -34,7 +34,7 @@ NXMUrl::NXMUrl(const QString& url)
       "(?:nxm|modl)://[a-z0-9]+/mods/(\\d+)/files/(\\d+)",
       QRegularExpression::CaseInsensitiveOption);
   static const QRegularExpression collectionRegex(
-      "(?:nxm|modl)://[a-z0-9]+/collections/([a-z0-9]+)/revisions/(\\d+)",
+      "(?:nxm|modl)://[a-z0-9]+/collections/([a-z0-9_-]+)/revisions/(\\d+)",
       QRegularExpression::CaseInsensitiveOption);
 
   m_Game = nxm.host();
