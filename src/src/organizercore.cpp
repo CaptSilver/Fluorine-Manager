@@ -832,10 +832,10 @@ void OrganizerCore::userInterfaceInitialized()
 
 void OrganizerCore::mainWindowShown()
 {
-  // Nothing calls userInterfaceInitialized(), and MainWindow can't: plugins are
-  // already notified through their proxies in PluginContainer::startPlugins(),
-  // so calling it would fire their callback twice. Collection links that
-  // arrived during startup wait for the first show instead.
+  // Plugins are notified through their proxies in PluginContainer::startPlugins(),
+  // so MainWindow calling userInterfaceInitialized() would fire their callback
+  // twice. Collection links that arrived during startup wait for this first
+  // show instead.
   m_CollectionSession->userInterfaceInitialized();
 }
 
