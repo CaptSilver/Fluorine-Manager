@@ -36,6 +36,7 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #include "fluorineconfig.h"
 #include "fluorinepaths.h"
 #include "fuseconnector.h"
+#include "headless.h"
 #include "wineprefix.h"
 
 #include <cerrno>
@@ -584,6 +585,12 @@ int MOApplication::run(MOMultiProcess& multiProcess)
 
 void MOApplication::externalMessage(const QString& message)
 {
+  if (headless::active()) {
+    // acting on it would remap the VFS or nest a dialog under the running game
+    log::info("headless: ignoring forwarded message");
+    return;
+  }
+
   log::debug("received external message '{}'", message);
 
   MOShortcut const moshortcut(message);
