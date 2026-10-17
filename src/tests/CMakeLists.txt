@@ -1134,6 +1134,17 @@ target_link_libraries(test_library_setup_panel PRIVATE Qt6::Widgets Qt6::Network
 add_test(NAME test_library_setup_panel COMMAND test_library_setup_panel)
 set_tests_properties(test_library_setup_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_steam_launch_option EXCLUDE_FROM_ALL
+    test_steam_launch_option.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/steamlaunchoption.cpp)
+set_target_properties(test_steam_launch_option PROPERTIES
+    AUTOMOC OFF CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+target_include_directories(test_steam_launch_option PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src)
+target_link_libraries(test_steam_launch_option PRIVATE Qt6::Core GTest::gtest)
+add_test(NAME test_steam_launch_option COMMAND test_steam_launch_option)
+set_tests_properties(test_steam_launch_option PROPERTIES TIMEOUT 30)
+
 add_custom_target(fluorine-tests
     DEPENDS test_stylesheetpath test_applicationappearance test_plugindatapath
             test_instancegeneralsettings test_desktopshortcutpolicy test_desktopshortcut
@@ -1151,7 +1162,7 @@ add_custom_target(fluorine-tests
             test_prefixsymlinks
             test_heroicjson test_protondetection
             test_external_dir_mapping test_portablelauncherscript test_xdgpaths
-            test_desktopnotifier test_multiprocess test_headless test_headlessstop
+            test_steam_launch_option test_desktopnotifier test_multiprocess test_headless test_headlessstop
             test_vfs_file_ops
             test_shell_operations
             test_vfs_descriptor_cleanup test_mount_path_utils

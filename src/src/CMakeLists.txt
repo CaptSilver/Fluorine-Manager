@@ -120,6 +120,7 @@ list(APPEND ORGANIZER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcef.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/steamlaunchoption.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/headless.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/headlessstop.cpp
@@ -164,6 +165,7 @@ list(APPEND ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcef.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/steamlaunchoption.h
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.h
     ${CMAKE_CURRENT_SOURCE_DIR}/headless.h
     ${CMAKE_CURRENT_SOURCE_DIR}/headlessstop.h
