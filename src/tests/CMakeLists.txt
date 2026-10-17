@@ -898,12 +898,23 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets WebSockets Network)
 add_executable(test_steam_cloud EXCLUDE_FROM_ALL
     test_steam_cloud.cpp
     ${CMAKE_SOURCE_DIR}/src/src/steamcloudsync.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/steamcef.cpp
     ${CMAKE_SOURCE_DIR}/src/src/vdfparser.cpp
 )
 set_target_properties(test_steam_cloud PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(test_steam_cloud PRIVATE Qt6::Widgets Qt6::Network Qt6::WebSockets GTest::gtest)
 add_test(NAME test_steam_cloud COMMAND test_steam_cloud)
 set_tests_properties(test_steam_cloud PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_steam_cef EXCLUDE_FROM_ALL
+    test_steam_cef.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/steamcef.cpp
+)
+set_target_properties(test_steam_cef PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+target_include_directories(test_steam_cef PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
+target_link_libraries(test_steam_cef PRIVATE Qt6::Core Qt6::Network Qt6::WebSockets GTest::gtest)
+add_test(NAME test_steam_cef COMMAND test_steam_cef)
+set_tests_properties(test_steam_cef PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # ---------------------------------------------------------------------------
 # Installed/portable stylesheet lookup and containment tests
@@ -1131,7 +1142,7 @@ add_custom_target(fluorine-tests
             test_nativeprocess test_pluginprocessregistry
             test_game_artwork test_settings_navigation test_fluorine_menu_bar
             test_library_setup_panel
-            test_esptk_tes3 test_bsatk_extraction test_executable_options test_steam_cloud
+            test_esptk_tes3 test_bsatk_extraction test_executable_options test_steam_cloud test_steam_cef
             test_conflict_sorting test_launch_environment test_faudioruntime
             test_plugincompatibility test_pefileutils test_curatedguide
             test_metainiutils test_fomoddependency test_persistentcookiejar test_fluorineupdater
