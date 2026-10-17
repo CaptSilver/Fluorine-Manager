@@ -323,7 +323,9 @@ int MOApplication::setup(MOMultiProcess& multiProcess, bool forceSelect)
 
   if (!setLogDirectory(dataPath)) {
     reportError(tr("Failed to create log folder."));
-    InstanceManager::singleton().clearCurrentInstance();
+    if (!headless::active()) {
+      InstanceManager::singleton().clearCurrentInstance();
+    }
     return 1;
   }
 
@@ -410,7 +412,9 @@ int MOApplication::setup(MOMultiProcess& multiProcess, bool forceSelect)
   m_core.reset(new OrganizerCore(*m_settings));
   if (!m_core->bootstrap()) {
     reportError(tr("Failed to set up data paths."));
-    InstanceManager::singleton().clearCurrentInstance();
+    if (!headless::active()) {
+      InstanceManager::singleton().clearCurrentInstance();
+    }
     return 1;
   }
   MemoryDiagnostics::snapshot("startup.core_bootstrapped");
@@ -685,6 +689,13 @@ std::unique_ptr<Instance> MOApplication::getCurrentInstance(bool forceSelect)
   auto& m              = InstanceManager::singleton();
   auto currentInstance = m.currentInstance();
 
+  if (headless::active() && (forceSelect || !currentInstance)) {
+    headless::fail(QObject::tr("Instance '%1' not found.")
+                       .arg(currentInstance ? currentInstance->displayName()
+                                            : QString()));
+    return {};
+  }
+
   if (forceSelect || !currentInstance) {
     // clear any overrides that might have been given on the command line
     m.clearOverrides();
@@ -692,6 +703,12 @@ std::unique_ptr<Instance> MOApplication::getCurrentInstance(bool forceSelect)
   } else {
     if (!QDir(currentInstance->directory()).exists()) {
       // the previously used instance doesn't exist anymore
+
+      if (headless::active()) {
+        headless::fail(QObject::tr("Instance '%1' not found.")
+                           .arg(currentInstance->displayName()));
+        return {};
+      }
 
       // clear any overrides that might have been given on the command line
       m.clearOverrides();
@@ -724,6 +741,9 @@ std::optional<int> MOApplication::setupInstanceLoop(Instance& currentInstance,
     } else if (setupResult == SetupInstanceResults::TryAgain) {
       continue;
     } else if (setupResult == SetupInstanceResults::SelectAnother) {
+      if (headless::active()) {
+        return 1;
+      }
       InstanceManager::singleton().clearCurrentInstance();
       return ReselectExitCode;
     } else {
