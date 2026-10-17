@@ -1,4 +1,5 @@
 #include "plugincontainer.h"
+#include "headless.h"
 #include "iuserinterface.h"
 #include "organizercore.h"
 #include "organizerproxy.h"
@@ -1306,7 +1307,8 @@ void PluginContainer::loadPlugins()
       const auto Blacklist = QMessageBox::Cancel;
       const auto Load      = QMessageBox::Ok;
 
-      const auto r =
+      // Skip, never Blacklist: Cancel would blacklist the plugin for good.
+      const auto r = headless::active() ? Skip :
           dlg.title(tr("Plugin error"))
               .main(tr("Mod Organizer failed to load the plugin '%1' last time it was "
                        "started.")

@@ -30,6 +30,7 @@
 #include "shared/fileentry.h"
 #include "shared/filesorigin.h"
 #include "shared/util.h"
+#include "headless.h"
 #include "spawn.h"
 #include "syncoverwritedialog.h"
 #include "virtualfiletree.h"
@@ -548,10 +549,14 @@ void OrganizerCore::storeSettings()
       reason = tr("Unknown error %1").arg(result);
     }
 
-    QMessageBox::critical(
-        qApp->activeWindow(), tr("Failed to write settings"),
+    const auto text =
         tr("An error occurred trying to write back MO settings to %1: %2")
-            .arg(m_Settings.filename(), reason));
+            .arg(m_Settings.filename(), reason);
+    if (headless::active()) {
+      headless::fail(text);
+    } else {
+      QMessageBox::critical(qApp->activeWindow(), tr("Failed to write settings"), text);
+    }
   }
 }
 
@@ -874,10 +879,14 @@ InstallationManager* OrganizerCore::installationManager()
 bool OrganizerCore::createDirectory(const QString& path)
 {
   if (!QDir(path).exists() && !QDir().mkpath(path)) {
-    QMessageBox::critical(nullptr, QObject::tr("Error"),
-                          QObject::tr("Failed to create \"%1\". Your user "
-                                      "account probably lacks permission.")
-                              .arg(QDir::toNativeSeparators(path)));
+    const auto text = QObject::tr("Failed to create \"%1\". Your user "
+                                  "account probably lacks permission.")
+                          .arg(QDir::toNativeSeparators(path));
+    if (headless::active()) {
+      headless::fail(text);
+    } else {
+      QMessageBox::critical(nullptr, QObject::tr("Error"), text);
+    }
     return false;
   } else {
     return true;
@@ -2875,7 +2884,11 @@ bool OrganizerCore::checkGameRegistryKey()
       parent = m_UserInterface->mainWindow();
     }
 
-    const auto answer = QMessageBox::question(
+    // Yes is the dialog's default and the change is non-destructive; failing
+    // would make the first launch on a fresh prefix always refuse.
+    const auto answer = headless::active()
+        ? QMessageBox::Yes
+        : QMessageBox::question(
         parent,
         tr("Registry key does not match"),
         tr("The game's installation path in the Wine registry does not match "
@@ -2888,6 +2901,10 @@ bool OrganizerCore::checkGameRegistryKey()
         QMessageBox::Yes);
 
     if (answer == QMessageBox::Yes) {
+      if (headless::active()) {
+        log::info("headless: registry key updated from '{}' to '{}'",
+                  displayRegPath, winePath);
+      }
       if (!prefix.writeHklmValue(subKey, valueName, winePath)) {
         log::error("Failed to update game registry key");
       }
@@ -3204,7 +3221,11 @@ bool OrganizerCore::beforeRun(
     if (m_UserInterface) {
       w = m_UserInterface->mainWindow();
     }
-    QMessageBox::warning(w, tr("Error"), e.what());
+    if (headless::active()) {
+      headless::fail(QString::fromUtf8(e.what()));
+    } else {
+      QMessageBox::warning(w, tr("Error"), e.what());
+    }
     if (usvfsRequestPath && !usvfsRequestPath->isEmpty()) {
       QFile::remove(*usvfsRequestPath);
       usvfsRequestPath->clear();

@@ -123,6 +123,127 @@ class HeadlessPromptSurfaceTests(unittest.TestCase):
         self.assertRegex(body, r"currentProfile\(\)")
         self.assertIn("->name()", body)
 
+    def _body_of(self, name: str, regex: str) -> str:
+        return function_body(self._read(name), regex)
+
+    def _assert_before(self, body: str, first: str, second: str) -> None:
+        self.assertIn(first, body)
+        self.assertIn(second, body)
+        self.assertLess(body.index(first), body.index(second))
+
+    def test_instance_resolution_never_picks_in_headless(self) -> None:
+        body = self._body_of(
+            "moapplication.cpp", r"MOApplication::getCurrentInstance\(bool forceSelect\)"
+        )
+        self.assertIn("headless::fail(", body)
+        self.assertIn("Instance '%1' not found.", body)
+        self._assert_before(body, "headless::active()", "clearOverrides()")
+        self._assert_before(body, "headless::active()", "selectInstance()")
+        select = self._body_of("instancemanager.cpp", r"std::unique_ptr<Instance> selectInstance\(\)")
+        self.assertRegex(select, r"^\{\s*if \(headless::active\(\)\)\s*\{\s*return \{\};")
+        self.assertLess(select.index("headless::active()"), select.index("PluginContainer"))
+
+    def test_setup_instance_never_opens_game_or_variant_pickers(self) -> None:
+        body = self._body_of(
+            "instancemanager.cpp",
+            r"SetupInstanceResults setupInstance\(Instance& instance, PluginContainer& pc\)",
+        )
+        for case, picker in (
+            ("IniMissingGame", "selectGame"),
+            ("GameGone", "selectGame"),
+            ("MissingVariant", "selectVariant"),
+        ):
+            start = body.index("SetupResults::" + case)
+            end = body.index("case Instance::SetupResults::", start + 10) if (
+                "case Instance::SetupResults::" in body[start + 10 :]
+            ) else len(body)
+            section = body[start:end]
+            self._assert_before(section, "headless::active()", picker + "(")
+            guard = function_body(section, r"if \(headless::active\(\)\)")
+            self.assertIn("SetupInstanceResults::Exit", guard)
+
+    def test_start_binary_uses_report_launch_problem(self) -> None:
+        source = self._read("spawn.cpp")
+        body = function_body(source, r"env::NativeProcess startBinary\(QWidget\* parent")
+        self.assertNotIn("QMessageBox::critical(", body)
+        self.assertGreaterEqual(body.count("reportLaunchProblem("), 4)
+        helper = function_body(source, r"void reportLaunchProblem\(")
+        self.assertIn("headless::fail(text)", helper)
+        self.assertIn("QMessageBox::critical(parent, title, text)", helper)
+        anon = re.search(r"\nnamespace\s*\{", source)
+        self.assertIsNotNone(anon, "no anonymous namespace in spawn.cpp")
+        self.assertLess(anon.start(), source.index("void reportLaunchProblem("))
+        self.assertNotIn("reportLaunchProblem", self._read("spawn.h"))
+
+    def test_check_steam_continues_headless(self) -> None:
+        body = self._body_of("spawn.cpp", r"bool checkSteam\(QWidget\* parent")
+        self.assertIn(
+            "headless: Steam isn't running; continuing without starting it", body
+        )
+        self._assert_before(body, "headless::active()", "confirmStartSteam(")
+        guard = function_body(body, r"if \(headless::active\(\)\)")
+        self.assertIn("return true;", guard)
+
+    def test_registry_prompt_auto_answers_yes_headless(self) -> None:
+        body = self._body_of("organizercore.cpp", r"bool OrganizerCore::checkGameRegistryKey\(\)")
+        self.assertIn("headless: registry key updated from '{}' to '{}'", body)
+        self._assert_before(body, "headless::active()", "QMessageBox::question(")
+        self.assertRegex(body, r"headless::active\(\)\s*\?\s*QMessageBox::Yes\s*:\s*QMessageBox::question\(")
+
+    def test_before_run_catch_routes_headless(self) -> None:
+        body = self._body_of("organizercore.cpp", r"bool OrganizerCore::beforeRun\(")
+        catch = body[body.index("catch (const std::exception& e)") :]
+        self._assert_before(catch, "headless::fail(", "QMessageBox::warning(")
+        self.assertIn("headless::active()", catch[: catch.index("QMessageBox::warning(")])
+
+    def test_organizercore_critical_sites_headless(self) -> None:
+        source = self._read("organizercore.cpp")
+        write = function_body(source, r"void OrganizerCore::saveCurrentLists\(\)|void OrganizerCore::storeSettings\(\)")
+        self._assert_before(write, "headless::fail(", "QMessageBox::critical(")
+        create = function_body(source, r"bool OrganizerCore::createDirectory\(const QString& path\)")
+        self._assert_before(create, "headless::fail(", "QMessageBox::critical(")
+        self.assertIn("headless::active()", create)
+
+    def test_fuse_catalog_dialog_suppressed_headless(self) -> None:
+        source = self._read("fuseconnector.cpp")
+        self.assertRegex(
+            source,
+            r"if \(qApp != nullptr && !headless::active\(\) &&\s*QThread::currentThread\(\) == qApp->thread\(\)\)\s*\{\s*catalogProgress = std::make_unique<QProgressDialog>",
+        )
+
+    def test_profile_ini_warning_skipped_headless(self) -> None:
+        body = self._body_of("profile.cpp", r"bool Profile::localSettingsEnabled\(\) const")
+        self.assertIn("headless: profile-specific INI files missing; continuing", body)
+        self._assert_before(body, "headless::active()", "QMessageBox::warning(")
+        self.assertIn("return enabled;", body)
+
+    def test_plugin_loadcheck_skips_headless(self) -> None:
+        source = self._read("plugincontainer.cpp")
+        start = source.index("MOBase::TaskDialog dlg;")
+        section = source[start : source.index("switch (r)", start)]
+        self._assert_before(section, "headless::active()", ".exec()")
+        self.assertRegex(section, r"headless::active\(\)\s*\?\s*Skip\s*:")
+        self.assertNotRegex(section, r"headless::active\(\)\s*\?\s*Blacklist")
+
+    def test_headless_setup_keeps_last_instance(self) -> None:
+        source = self._read("moapplication.cpp")
+        loop = function_body(source, r"MOApplication::setupInstanceLoop\(")
+        select = loop[loop.index("SelectAnother") :]
+        self._assert_before(select, "headless::active()", "clearCurrentInstance()")
+        guard = function_body(select, r"if \(headless::active\(\)\)")
+        self.assertIn("return 1;", guard)
+        setup = function_body(source, r"int MOApplication::setup\(")
+        for call in re.finditer(r"clearCurrentInstance\(\)", setup):
+            before = setup[: call.start()]
+            self.assertRegex(before[-120:], r"!headless::active\(\)")
+
+    def test_java_picker_skipped_headless(self) -> None:
+        body = self._body_of("spawn.cpp", r"FileExecutionContext getFileExecutionContext\(")
+        java = body[body.index("isJavaFile(target)") :]
+        self._assert_before(java, "headless::active()", "QFileDialog::getOpenFileName(")
+        guard = function_body(java, r"if \(headless::active\(\)\)")
+        self.assertIn("FileExecutionTypes::Other", guard)
+
 
 if __name__ == "__main__":
     unittest.main()
