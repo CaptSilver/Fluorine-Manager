@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Network DBus)
 find_package(GTest REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(ZLIB REQUIRED)
@@ -24,6 +24,18 @@ target_compile_options(test_xdgpaths PRIVATE
 target_link_libraries(test_xdgpaths PRIVATE
     Qt6::Core Qt6::Network Qt6::DBus mo2::uibase GTest::gtest)
 add_test(NAME test_xdgpaths COMMAND test_xdgpaths)
+
+add_executable(test_desktopnotifier EXCLUDE_FROM_ALL
+    test_desktopnotifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/desktopnotifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/desktopnotifier.h)
+set_target_properties(test_desktopnotifier PROPERTIES AUTOMOC ON CXX_STANDARD 23)
+target_include_directories(test_desktopnotifier PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
+target_compile_options(test_desktopnotifier PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_link_libraries(test_desktopnotifier PRIVATE
+    Qt6::Core Qt6::DBus mo2::uibase GTest::gtest)
+add_test(NAME test_desktopnotifier COMMAND test_desktopnotifier)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TEST_FUSE3 REQUIRED IMPORTED_TARGET fuse3)
 
@@ -1090,6 +1102,7 @@ add_custom_target(fluorine-tests
             test_prefixsymlinks
             test_heroicjson test_protondetection
             test_external_dir_mapping test_portablelauncherscript test_xdgpaths
+            test_desktopnotifier
             test_vfs_file_ops
             test_shell_operations
             test_vfs_descriptor_cleanup test_mount_path_utils
