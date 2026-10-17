@@ -118,6 +118,7 @@ list(APPEND ORGANIZER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/modlistmetadata.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clf3collectiondialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/steamcef.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/headless.cpp
@@ -161,6 +162,7 @@ list(APPEND ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/clf3installertabs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/clf3collectiondialog.h
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/steamcef.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.h
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.h
     ${CMAKE_CURRENT_SOURCE_DIR}/headless.h
