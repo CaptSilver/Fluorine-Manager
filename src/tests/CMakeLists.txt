@@ -909,6 +909,7 @@ set_tests_properties(test_steam_cloud PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 add_executable(test_steam_cef EXCLUDE_FROM_ALL
     test_steam_cef.cpp
     ${CMAKE_SOURCE_DIR}/src/src/steamcef.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/steamlaunchoptions.cpp
 )
 set_target_properties(test_steam_cef PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
 target_include_directories(test_steam_cef PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
