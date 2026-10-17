@@ -1,4 +1,5 @@
 #include "steamcef.h"
+#include "steamlaunchoptions.h"
 
 #include <QCoreApplication>
 #include <QJsonArray>
@@ -199,6 +200,67 @@ TEST(SteamCef, JsStringEscapes)
     ASSERT_EQ(parsed.size(), 1) << qPrintable(s);
     EXPECT_EQ(parsed.at(0).toString(), s);
   }
+}
+
+TEST(SteamLaunchOptions, ExpressionsRejectNonDigitAppIds)
+{
+  for (const QString id : {QString(), QString("48x"), QString("-1"), QString("1);evil("), QString(" 5")}) {
+    EXPECT_THROW(SteamLaunchOptions::readExpression(id), std::invalid_argument) << qPrintable(id);
+    EXPECT_THROW(SteamLaunchOptions::writeExpression(id, "x"), std::invalid_argument)
+        << qPrintable(id);
+  }
+}
+
+TEST(SteamLaunchOptions, WriteExpressionEmbedsEscapedOptions)
+{
+  const QString line = "'/x y' -i 'a\"b' run --headless -e 'It\\'s' # %command%";
+  const auto expression = SteamLaunchOptions::writeExpression("489830", line);
+  EXPECT_TRUE(expression.contains("SetAppLaunchOptions(489830, " + SteamCef::jsString(line) + ")"));
+}
+
+TEST(SteamLaunchOptions, ReadUsesRegisterForAppDetails)
+{
+  const auto expression = SteamLaunchOptions::readExpression("489830");
+  EXPECT_TRUE(expression.contains("RegisterForAppDetails(489830,"));
+  EXPECT_TRUE(expression.contains("strLaunchOptions"));
+}
+
+TEST(SteamLaunchOptions, ReadReturnsFakeValue)
+{
+  FakeSteam fake;
+  fake.replyWith(valueResult(QJsonObject{{"launchOptions", "-x"}}));
+  SteamCef::Client client("127.0.0.1", fake.port());
+  EXPECT_EQ(SteamLaunchOptions::read(client, "489830"), "-x");
+  ASSERT_EQ(fake.m_requests.size(), 1);
+  EXPECT_TRUE(fake.m_requests.first().value("params").toObject().value("expression").toString()
+                  .contains("RegisterForAppDetails(489830,"));
+}
+
+TEST(SteamLaunchOptions, ReadReturnsEmptyWhenUnset)
+{
+  FakeSteam fake;
+  fake.replyWith(valueResult(QJsonObject{{"launchOptions", ""}}));
+  SteamCef::Client client("127.0.0.1", fake.port());
+  EXPECT_EQ(SteamLaunchOptions::read(client, "489830"), "");
+}
+
+TEST(SteamLaunchOptions, WriteSendsExpressionAndAcceptsOk)
+{
+  FakeSteam fake;
+  fake.replyWith(valueResult(QJsonObject{{"ok", true}}));
+  SteamCef::Client client("127.0.0.1", fake.port());
+  EXPECT_NO_THROW(SteamLaunchOptions::write(client, "489830", "-y"));
+  ASSERT_EQ(fake.m_requests.size(), 1);
+  EXPECT_EQ(fake.m_requests.first().value("params").toObject().value("expression").toString(),
+            SteamLaunchOptions::writeExpression("489830", "-y"));
+}
+
+TEST(SteamLaunchOptions, WriteThrowsWhenSteamDoesNotConfirm)
+{
+  FakeSteam fake;
+  fake.replyWith(valueResult(QJsonObject{}));
+  SteamCef::Client client("127.0.0.1", fake.port());
+  EXPECT_THROW(SteamLaunchOptions::write(client, "489830", "-y"), SteamCef::Error);
 }
 
 int main(int argc, char** argv)

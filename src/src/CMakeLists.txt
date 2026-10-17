@@ -119,6 +119,7 @@ list(APPEND ORGANIZER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/clf3collectiondialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcef.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/steamlaunchoptions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamlaunchoption.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.cpp
@@ -164,6 +165,7 @@ list(APPEND ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/clf3collectiondialog.h
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcef.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/steamlaunchoptions.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamlaunchoption.h
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.h
