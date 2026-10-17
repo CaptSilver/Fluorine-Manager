@@ -25,6 +25,18 @@ target_link_libraries(test_xdgpaths PRIVATE
     Qt6::Core Qt6::Network Qt6::DBus mo2::uibase GTest::gtest)
 add_test(NAME test_xdgpaths COMMAND test_xdgpaths)
 
+add_executable(test_multiprocess EXCLUDE_FROM_ALL
+    test_multiprocess.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/multiprocess.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/multiprocess.h)
+set_target_properties(test_multiprocess PROPERTIES AUTOMOC ON CXX_STANDARD 23)
+target_include_directories(test_multiprocess PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
+target_compile_options(test_multiprocess PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_link_libraries(test_multiprocess PRIVATE
+    Qt6::Core Qt6::Network mo2::uibase GTest::gtest)
+add_test(NAME test_multiprocess COMMAND test_multiprocess)
+
 add_executable(test_desktopnotifier EXCLUDE_FROM_ALL
     test_desktopnotifier.cpp
     ${CMAKE_SOURCE_DIR}/src/src/desktopnotifier.cpp
@@ -1126,7 +1138,7 @@ add_custom_target(fluorine-tests
             test_prefixsymlinks
             test_heroicjson test_protondetection
             test_external_dir_mapping test_portablelauncherscript test_xdgpaths
-            test_desktopnotifier test_headless test_headlessstop
+            test_desktopnotifier test_multiprocess test_headless test_headlessstop
             test_vfs_file_ops
             test_shell_operations
             test_vfs_descriptor_cleanup test_mount_path_utils
