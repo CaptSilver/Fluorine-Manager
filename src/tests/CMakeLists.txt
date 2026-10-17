@@ -56,10 +56,8 @@ add_executable(test_headlessstop EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/src/src/headlessstop.h)
 set_target_properties(test_headlessstop PROPERTIES AUTOMOC OFF CXX_STANDARD 23)
 target_include_directories(test_headlessstop PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
-target_compile_options(test_headlessstop PRIVATE
-    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
 target_link_libraries(test_headlessstop PRIVATE
-    Qt6::Core mo2::uibase GTest::gtest GTest::gtest_main)
+    Qt6::Core GTest::gtest GTest::gtest_main)
 add_test(NAME test_headlessstop COMMAND test_headlessstop)
 set_tests_properties(test_headlessstop PROPERTIES TIMEOUT 30)
 find_package(PkgConfig REQUIRED)
