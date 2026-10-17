@@ -75,7 +75,7 @@ TEST_F(Headless, TaskDialogReturnsCancelWhenHeadless) {
   const auto r = MOBase::TaskDialog(nullptr, "t").main("m").content("c").exec();
   EXPECT_EQ(r, QMessageBox::Cancel);
   ASSERT_EQ(calls.size(), 1u);
-  EXPECT_TRUE(calls[0].second.contains("m"));
+  EXPECT_EQ(calls[0].second, "t\nm\nc");
 }
 
 TEST_F(Headless, RunExitCodeCompletedPassesGameCode) {
