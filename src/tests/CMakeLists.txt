@@ -1025,6 +1025,8 @@ add_test(NAME test_desktop_portable_policy
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_desktop_portable_policy.py)
 add_test(NAME test_executable_shortcut_surface
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_executable_shortcut_surface.py)
+add_test(NAME test_headless_prompt_surface
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test_headless_prompt_surface.py)
 
 add_executable(test_logredaction EXCLUDE_FROM_ALL test_logredaction.cpp)
 set_target_properties(test_logredaction PROPERTIES
