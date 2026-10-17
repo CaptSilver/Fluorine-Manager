@@ -120,6 +120,7 @@ list(APPEND ORGANIZER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/headless.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fluorineconfig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fluorinepaths.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lootmanager.cpp
@@ -161,6 +162,7 @@ list(APPEND ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogclf3.h
     ${CMAKE_CURRENT_SOURCE_DIR}/steamcloudsync.h
     ${CMAKE_CURRENT_SOURCE_DIR}/desktopnotifier.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/headless.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fluorineconfig.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fluorinepaths.h
     ${CMAKE_CURRENT_SOURCE_DIR}/lootmanager.h

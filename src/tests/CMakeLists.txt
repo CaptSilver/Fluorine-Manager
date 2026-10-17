@@ -36,6 +36,20 @@ target_compile_options(test_desktopnotifier PRIVATE
 target_link_libraries(test_desktopnotifier PRIVATE
     Qt6::Core Qt6::DBus mo2::uibase GTest::gtest)
 add_test(NAME test_desktopnotifier COMMAND test_desktopnotifier)
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+add_executable(test_headless EXCLUDE_FROM_ALL
+    test_headless.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/headless.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/headless.h)
+set_target_properties(test_headless PROPERTIES AUTOMOC ON CXX_STANDARD 23)
+target_include_directories(test_headless PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
+target_compile_options(test_headless PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_link_libraries(test_headless PRIVATE
+    Qt6::Core Qt6::Widgets mo2::uibase GTest::gtest)
+add_test(NAME test_headless COMMAND test_headless)
+set_tests_properties(test_headless PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TEST_FUSE3 REQUIRED IMPORTED_TARGET fuse3)
 
@@ -1102,7 +1116,7 @@ add_custom_target(fluorine-tests
             test_prefixsymlinks
             test_heroicjson test_protondetection
             test_external_dir_mapping test_portablelauncherscript test_xdgpaths
-            test_desktopnotifier
+            test_desktopnotifier test_headless
             test_vfs_file_ops
             test_shell_operations
             test_vfs_descriptor_cleanup test_mount_path_utils
