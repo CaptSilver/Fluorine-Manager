@@ -39,8 +39,15 @@ public:
     if (!m_bus.isConnected() || m_bus.interface() == nullptr) {
       return false;
     }
-    const auto reply = m_bus.interface()->isServiceRegistered(Service);
-    return reply.isValid() && reply.value();
+    // isServiceRegistered() has no timeout parameter, so call NameHasOwner
+    // directly to keep the bounded wait.
+    auto message = QDBusMessage::createMethodCall(
+        "org.freedesktop.DBus", "/org/freedesktop/DBus",
+        "org.freedesktop.DBus", "NameHasOwner");
+    message << QString(Service);
+    const auto reply = m_bus.call(message, QDBus::Block, CallTimeoutMs);
+    return reply.type() == QDBusMessage::ReplyMessage &&
+           !reply.arguments().isEmpty() && reply.arguments().first().toBool();
   }
 
   bool notify(const QString &appName, const QString &summary,
