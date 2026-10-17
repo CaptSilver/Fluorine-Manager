@@ -69,6 +69,10 @@ QJsonValue Client::evaluate(const QString& expression, int timeoutMs) const
 
   if (response.isEmpty())
     throw Error(Error::Kind::NoResponse, QStringLiteral("Steam's internal interface did not respond."));
+  // A frame with neither payload is as unusable as no frame; a script that
+  // returns undefined still carries a `result` object.
+  if (!response.contains("result") && !response.contains("error"))
+    throw Error(Error::Kind::NoResponse, QStringLiteral("Steam's internal interface did not respond."));
   const auto result = response.value("result").toObject();
   if (response.contains("error") || result.contains("exceptionDetails"))
     throw Error(Error::Kind::ScriptFailed, QStringLiteral("Steam's internal interface reported an error."));
