@@ -170,6 +170,14 @@ TEST(SteamCef, ThrowsNoResponseOnTimeout)
             SteamCef::Error::Kind::NoResponse);
 }
 
+TEST(SteamCef, ThrowsNoResponseOnEmptyReply)
+{
+  FakeSteam fake;
+  SteamCef::Client client("127.0.0.1", fake.port());
+  fake.replyWith({});  // an id-1 frame with neither result nor error
+  EXPECT_EQ(kindOf(client), SteamCef::Error::Kind::NoResponse);
+}
+
 TEST(SteamCef, ThrowsNoResponseWhenSocketDrops)
 {
   FakeSteam fake;
