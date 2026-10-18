@@ -23,7 +23,6 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #include "envmodule.h"
 #include "fluorineconfig.h"
 #include "headless.h"
-#include "headless.h"
 #include "protonlauncher.h"
 #include "launchenvironment.h"
 #include "settings.h"
