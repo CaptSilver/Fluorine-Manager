@@ -436,6 +436,7 @@ MainWindow::MainWindow(Settings& settings, OrganizerCore& organizerCore,
                                         tr("Application menu shortcut"), this,
                                         SLOT(linkMenu()));
   QMenu* steamMenu = linkMenu->addMenu(tr("Steam launch option"));
+  steamMenu->setToolTipsVisible(true);
   m_SteamCopy = steamMenu->addAction(tr("Copy launch option"), this,
                                      &MainWindow::copySteamLaunchOption);
   m_SteamSet  = steamMenu->addAction(tr("Set in Steam…"), this,
