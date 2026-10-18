@@ -1118,6 +1118,7 @@ add_executable(test_clf3_collections EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/src/src/clf3collectioncompat.cpp
     ${CMAKE_SOURCE_DIR}/src/src/clf3collectionhost.cpp
     ${CMAKE_SOURCE_DIR}/src/src/clf3installertabs.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/clf3momwpage.cpp
     ${CMAKE_SOURCE_DIR}/src/src/clf3collectiondialog.cpp
     ${CMAKE_SOURCE_DIR}/src/src/clf3processcontroller.cpp
     ${CMAKE_SOURCE_DIR}/src/src/clf3enginemanager.cpp
