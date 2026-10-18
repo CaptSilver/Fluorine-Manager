@@ -111,20 +111,21 @@ void PluginsWidget::updatePluginCount()
   int activeMediumMasterCount = 0;
   int activeLightMasterCount  = 0;
   int activeRegularCount      = 0;
+  int activeOverlayCount      = 0;
   int masterCount             = 0;
   int mediumMasterCount       = 0;
   int lightMasterCount        = 0;
   int regularCount            = 0;
+  int overlayCount            = 0;
   int activeVisibleCount      = 0;
 
   const auto gameFeatures = m_Organizer->gameFeatures();
   const auto tesSupport =
       gameFeatures ? gameFeatures->gameFeature<MOBase::GamePlugins>() : nullptr;
 
-  const bool lightPluginsAreSupported =
-      tesSupport && tesSupport->lightPluginsAreSupported();
-  const bool mediumPluginsAreSupported =
-      tesSupport && tesSupport->mediumPluginsAreSupported();
+  const auto managedGame = m_Organizer->managedGame();
+  const auto display     = MOBase::BethesdaPluginDisplay::forGame(
+      tesSupport.get(), managedGame ? managedGame->gameShortName() : QString());
 
   for (int i = 0, count = m_PluginListModel->rowCount(); i < count; ++i) {
     const auto index = m_PluginListModel->index(i, 0);
@@ -136,7 +137,11 @@ void PluginsWidget::updatePluginCount()
 
     const bool active  = info->enabled() || info->isAlwaysEnabled();
     const bool visible = m_SortProxy->filterAcceptsRow(index.row(), index.parent());
-    if (info->isMediumFile()) {
+    if (info->isOverlayFile()) {
+      ++overlayCount;
+      activeOverlayCount += active ? 1 : 0;
+      activeVisibleCount += visible && active ? 1 : 0;
+    } else if (info->isMediumFile()) {
       ++mediumMasterCount;
       activeMediumMasterCount += active ? 1 : 0;
       activeVisibleCount += visible && active ? 1 : 0;
@@ -156,9 +161,10 @@ void PluginsWidget::updatePluginCount()
   }
 
   const int activeCount = activeMasterCount + activeMediumMasterCount +
-                          activeLightMasterCount + activeRegularCount;
+                          activeLightMasterCount + activeRegularCount +
+                          activeOverlayCount;
   const int totalCount =
-      masterCount + mediumMasterCount + lightMasterCount + regularCount;
+      masterCount + mediumMasterCount + lightMasterCount + regularCount + overlayCount;
 
   ui->activePluginsCounter->display(activeVisibleCount);
 
@@ -178,10 +184,12 @@ void PluginsWidget::updatePluginCount()
   toolTip += row.arg(tr("ESMs+ESPs"))
                  .arg(activeMasterCount + activeRegularCount)
                  .arg(masterCount + regularCount);
-  if (mediumPluginsAreSupported)
+  if (display.medium)
     toolTip += row.arg(tr("ESHs")).arg(activeMediumMasterCount).arg(mediumMasterCount);
-  if (lightPluginsAreSupported)
+  if (display.light)
     toolTip += row.arg(tr("ESLs")).arg(activeLightMasterCount).arg(lightMasterCount);
+  if (display.overlay)
+    toolTip += row.arg(tr("Overlays")).arg(activeOverlayCount).arg(overlayCount);
   toolTip += uR"(</table>)"_s;
 
   ui->activePluginsCounter->setToolTip(toolTip);

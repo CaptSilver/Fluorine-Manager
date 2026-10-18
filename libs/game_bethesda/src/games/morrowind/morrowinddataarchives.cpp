@@ -33,8 +33,10 @@ QStringList MorrowindDataArchives::getArchives(const QString& iniFile) const
 
 void MorrowindDataArchives::setArchives(const QString& iniFile, const QStringList& list)
 {
-  QSettings settings(iniFile, QSettings::IniFormat);
-  settings.remove("Archives");
+  // Not QSettings: its destructor rewrites the whole file, URL-encoding the
+  // spaces in key names ("Archive 0" -> "Archive%200") and dropping comments,
+  // which the game cannot parse.
+  MOBase::RemoveRegistrySection("Archives", iniFile);
 
   QString key      = "Archive ";
   int writtenCount = 0;

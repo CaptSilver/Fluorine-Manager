@@ -164,6 +164,7 @@ private:
   void refreshLoadOrder();
 
   const MOBase::IOrganizer* m_Organizer;
+  MOBase::BethesdaPluginDisplay m_PluginDisplay;
 
   std::vector<std::shared_ptr<FileInfo>> m_Plugins;
 

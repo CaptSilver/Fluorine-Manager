@@ -87,8 +87,9 @@ void MorrowindGamePlugins::writeList(const IPluginList* pluginList,
                                ? QStringEncoder(QStringConverter::Encoding::Utf8)
                                : QStringEncoder(QStringConverter::Encoding::System);
 
-  QSettings settings(filePath, QSettings::IniFormat);
-  settings.remove("Game Files");
+  // Not QSettings: its destructor rewrites the whole file, URL-encoding the
+  // spaces in key names and dropping comments, which breaks Morrowind.ini.
+  MOBase::RemoveRegistrySection("Game Files", filePath);
 
   bool invalidFileNames = false;
   int writtenCount      = 0;

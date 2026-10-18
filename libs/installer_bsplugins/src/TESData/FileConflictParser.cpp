@@ -10,10 +10,8 @@ namespace TESData
 {
 
 FileConflictParser::FileConflictParser(PluginList* pluginList, FileInfo* plugin,
-                                       bool lightSupported, bool mediumSupported,
-                                       bool blueprintSupported)
-    : m_PluginList{pluginList}, m_Plugin{plugin}, m_LightSupported{lightSupported},
-      m_MediumSupported{mediumSupported}, m_BlueprintSupported{blueprintSupported}
+                                       MOBase::BethesdaPluginDisplay support)
+    : m_PluginList{pluginList}, m_Plugin{plugin}, m_Support{support}
 {
   m_PluginName = m_Plugin->name().toStdString();
 }
@@ -51,15 +49,13 @@ bool FileConflictParser::Form(TESFile::FormData form)
 
   if (m_CurrentPath.groups().empty()) {
     if (form.type() == "TES4"_ts) {
-      m_Plugin->setMasterFlagged(form.flags() & TESFile::RecordFlags::Master);
-      m_Plugin->setMediumFlagged(m_MediumSupported &&
-                                 (form.flags() & TESFile::RecordFlags::Medium));
-      m_Plugin->setBlueprintFlagged(m_BlueprintSupported &&
-                                    (form.flags() & TESFile::RecordFlags::Blueprint));
-      m_Plugin->setLightFlagged(
-          m_MediumSupported  ? (form.flags() & TESFile::RecordFlags::SmallNew)
-          : m_LightSupported ? (form.flags() & TESFile::RecordFlags::SmallOld)
-                             : false);
+      const auto flags =
+          MOBase::BethesdaPluginFlags::fromHeader(form.flags(), m_Support);
+      m_Plugin->setMasterFlagged(flags.master);
+      m_Plugin->setMediumFlagged(flags.medium);
+      m_Plugin->setBlueprintFlagged(flags.blueprint);
+      m_Plugin->setLightFlagged(flags.light);
+      m_Plugin->setOverlayFlagged(flags.overlay);
       m_Plugin->setFormVersion(form.formVersion());
       return true;
     } else {

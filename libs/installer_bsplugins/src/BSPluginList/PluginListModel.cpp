@@ -406,7 +406,11 @@ QVariant PluginListModel::tooltipData(const QModelIndex& index) const
                  spacing;
     }
 
-    if (plugin->isSmallFile()) {
+    if (plugin->isOverlayFile()) {
+      toolTip += tr("Flagged as an overlay plugin. Displayed as XX and "
+                    "excluded from the indexed plugin count.") +
+                 spacing;
+    } else if (plugin->isSmallFile()) {
       toolTip +=
           tr("This file is flagged as a light plugin (ESL). It will adhere to its "
              "position in "

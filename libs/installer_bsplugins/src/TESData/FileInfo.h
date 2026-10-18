@@ -3,6 +3,7 @@
 
 #include <ifiletree.h>
 #include <memoizedlock.h>
+#include <uibase/bethesdaplugin.h>
 
 #include <boost/container/flat_set.hpp>
 
@@ -50,6 +51,7 @@ public:
 
     bool hasMasterExtension;
     bool hasLightExtension;
+    bool respectsExtensions;
 
     bool forceLoaded;
     bool forceEnabled;
@@ -67,6 +69,7 @@ public:
     bool isMasterFlagged;
     bool isMediumFlagged;
     bool isLightFlagged;
+    bool isOverlayFlagged;
     bool isBlueprintFlagged;
     bool hasNoRecords;
 
@@ -98,7 +101,8 @@ public:
   };
 
   FileInfo(PluginList* pluginList, const QString& name, bool forceLoaded,
-           bool forceEnabled, bool forceDisabled, bool lightSupported);
+           bool forceEnabled, bool forceDisabled, bool lightSupported,
+           MOBase::BethesdaPluginDisplay support);
 
   [[nodiscard]] const QString& name() const { return m_FileSystemData.name; }
 
@@ -131,6 +135,8 @@ public:
   void setMediumFlagged(bool value) { m_Metadata.isMediumFlagged = value; }
   [[nodiscard]] bool isLightFlagged() const { return m_Metadata.isLightFlagged; }
   void setLightFlagged(bool value) { m_Metadata.isLightFlagged = value; }
+  [[nodiscard]] bool isOverlayFile() const { return m_Metadata.isOverlayFlagged; }
+  void setOverlayFlagged(bool value) { m_Metadata.isOverlayFlagged = value; }
   [[nodiscard]] bool isBlueprintFlagged() const { return m_Metadata.isBlueprintFlagged; }
   void setBlueprintFlagged(bool value) { m_Metadata.isBlueprintFlagged = value; }
   [[nodiscard]] bool hasNoRecords() const { return m_Metadata.hasNoRecords; }
@@ -212,7 +218,7 @@ private:
 
   PluginList* m_PluginList;
   FileSystemData m_FileSystemData;
-  Metadata m_Metadata;
+  Metadata m_Metadata{};
   State m_State;
   mutable MOBase::MemoizedLocked<Conflicts> m_Conflicts;
 };

@@ -3,6 +3,7 @@
 
 #include "RecordPath.h"
 #include "TESFile/Stream.h"
+#include <uibase/bethesdaplugin.h>
 
 #include <string>
 #include <vector>
@@ -16,8 +17,8 @@ class FileInfo;
 class FileConflictParser final
 {
 public:
-  FileConflictParser(PluginList* pluginList, FileInfo* plugin, bool lightSupported,
-                     bool mediumSupported, bool blueprintSupported);
+  FileConflictParser(PluginList* pluginList, FileInfo* plugin,
+                     MOBase::BethesdaPluginDisplay support);
 
   bool Group(TESFile::GroupData group);
   void EndGroup();
@@ -34,9 +35,7 @@ private:
 
   PluginList* m_PluginList;
   FileInfo* m_Plugin;
-  bool m_LightSupported;
-  bool m_MediumSupported;
-  bool m_BlueprintSupported;
+  MOBase::BethesdaPluginDisplay m_Support;
 
   std::string m_PluginName;
   std::vector<std::string> m_Masters;

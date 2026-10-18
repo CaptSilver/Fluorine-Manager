@@ -32,6 +32,7 @@ private:
   void onOpenPrefixFolder();
   void onWinetricks();
   void onBrowsePrefixLocation();
+  void onCustomPrefixLocationClicked(bool checked);
   void onDownloadSLR();
   void onFuseAllowOtherClicked(bool checked);
 
