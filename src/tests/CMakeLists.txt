@@ -91,6 +91,15 @@ target_link_libraries(test_esptk_tes3 PRIVATE
 )
 add_test(NAME test_esptk_tes3 COMMAND test_esptk_tes3)
 
+add_executable(test_falloutnv_plugin_types EXCLUDE_FROM_ALL
+    test_falloutnv_plugin_types.cpp)
+set_target_properties(test_falloutnv_plugin_types PROPERTIES AUTOMOC OFF CXX_STANDARD 23)
+target_compile_options(test_falloutnv_plugin_types PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_link_libraries(test_falloutnv_plugin_types PRIVATE
+    mo2::esptk mo2::uibase Qt6::Widgets bsplugins ZLIB::ZLIB GTest::gtest_main)
+add_test(NAME test_falloutnv_plugin_types COMMAND test_falloutnv_plugin_types)
+
 # ---------------------------------------------------------------------------
 # BSA/BA2 extraction path normalization tests
 # ---------------------------------------------------------------------------
@@ -1081,7 +1090,7 @@ add_custom_target(fluorine-tests
             test_nativeprocess test_pluginprocessregistry
             test_game_artwork test_settings_navigation test_fluorine_menu_bar
             test_library_setup_panel
-            test_esptk_tes3 test_bsatk_extraction test_executable_options test_steam_cloud
+            test_esptk_tes3 test_falloutnv_plugin_types test_bsatk_extraction test_executable_options test_steam_cloud
             test_conflict_sorting test_launch_environment test_faudioruntime
             test_plugincompatibility test_pefileutils test_curatedguide
             test_metainiutils test_fomoddependency test_persistentcookiejar test_fluorineupdater
