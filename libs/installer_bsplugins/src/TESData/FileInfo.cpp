@@ -11,16 +11,18 @@ namespace TESData
 {
 
 FileInfo::FileInfo(PluginList* pluginList, const QString& name, bool forceLoaded,
-                   bool forceEnabled, bool forceDisabled, bool lightSupported)
+                   bool forceEnabled, bool forceDisabled, bool lightSupported,
+                   MOBase::BethesdaPluginDisplay support)
     : m_PluginList{pluginList},
       m_FileSystemData{
           .name               = name,
           .hasMasterExtension = name.endsWith(u".esm"_s, Qt::CaseInsensitive),
           .hasLightExtension =
               lightSupported && name.endsWith(u".esl"_s, Qt::CaseInsensitive),
-          .forceLoaded   = forceLoaded,
-          .forceEnabled  = forceEnabled,
-          .forceDisabled = forceDisabled,
+          .respectsExtensions = support.respectsExtensions,
+          .forceLoaded        = forceLoaded,
+          .forceEnabled       = forceEnabled,
+          .forceDisabled      = forceDisabled,
       },
       m_Conflicts{[this]() {
         return doConflictCheck();
@@ -40,7 +42,9 @@ bool FileInfo::isMediumFile() const
 
 bool FileInfo::isSmallFile() const
 {
-  return m_Metadata.isLightFlagged || m_FileSystemData.hasLightExtension;
+  return MOBase::isBethesdaLight(
+      m_Metadata.isLightFlagged, m_FileSystemData.hasLightExtension,
+      m_FileSystemData.respectsExtensions, m_Metadata.isOverlayFlagged);
 }
 
 bool FileInfo::isBlueprintFile() const

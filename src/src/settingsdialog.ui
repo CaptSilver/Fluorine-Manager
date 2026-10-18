@@ -1950,6 +1950,16 @@
             <widget class="QWidget" name="protonMaintenanceContent">
              <layout class="QVBoxLayout" name="protonMaintenanceContentLayout">
               <item>
+               <widget class="QCheckBox" name="customPrefixLocationCheckBox">
+                <property name="text">
+                 <string>Use a custom prefix location (unsupported)</string>
+                </property>
+                <property name="toolTip">
+                 <string>By default Fluorine keeps its prefix in its own data folder. Enable this only if you understand that no support is provided for custom prefix locations.</string>
+                </property>
+               </widget>
+              </item>
+              <item>
                <layout class="QGridLayout" name="maintenancePrefixLayout">
                 <item row="0" column="0">
                  <widget class="QLabel" name="label_63">

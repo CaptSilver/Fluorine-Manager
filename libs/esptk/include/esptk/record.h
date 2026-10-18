@@ -34,6 +34,7 @@ public:
   bool readFrom(std::istream& stream);
 
   bool flagSet(EFlag flag) const;
+  uint32_t flags() const { return m_Header.flags; }
 
   uint16_t formVersion() const { return m_FormVersion; }
 

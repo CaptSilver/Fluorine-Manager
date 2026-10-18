@@ -34,6 +34,10 @@ QDLLEXPORT bool WriteRegistryValue(const QString& appName, const QString& keyNam
 QDLLEXPORT bool RemoveRegistryValue(const QString& section, const QString& key,
                                     const QString& fileName);
 
+// Removes every key=value entry of a section from a Bethesda-style INI file,
+// leaving the header, comments and all other sections untouched.
+QDLLEXPORT bool RemoveRegistrySection(const QString& section, const QString& fileName);
+
 #ifdef _WIN32
 // Windows-specific overload using wide strings
 QDLLEXPORT bool WriteRegistryValue(const wchar_t* appName, const wchar_t* keyName,

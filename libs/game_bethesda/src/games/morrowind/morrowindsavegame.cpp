@@ -3,6 +3,14 @@
 #include <QPixmap>
 #include <QRegularExpression>
 #include <filesystem>
+#include <stdexcept>
+
+namespace
+{
+// Record and subrecord lengths come straight from the save file, so they are
+// never trusted to fit a fixed buffer.
+constexpr uint32_t kMaxNameLength = 1024;
+}  // namespace
 
 MorrowindSaveGame::MorrowindSaveGame(QString const& fileName, GameMorrowind const* game)
     : GamebryoSaveGame(fileName, game)
@@ -57,9 +65,13 @@ void MorrowindSaveGame::fetchInformationFields(FileWrapper& file, QString& saveN
   // Parse the MAST/DATA records
   while (QString::fromLatin1(buffer.data(), 4) == "MAST") {
     uint32_t len;
-    file.read(len);                 // Length of master name
-    file.read(buffer.data(), len);  // Name of master
-    QString name = QString::fromLatin1(buffer.data(), len - 1);
+    file.read(len);  // Length of master name
+    if (len == 0 || len > kMaxNameLength) {
+      throw std::runtime_error("invalid master name length in Morrowind save");
+    }
+    std::vector<char> nameBuffer(len);
+    file.read(nameBuffer.data(), len);  // Name of master
+    QString name = QString::fromLatin1(nameBuffer.data(), len - 1);
     file.skip<unsigned char>(4);  // DATA record
 
     // Typically size 8 - contains length of master data for version checking
@@ -118,39 +130,51 @@ std::unique_ptr<GamebryoSaveGame::DataFields> MorrowindSaveGame::fetchDataFields
   QImage image       = readImageBGRA(file, 128, 128, 0, 1);
   fields->Screenshot = image.scaled(252, 192);
 
-  // definitively have to use another method to access the player level
-  // it is stored in the fifth byte of the NPDT subrecord of the first NPC_ record
-
-  // Globals, Scripts, Regions
-  // file.skip<unsigned char>();
-  std::vector<char> buff(4);
-  file.read(buff.data(), 4);
-  while (QString::fromLatin1(buff.data(), 4) != "NPC_") {
-    uint32_t len;
-    file.read(len);
-    file.skip<unsigned char>(8 + len);
-    file.read(buff.data(), 4);
-  }
-  while (QString::fromLatin1(buff.data(), 4) == "NPC_") {
-    uint32_t size;
-    file.read(size);
-    file.skip<unsigned long>(3);
-    uint32_t len;
-    file.read(len);
-    file.read(buffer.data(), len);
-    if (QString::fromLatin1(buffer.data(), len - 1) == "player") {
-      file.read(buff.data(), 4);
-      while (QString::fromLatin1(buff.data(), 4) != "NPDT") {
-        uint32_t len;
-        file.read(len);
-        file.skip<unsigned char>(len);
-        file.read(buff.data(), 4);
-      }
-      file.skip<unsigned long>();
-      file.read(fields->PCLevel);
-    } else {
-      file.skip<unsigned char>(size - len - 8);
+  // The player level is stored in the fifth byte of the NPDT subrecord of the
+  // player's NPC_ record. A failure to find it must not take the whole save
+  // down (the info widget would otherwise throw out of a Qt slot), so the
+  // level just stays 0.
+  //
+  // Note: sizes are explicit uint32_t. `unsigned long` is 8 bytes on Linux,
+  // which made every skip here overshoot and misparse the record stream.
+  try {
+    // Globals, Scripts, Regions
+    char tag[4];
+    file.read(tag, 4);
+    while (QString::fromLatin1(tag, 4) != "NPC_") {
+      uint32_t len;
+      file.read(len);
+      file.skip<unsigned char>(8 + len);
+      file.read(tag, 4);
     }
+    while (QString::fromLatin1(tag, 4) == "NPC_") {
+      uint32_t size;
+      file.read(size);
+      file.skip<uint32_t>(3);  // header, flags, NAME tag
+      uint32_t len;
+      file.read(len);
+      if (len == 0 || len > kMaxNameLength || size < len + 8) {
+        throw std::runtime_error("invalid NPC_ record in Morrowind save");
+      }
+      std::vector<char> name(len);
+      file.read(name.data(), len);
+      if (QString::fromLatin1(name.data(), len - 1) == "player") {
+        file.read(tag, 4);
+        while (QString::fromLatin1(tag, 4) != "NPDT") {
+          uint32_t subLen;
+          file.read(subLen);
+          file.skip<unsigned char>(subLen);
+          file.read(tag, 4);
+        }
+        file.skip<uint32_t>();
+        file.read(fields->PCLevel);
+        break;
+      }
+      file.skip<unsigned char>(size - len - 8);
+      file.read(tag, 4);
+    }
+  } catch (const std::exception&) {
+    fields->PCLevel = 0;
   }
 
   return fields;
