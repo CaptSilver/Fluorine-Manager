@@ -25,9 +25,31 @@ static const char* SKIP_DIRS[] = {
     "Contacts", "3D Objects",
 };
 
+// Folders under AppData that are written by launchers, anti-cheat, GPU
+// drivers and Wine itself rather than by one game. Every Steam prefix has its
+// own copy, so linking the first one found would route data from all other
+// games into an unrelated game's compatdata (which Steam deletes on uninstall).
+static const char* SHARED_APPDATA_DIRS[] = {
+    "CrashReportClient", "dxvk", "dxvk-cache", "vkd3d-proton", "Epic Games",
+    "EpicGamesLauncher", "NVIDIA", "NVIDIA Corporation", "UnrealEngine",
+    "EasyAntiCheat", "EasyAntiCheat_EOS", "BattlEye", "D3DSCache", "CrashDumps",
+    "Programs", "Packages", "Steam", "Ubisoft Game Launcher", "Battle.net",
+    "Google", "Mozilla", "Temp", "cache", "Cache", "mesa_shader_cache",
+    "AMD", "Intel", "Unity", "UnityLogs", "Overwolf", "discord",
+};
+
 bool shouldSkip(const QString& name)
 {
   for (const char* s : SKIP_DIRS) {
+    if (name.compare(QLatin1String(s), Qt::CaseInsensitive) == 0)
+      return true;
+  }
+  return false;
+}
+
+bool isSharedAppDataDir(const QString& name)
+{
+  for (const char* s : SHARED_APPDATA_DIRS) {
     if (name.compare(QLatin1String(s), Qt::CaseInsensitive) == 0)
       return true;
   }
@@ -84,10 +106,28 @@ QString readSymlinkTargetLiteral(const QString& path)
   }
 }
 
-bool hasSymlinkAncestor(const QStringList& ancestors)
+/// True when any ancestor is a symlink that resolves outside `prefixRoot`.
+/// The prefix root itself may be a symlink (umu creates `pfx -> <prefix>`, and
+/// users often relocate prefixes with one); only links *below* it that leave
+/// the prefix could redirect the migration onto files Fluorine does not own.
+bool hasEscapingSymlinkAncestor(const QString& prefixRoot,
+                                const QStringList& ancestorsBelowRoot)
 {
-  for (const QString& ancestor : ancestors) {
-    if (QFileInfo(ancestor).isSymLink())
+  const QString canonicalRoot = QFileInfo(prefixRoot).canonicalFilePath();
+  if (canonicalRoot.isEmpty())
+    return true;
+  const QString rootWithSeparator =
+      canonicalRoot.endsWith(QLatin1Char('/')) ? canonicalRoot
+                                               : canonicalRoot + QLatin1Char('/');
+
+  for (const QString& ancestor : ancestorsBelowRoot) {
+    const QFileInfo info(ancestor);
+    if (!info.isSymLink())
+      continue;
+    const QString resolved = info.canonicalFilePath();
+    if (resolved.isEmpty())
+      return true;  // dangling link
+    if (resolved != canonicalRoot && !resolved.startsWith(rootWithSeparator))
       return true;
   }
   return false;
@@ -148,6 +188,25 @@ bool createSymlinkIfNeeded(const QString& linkPath, const QString& target,
   return true;
 }
 
+/// Remove links created by earlier versions that point a shared (non-game)
+/// AppData folder into a Steam compatdata prefix. Only symlinks are removed;
+/// their targets are never touched.
+void removeSharedAppDataLinks(const QString& nakBase)
+{
+  const QDir dir(nakBase);
+  for (const QFileInfo& entry :
+       dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::System)) {
+    if (!entry.isSymLink() || !isSharedAppDataDir(entry.fileName()))
+      continue;
+    const QString target = readSymlinkTargetLiteral(entry.absoluteFilePath());
+    if (!target.contains(QLatin1String("/compatdata/")))
+      continue;
+    if (QFile::remove(entry.absoluteFilePath()))
+      MOBase::log::info("Removed shared AppData link {} -> {}",
+                        entry.absoluteFilePath(), target);
+  }
+}
+
 /// Scan all subdirectories in gameBase and symlink them into nakBase.
 /// `replaceStale` — when true, stale symlinks (e.g. left from a previous
 /// run pointing to a lower-priority prefix) get overwritten.
@@ -176,6 +235,9 @@ int scanAndLinkAll(const QString& nakBase, const QString& gameBase,
       continue;
     }
     if (skipMyGames && folder == QStringLiteral("My Games"))
+      continue;
+    if (label.startsWith(QLatin1String("AppData/"), Qt::CaseInsensitive) &&
+        isSharedAppDataDir(folder))
       continue;
 
     const QString linkPath = nakBase + "/" + folder;
@@ -216,13 +278,15 @@ bool ensureSkyrimSpecialEditionAppDataPrivate(const QString& prefixPath)
   const QString skyrimPath =
       QDir(appDataLocal).filePath(QLatin1String(kSkyrimSpecialEditionDirectory));
 
-  // A symlink in any ancestor would make the migration operate outside the
-  // managed prefix. Refuse before moving the game-directory link; the caller
-  // can repair the prefix layout explicitly without risking external files.
-  if (hasSymlinkAncestor({prefixRoot, driveC, usersDir, userDir, appDataDir,
-                          appDataLocal})) {
+  // A symlink in any ancestor that leaves the prefix would make the migration
+  // operate outside the managed prefix. Refuse before moving the
+  // game-directory link; the caller can repair the prefix layout explicitly
+  // without risking external files. Links that stay inside the prefix (and a
+  // symlinked prefix root, as umu uses) are harmless.
+  if (hasEscapingSymlinkAncestor(prefixRoot, {driveC, usersDir, userDir,
+                                              appDataDir, appDataLocal})) {
     MOBase::log::error("Refusing Skyrim AppData migration because an ancestor "
-                       "is a symlink (path '{}')", skyrimPath);
+                       "is a symlink leaving the prefix (path '{}')", skyrimPath);
     return false;
   }
 
@@ -382,6 +446,9 @@ void createGameSymlinksAuto(const QString& prefixPath)
                      return steamAppTypeRank(appType(a.app_id))
                             < steamAppTypeRank(appType(b.app_id));
                    });
+
+  removeSharedAppDataLinks(appdataLocal);
+  removeSharedAppDataLinks(appdataRoaming);
 
   int linked = 0;
   bool first = true;
