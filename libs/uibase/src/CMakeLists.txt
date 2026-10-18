@@ -81,6 +81,7 @@ set(widget_headers
 	../include/uibase/widgetutility.h
 )
 set(game_features_header
+	../include/uibase/bethesdaplugin.h
 	../include/uibase/game_features/bsainvalidation.h
 	../include/uibase/game_features/dataarchives.h
 	../include/uibase/game_features/game_feature.h

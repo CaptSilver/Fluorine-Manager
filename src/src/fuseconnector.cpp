@@ -2228,8 +2228,12 @@ void FuseConnector::deployRootFiles(
     }
   };
 
-  for (const auto& [modName, modPath] : mods) {
-    const auto rootDir = findRootDir(modPath);
+  // `mods` is ordered lowest to highest priority (the same order the VFS tree
+  // is layered in, where later entries win). The first deployment of a path
+  // is the one that is kept, so walk from the highest priority downwards.
+  for (auto modIt = mods.rbegin(); modIt != mods.rend(); ++modIt) {
+    const auto& modPath = modIt->second;
+    const auto rootDir  = findRootDir(modPath);
     if (rootDir.empty()) continue;
 
     std::error_code ec;

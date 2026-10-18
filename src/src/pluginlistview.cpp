@@ -72,11 +72,13 @@ void PluginListView::updatePluginCount()
   int activeLightMasterCount  = 0;
   int activeBlueprintCount    = 0;
   int activeRegularCount      = 0;
+  int activeOverlayCount      = 0;
   int masterCount             = 0;
   int mediumMasterCount       = 0;
   int lightMasterCount        = 0;
   int blueprintCount          = 0;
   int regularCount            = 0;
+  int overlayCount            = 0;
   int activeVisibleCount      = 0;
 
   PluginList* list = m_core->pluginList();
@@ -85,11 +87,15 @@ void PluginListView::updatePluginCount()
   for (QString plugin : list->pluginNames()) {
     bool active  = list->isEnabled(plugin);
     bool visible = m_sortProxy->filterMatchesPlugin(plugin);
-    if (list->isMediumFlagged(plugin)) {
+    if (list->isOverlayFlagged(plugin)) {
+      overlayCount++;
+      activeOverlayCount += active;
+      activeVisibleCount += visible && active;
+    } else if (list->isMediumFlagged(plugin)) {
       mediumMasterCount++;
       activeMediumMasterCount += active;
       activeVisibleCount += visible && active;
-    } else if (list->hasLightExtension(plugin) || list->isLightFlagged(plugin)) {
+    } else if (list->isLightFile(plugin)) {
       lightMasterCount++;
       activeLightMasterCount += active;
       activeVisibleCount += visible && active;
@@ -112,8 +118,9 @@ void PluginListView::updatePluginCount()
   }
 
   int activeCount = activeMasterCount + activeMediumMasterCount +
-                    activeLightMasterCount + activeRegularCount;
-  int totalCount = masterCount + mediumMasterCount + lightMasterCount + regularCount;
+                    activeLightMasterCount + activeRegularCount + activeOverlayCount;
+  int totalCount =
+      masterCount + mediumMasterCount + lightMasterCount + regularCount + overlayCount;
 
   auto toolTip =
       tr("<table cellspacing=\"6\">"
@@ -134,26 +141,28 @@ void PluginListView::updatePluginCount()
           .arg(masterCount + regularCount);
 
   auto gamePlugins = m_core->gameFeatures().gameFeature<GamePlugins>();
-  const bool lightPluginsAreSupported =
-      gamePlugins ? gamePlugins->lightPluginsAreSupported() : false;
-  const bool mediumPluginsAreSupported =
-      gamePlugins ? gamePlugins->mediumPluginsAreSupported() : false;
-  const bool blueprintPluginsAreSupported =
-      gamePlugins ? gamePlugins->blueprintPluginsAreSupported() : false;
+  const auto display = BethesdaPluginDisplay::forGame(
+      gamePlugins.get(), m_core->managedGame()->gameShortName());
 
-  if (mediumPluginsAreSupported) {
+  if (display.medium) {
     toolTip +=
         tr("<tr><td>ESHs:</td><td align=right>%1   </td><td align=right>%2</td></tr>")
             .arg(activeMediumMasterCount)
             .arg(mediumMasterCount);
   }
-  if (lightPluginsAreSupported) {
+  if (display.light) {
     toolTip +=
         tr("<tr><td>ESLs:</td><td align=right>%1    </td><td align=right>%2</td></tr>")
             .arg(activeLightMasterCount)
             .arg(lightMasterCount);
   }
-  if (blueprintPluginsAreSupported) {
+  if (display.overlay) {
+    toolTip +=
+        tr("<tr><td>Overlays:</td><td align=right>%1</td><td align=right>%2</td></tr>")
+            .arg(activeOverlayCount)
+            .arg(overlayCount);
+  }
+  if (display.blueprint) {
     toolTip += tr("<tr><td>Blueprint masters:</td><td align=right>%1    </td><td "
                   "align=right>%2</td></tr>")
                    .arg(activeBlueprintCount)

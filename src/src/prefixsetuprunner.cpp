@@ -1295,6 +1295,27 @@ bool PrefixSetupRunner::stepProtonInit()
     } else {
       currentStep().errorMessage =
           QStringLiteral("proton wineboot failed (exit code %1)").arg(rc);
+
+      // The streamed log filters most Proton output, so a failure used to show
+      // only the exit code. Include the tail of what Proton printed, and say
+      // so when no Steam install was found (STEAM_COMPAT_CLIENT_INSTALL_PATH
+      // is then empty, which some Proton builds reject).
+      QStringList tail;
+      const QList<QByteArray> lines = out.split('\n');
+      for (auto it = lines.crbegin(); it != lines.crend() && tail.size() < 6; ++it) {
+        const QString line = QString::fromUtf8(*it).trimmed();
+        if (!line.isEmpty())
+          tail.prepend(line);
+      }
+      if (!tail.isEmpty()) {
+        currentStep().errorMessage +=
+            QStringLiteral("\nLast Proton output:\n") + tail.join('\n');
+      }
+      if (steamPath.isEmpty()) {
+        currentStep().errorMessage +=
+            QStringLiteral("\nNo Steam installation was found; "
+                           "STEAM_COMPAT_CLIENT_INSTALL_PATH was empty.");
+      }
     }
     return false;
   }

@@ -7,6 +7,7 @@
 #include "instancemanager.h"
 #include "librarysetuppanel.h"
 #include "plugincontainer.h"
+#include "protonlauncher.h"
 #include "settings.h"
 #include "shared/appconfig.h"
 #include "shared/util.h"
@@ -1282,7 +1283,11 @@ void LibraryView::fillData(const Instance& ii)
   const QString ini = ii.iniPath();
   if (!ini.isEmpty() && QFile::exists(ini)) {
     QSettings const settings(ini, QSettings::IniFormat);
-    setup.steamDrm = settings.value("fluorine/steam_drm", true).toBool();
+    setup.steamDrm =
+        settings
+            .value("fluorine/steam_drm",
+                   ProtonLauncher::defaultSteamDrmForGame(ii.gameDirectory()))
+            .toBool();
     setup.rootBuilder = settings.value("fluorine/vfs_root_builder", true).toBool();
   }
   ui->details->setSetup(setup);

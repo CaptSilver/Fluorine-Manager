@@ -950,6 +950,15 @@ static void assignConsecutivePriorities(std::vector<std::shared_ptr<FileInfo>>& 
 
 void PluginList::scanDataFiles(bool invalidate)
 {
+  const auto gameFeatures = m_Organizer->gameFeatures();
+  const auto tesSupport =
+      gameFeatures ? gameFeatures->gameFeature<MOBase::GamePlugins>() : nullptr;
+  const auto managedGame = m_Organizer->managedGame();
+  const auto support     = MOBase::BethesdaPluginDisplay::forGame(
+      tesSupport.get(), managedGame ? managedGame->gameShortName() : QString());
+  invalidate      = invalidate || support != m_PluginDisplay;
+  m_PluginDisplay = support;
+
   if (invalidate) {
     m_Plugins.clear();
     m_PluginsByName.clear();
@@ -963,9 +972,6 @@ void PluginList::scanDataFiles(bool invalidate)
     m_Archives.clear();
   }
 
-  const auto managedGame  = m_Organizer->managedGame();
-  const auto gameFeatures = m_Organizer->gameFeatures();
-
   const QStringList primaryPlugins =
       managedGame ? managedGame->primaryPlugins() : QStringList();
   const QStringList enabledPlugins =
@@ -973,16 +979,6 @@ void PluginList::scanDataFiles(bool invalidate)
   const auto loadOrderMechanism = managedGame
                                       ? managedGame->loadOrderMechanism()
                                       : MOBase::IPluginGame::LoadOrderMechanism::None;
-
-  const auto tesSupport =
-      gameFeatures ? gameFeatures->gameFeature<MOBase::GamePlugins>() : nullptr;
-
-  const bool lightPluginsAreSupported =
-      tesSupport && tesSupport->lightPluginsAreSupported();
-  const bool mediumPluginsAreSupported =
-      tesSupport && tesSupport->mediumPluginsAreSupported();
-  const bool blueprintPluginsAreSupported =
-      tesSupport && tesSupport->blueprintPluginsAreSupported();
 
   QStringList availablePlugins;
 
@@ -1048,9 +1044,9 @@ void PluginList::scanDataFiles(bool invalidate)
 
     const QString fullPath = m_Organizer->resolvePath(filename);
 
-    const auto& info = m_Plugins.emplace_back(
-        std::make_shared<FileInfo>(this, filename, forceLoaded, forceEnabled,
-                                   forceDisabled, lightPluginsAreSupported));
+    const auto& info = m_Plugins.emplace_back(std::make_shared<FileInfo>(
+        this, filename, forceLoaded, forceEnabled, forceDisabled,
+        tesSupport && tesSupport->lightPluginsAreSupported(), support));
 
     auto assocTask = std::async(std::launch::async, [this, info, tree, &smph] {
       smph.acquire();
@@ -1064,9 +1060,7 @@ void PluginList::scanDataFiles(bool invalidate)
           smph.acquire();
 
           try {
-            FileConflictParser handler{this, info.get(), lightPluginsAreSupported,
-                                       mediumPluginsAreSupported,
-                                       blueprintPluginsAreSupported};
+            FileConflictParser handler{this, info.get(), support};
             TESFile::Reader<FileConflictParser> reader{};
             // Fluorine port: use UTF-8 bytes (upstream used toStdWString which
             // silently mangles paths through the C locale on Linux). Also fall
@@ -1365,46 +1359,11 @@ void PluginList::updateCache()
 
 void PluginList::computeCompileIndices()
 {
-  int numNormal  = 0;
-  int numESLs    = 0;
-  int numESHs    = 0;
-  int numSkipped = 0;
-
-  const auto gameFeatures = m_Organizer->gameFeatures();
-  const auto tesSupport =
-      gameFeatures ? gameFeatures->gameFeature<MOBase::GamePlugins>() : nullptr;
-
-  const bool lightPluginsAreSupported =
-      tesSupport && tesSupport->lightPluginsAreSupported();
-  const bool mediumPluginsAreSupported =
-      tesSupport && tesSupport->mediumPluginsAreSupported();
-
-  for (int priority = 0; priority < m_PluginsByPriority.size(); ++priority) {
-    const int index    = m_PluginsByPriority[priority];
+  MOBase::BethesdaPluginIndexes indexes;
+  for (const int index : m_PluginsByPriority) {
     const auto& plugin = m_Plugins.at(index);
-
-    if (!plugin->enabled()) {
-      plugin->setIndex(QString());
-      ++numSkipped;
-      continue;
-    }
-
-    if (mediumPluginsAreSupported && plugin->isMediumFile()) {
-      const int ESHpos = 0xFD + (numESHs >> 8);
-      plugin->setIndex((u"%1:%2"_s)
-                           .arg(ESHpos, 2, 16, QChar(u'0'))
-                           .arg(numESHs & 0xFF, 2, 16, QChar(u'0'))
-                           .toUpper());
-    } else if (lightPluginsAreSupported && plugin->isSmallFile()) {
-      const int ESLpos = 0xFE + (numESLs >> 12);
-      plugin->setIndex((u"%1:%2"_s)
-                           .arg(ESLpos, 2, 16, QChar(u'0'))
-                           .arg(numESLs & 0xFFF, 3, 16, QChar(u'0'))
-                           .toUpper());
-      ++numESLs;
-    } else {
-      plugin->setIndex((u"%1"_s).arg(numNormal++, 2, 16, QChar(u'0')).toUpper());
-    }
+    plugin->setIndex(indexes.next(plugin->enabled(), plugin->isOverlayFile(),
+                                  plugin->isMediumFile(), plugin->isSmallFile()));
   }
 }
 

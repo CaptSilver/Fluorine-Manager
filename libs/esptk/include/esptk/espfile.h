@@ -21,6 +21,10 @@ public:
   Record readRecord();
 
   bool isMaster() const;
+  uint32_t headerFlags() const
+  {
+    return m_IsTES3 ? (m_TES3Master ? Record::FLAG_MASTER : 0) : m_MainRecord.flags();
+  }
   bool isLight(bool overlaySupport = false) const;
   bool isMedium() const;
   bool isOverlay() const;

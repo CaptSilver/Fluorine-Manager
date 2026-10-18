@@ -384,7 +384,13 @@ int spawn(const SpawnParameters& sp, env::NativeProcess& process)
     QString storeVariant;
     if (instanceForLaunch) {
       const QSettings instanceIni(instanceForLaunch->filename(), QSettings::IniFormat);
-      useSteamDrm     = instanceIni.value("fluorine/steam_drm", true).toBool();
+      // Unless the user chose explicitly, only Steam-library installs get the
+      // Steam bridge (and the background Steam start that comes with it).
+      useSteamDrm = instanceIni
+                        .value("fluorine/steam_drm",
+                               ProtonLauncher::defaultSteamDrmForGame(
+                                   sp.gameDirectory.absolutePath()))
+                        .toBool();
       storeVariant    = instanceIni.value("game_edition").toString().trimmed();
     }
 
