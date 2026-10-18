@@ -7,15 +7,18 @@
 #include <utility>
 #include <vector>
 
-namespace {
+namespace
+{
 using Call = std::pair<QString, QString>;
 
-class Headless : public ::testing::Test {
+class Headless : public ::testing::Test
+{
 protected:
   void TearDown() override { headless::deactivateForTesting(); }
 
-  void activateWithFake() {
-    headless::activate([this](const QString &s, const QString &b) {
+  void activateWithFake()
+  {
+    headless::activate([this](const QString& s, const QString& b) {
       calls.emplace_back(s, b);
     });
   }
@@ -23,13 +26,15 @@ protected:
   std::vector<Call> calls;
 };
 
-TEST_F(Headless, InactiveByDefault) {
+TEST_F(Headless, InactiveByDefault)
+{
   EXPECT_FALSE(headless::active());
   activateWithFake();
   EXPECT_TRUE(headless::active());
 }
 
-TEST_F(Headless, FailNotifiesWithSubject) {
+TEST_F(Headless, FailNotifiesWithSubject)
+{
   activateWithFake();
   headless::setSubject("Skyrim Special Edition");
   headless::fail("x");
@@ -38,14 +43,16 @@ TEST_F(Headless, FailNotifiesWithSubject) {
   EXPECT_EQ(calls[0].second, "x");
 }
 
-TEST_F(Headless, FailWithoutSubjectUsesGenericSummary) {
+TEST_F(Headless, FailWithoutSubjectUsesGenericSummary)
+{
   activateWithFake();
   headless::fail("x");
   ASSERT_EQ(calls.size(), 1u);
   EXPECT_EQ(calls[0].first, "Fluorine couldn't start the game");
 }
 
-TEST_F(Headless, FirstFailureIsKept) {
+TEST_F(Headless, FirstFailureIsKept)
+{
   activateWithFake();
   EXPECT_FALSE(headless::firstFailure().has_value());
   headless::fail("a");
@@ -54,7 +61,8 @@ TEST_F(Headless, FirstFailureIsKept) {
   EXPECT_EQ(calls.size(), 2u);
 }
 
-TEST_F(Headless, ReportErrorRoutesToHandlerWithoutWidgets) {
+TEST_F(Headless, ReportErrorRoutesToHandlerWithoutWidgets)
+{
   activateWithFake();
   MOBase::reportError("boom");
   ASSERT_EQ(calls.size(), 1u);
@@ -62,7 +70,8 @@ TEST_F(Headless, ReportErrorRoutesToHandlerWithoutWidgets) {
   EXPECT_TRUE(QApplication::topLevelWidgets().isEmpty());
 }
 
-TEST_F(Headless, CriticalOnTopRoutesToHandler) {
+TEST_F(Headless, CriticalOnTopRoutesToHandler)
+{
   activateWithFake();
   MOBase::criticalOnTop("bad");
   ASSERT_EQ(calls.size(), 1u);
@@ -70,7 +79,8 @@ TEST_F(Headless, CriticalOnTopRoutesToHandler) {
   EXPECT_TRUE(QApplication::topLevelWidgets().isEmpty());
 }
 
-TEST_F(Headless, TaskDialogReturnsCancelWhenHeadless) {
+TEST_F(Headless, TaskDialogReturnsCancelWhenHeadless)
+{
   activateWithFake();
   const auto r = MOBase::TaskDialog(nullptr, "t").main("m").content("c").exec();
   EXPECT_EQ(r, QMessageBox::Cancel);
@@ -78,29 +88,33 @@ TEST_F(Headless, TaskDialogReturnsCancelWhenHeadless) {
   EXPECT_EQ(calls[0].second, "t\nm\nc");
 }
 
-TEST_F(Headless, RunExitCodeCompletedPassesGameCode) {
+TEST_F(Headless, RunExitCodeCompletedPassesGameCode)
+{
   EXPECT_EQ(headless::runExitCode(headless::RunOutcome::Completed, 0), 0);
   EXPECT_EQ(headless::runExitCode(headless::RunOutcome::Completed, 3), 3);
 }
 
-TEST_F(Headless, RunExitCodeNotWaitedIsLaunchFailure) {
+TEST_F(Headless, RunExitCodeNotWaitedIsLaunchFailure)
+{
   EXPECT_EQ(headless::runExitCode(headless::RunOutcome::Completed, -1), 125);
 }
 
-TEST_F(Headless, RunExitCodeOutOfRangeBecomesOne) {
+TEST_F(Headless, RunExitCodeOutOfRangeBecomesOne)
+{
   EXPECT_EQ(headless::runExitCode(headless::RunOutcome::Completed, 259), 1);
 }
 
-TEST_F(Headless, RunExitCodeStoppedAndFailed) {
+TEST_F(Headless, RunExitCodeStoppedAndFailed)
+{
   EXPECT_EQ(headless::runExitCode(headless::RunOutcome::Stopped, 7), 143);
   EXPECT_EQ(headless::runExitCode(headless::RunOutcome::Failed, 7), 125);
 }
-} // namespace
+}  // namespace
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv)
+{
   QTemporaryDir bus;
-  qputenv("DBUS_SESSION_BUS_ADDRESS",
-          ("unix:path=" + bus.filePath("absent")).toUtf8());
+  qputenv("DBUS_SESSION_BUS_ADDRESS", ("unix:path=" + bus.filePath("absent")).toUtf8());
   qputenv("QT_QPA_PLATFORM", "offscreen");
   QApplication app(argc, argv);
   MOBase::log::LoggerConfiguration configuration;

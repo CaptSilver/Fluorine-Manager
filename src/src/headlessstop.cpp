@@ -3,27 +3,31 @@
 #include <atomic>
 #include <csignal>
 
-namespace headless {
+namespace headless
+{
 
-namespace {
-// Lock-free so the handler can touch them.
-std::atomic<bool> g_waitStarted{false};
-std::atomic<bool> g_stopRequested{false};
-std::atomic<SignalFallback> g_fallback{nullptr};
+namespace
+{
+  // Lock-free so the handler can touch them.
+  std::atomic<bool> g_waitStarted{false};
+  std::atomic<bool> g_stopRequested{false};
+  std::atomic<SignalFallback> g_fallback{nullptr};
 
-void handleStopSignal(int sig) {
-  if (g_waitStarted.load() && !g_stopRequested.load()) {
-    g_stopRequested.store(true);
-    return;
+  void handleStopSignal(int sig)
+  {
+    if (g_waitStarted.load() && !g_stopRequested.load()) {
+      g_stopRequested.store(true);
+      return;
+    }
+
+    if (SignalFallback fallback = g_fallback.load()) {
+      fallback(sig);
+    }
   }
+}  // namespace
 
-  if (SignalFallback fallback = g_fallback.load()) {
-    fallback(sig);
-  }
-}
-} // namespace
-
-void installStopHandlers(SignalFallback fallback) {
+void installStopHandlers(SignalFallback fallback)
+{
   g_fallback.store(fallback);
 
   struct sigaction action{};
@@ -38,22 +42,28 @@ void installStopHandlers(SignalFallback fallback) {
   }
 }
 
-void setWaitActive(bool active) {
+void setWaitActive(bool active)
+{
   if (active) {
     g_waitStarted.store(true);
   }
 }
 
-bool stopRequested() { return g_stopRequested.load(); }
+bool stopRequested()
+{
+  return g_stopRequested.load();
+}
 
-env::ProcessWaitAction waitAction() {
+env::ProcessWaitAction waitAction()
+{
   return stopRequested() ? env::ProcessWaitAction::Unlock
                          : env::ProcessWaitAction::Continue;
 }
 
-void resetStopForTesting() {
+void resetStopForTesting()
+{
   g_waitStarted.store(false);
   g_stopRequested.store(false);
 }
 
-} // namespace headless
+}  // namespace headless

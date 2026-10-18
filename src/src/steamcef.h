@@ -7,11 +7,14 @@
 
 // Client for Steam's local Chromium debugging endpoint. Needs no widgets and
 // no uibase logging, so headless code can use it.
-namespace SteamCef {
+namespace SteamCef
+{
 
-class Error : public std::runtime_error {
+class Error : public std::runtime_error
+{
 public:
-  enum class Kind {
+  enum class Kind
+  {
     Unavailable,  // nothing answered /json/list
     NoContext,    // no trusted SharedJSContext target
     NoResponse,   // no usable reply before the timeout, or the socket dropped
@@ -25,7 +28,8 @@ private:
   Kind m_kind;
 };
 
-class Client {
+class Client
+{
 public:
   explicit Client(QString host = QStringLiteral("127.0.0.1"), quint16 port = 8080);
 

@@ -160,8 +160,7 @@ int run(int argc, char* argv[])
         headless::fail(QObject::tr(
             "A game is running from Steam through Fluorine. Quit the game first."));
       } else {
-        headless::fail(
-            QObject::tr("Fluorine is open. Close it and press Play again."));
+        headless::fail(QObject::tr("Fluorine is open. Close it and press Play again."));
       }
 
       return headless::LaunchFailedExitCode;

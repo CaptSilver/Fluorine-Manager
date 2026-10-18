@@ -715,21 +715,21 @@ bool RunCommand::headless() const
 
 namespace
 {
-// Reports a headless launch failure unless an earlier, more specific reason
-// (for example a prompt routed through the headless seam) was already given.
-int headlessFailure(const QString& reason)
-{
-  if (!headless::firstFailure()) {
-    headless::fail(reason);
-  }
+  // Reports a headless launch failure unless an earlier, more specific reason
+  // (for example a prompt routed through the headless seam) was already given.
+  int headlessFailure(const QString& reason)
+  {
+    if (!headless::firstFailure()) {
+      headless::fail(reason);
+    }
 
-  return headless::LaunchFailedExitCode;
-}
+    return headless::LaunchFailedExitCode;
+  }
 }  // namespace
 
 std::optional<int> RunCommand::runPostOrganizer(OrganizerCore& core)
 {
-  const auto program  = QString::fromStdString(vm()["NAME"].as<std::string>());
+  const auto program    = QString::fromStdString(vm()["NAME"].as<std::string>());
   const bool isHeadless = headless();
 
   const auto instanceName = [] {
@@ -747,14 +747,13 @@ std::optional<int> RunCommand::runPostOrganizer(OrganizerCore& core)
       // setCurrentProfile falls back to another profile when the requested one
       // is missing, which would launch different mods
       if (vm().count("profile")) {
-        const auto wanted = QString::fromStdString(vm()["profile"].as<std::string>());
+        const auto wanted  = QString::fromStdString(vm()["profile"].as<std::string>());
         const auto profile = core.currentProfile();
 
         if (!profile || wanted.compare(profile->name(), Qt::CaseInsensitive) != 0) {
-          return headlessFailure(
-              QObject::tr("Profile '%1' not found in instance '%2'.")
-                  .arg(wanted)
-                  .arg(instanceName()));
+          return headlessFailure(QObject::tr("Profile '%1' not found in instance '%2'.")
+                                     .arg(wanted)
+                                     .arg(instanceName()));
         }
       }
     }
@@ -781,10 +780,9 @@ std::optional<int> RunCommand::runPostOrganizer(OrganizerCore& core)
                     .arg(instanceName()));
           }
 
-          reportError(
-              QObject::tr("Executable '%1' not found in instance '%2'.")
-                  .arg(program)
-                  .arg(instanceName()));
+          reportError(QObject::tr("Executable '%1' not found in instance '%2'.")
+                          .arg(program)
+                          .arg(instanceName()));
 
           return 1;
         }

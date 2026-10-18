@@ -7,34 +7,38 @@
 #include <gtest/gtest.h>
 #include <uibase/log.h>
 
-namespace {
-class FakeBus : public notify::Bus {
+namespace
+{
+class FakeBus : public notify::Bus
+{
 public:
-  bool owner = true;
-  bool notifyOk = true;
+  bool owner      = true;
+  bool notifyOk   = true;
   int notifyCalls = 0;
   QString appName, summary, body;
 
   bool hasOwner() override { return owner; }
 
-  bool notify(const QString &app, const QString &sum,
-              const QString &text) override {
+  bool notify(const QString& app, const QString& sum, const QString& text) override
+  {
     ++notifyCalls;
     appName = app;
     summary = sum;
-    body = text;
+    body    = text;
     return notifyOk;
   }
 };
 
-TEST(DesktopNotifier, SendSkipsWhenNoOwner) {
+TEST(DesktopNotifier, SendSkipsWhenNoOwner)
+{
   FakeBus bus;
   bus.owner = false;
   EXPECT_FALSE(notify::send(bus, "Couldn't start Skyrim", "reason"));
   EXPECT_EQ(bus.notifyCalls, 0);
 }
 
-TEST(DesktopNotifier, SendPassesFluorineAppName) {
+TEST(DesktopNotifier, SendPassesFluorineAppName)
+{
   FakeBus bus;
   EXPECT_TRUE(notify::send(bus, "Couldn't start Skyrim", "reason"));
   EXPECT_EQ(bus.notifyCalls, 1);
@@ -43,31 +47,36 @@ TEST(DesktopNotifier, SendPassesFluorineAppName) {
   EXPECT_EQ(bus.body, "reason");
 }
 
-TEST(DesktopNotifier, SendReturnsFalseWhenNotifyFails) {
+TEST(DesktopNotifier, SendReturnsFalseWhenNotifyFails)
+{
   FakeBus bus;
   bus.notifyOk = false;
   EXPECT_FALSE(notify::send(bus, "s", "b"));
   EXPECT_EQ(bus.notifyCalls, 1);
 }
 
-TEST(DesktopNotifier, AddressPrefersDbusSessionBusAddress) {
+TEST(DesktopNotifier, AddressPrefersDbusSessionBusAddress)
+{
   QProcessEnvironment env;
   env.insert("DBUS_SESSION_BUS_ADDRESS", "unix:path=/x");
   env.insert("XDG_RUNTIME_DIR", "/run/user/1000");
   EXPECT_EQ(notify::sessionBusAddress(env), "unix:path=/x");
 }
 
-TEST(DesktopNotifier, AddressFallsBackToXdgRuntimeDir) {
+TEST(DesktopNotifier, AddressFallsBackToXdgRuntimeDir)
+{
   QProcessEnvironment env;
   env.insert("XDG_RUNTIME_DIR", "/run/user/1000");
   EXPECT_EQ(notify::sessionBusAddress(env), "unix:path=/run/user/1000/bus");
 }
 
-TEST(DesktopNotifier, AddressEmptyWithoutEither) {
+TEST(DesktopNotifier, AddressEmptyWithoutEither)
+{
   EXPECT_EQ(notify::sessionBusAddress(QProcessEnvironment()), "");
 }
 
-TEST(DesktopNotifier, RealBusWithoutDaemonHasNoOwner) {
+TEST(DesktopNotifier, RealBusWithoutDaemonHasNoOwner)
+{
   QTemporaryDir dir;
   QProcessEnvironment env;
   env.insert("DBUS_SESSION_BUS_ADDRESS", "unix:path=" + dir.filePath("absent"));
@@ -80,12 +89,12 @@ TEST(DesktopNotifier, RealBusWithoutDaemonHasNoOwner) {
   EXPECT_FALSE(bus->notify("Fluorine", "s", "b"));
   EXPECT_LT(timer.elapsed(), 5000);
 }
-} // namespace
+}  // namespace
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv)
+{
   QTemporaryDir bus;
-  qputenv("DBUS_SESSION_BUS_ADDRESS",
-          ("unix:path=" + bus.filePath("absent")).toUtf8());
+  qputenv("DBUS_SESSION_BUS_ADDRESS", ("unix:path=" + bus.filePath("absent")).toUtf8());
   QCoreApplication app(argc, argv);
   MOBase::log::LoggerConfiguration configuration;
   configuration.name = "test_desktopnotifier";

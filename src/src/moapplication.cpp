@@ -690,9 +690,9 @@ std::unique_ptr<Instance> MOApplication::getCurrentInstance(bool forceSelect)
   auto currentInstance = m.currentInstance();
 
   if (headless::active() && (forceSelect || !currentInstance)) {
-    headless::fail(QObject::tr("Instance '%1' not found.")
-                       .arg(currentInstance ? currentInstance->displayName()
-                                            : QString()));
+    headless::fail(
+        QObject::tr("Instance '%1' not found.")
+            .arg(currentInstance ? currentInstance->displayName() : QString()));
     return {};
   }
 

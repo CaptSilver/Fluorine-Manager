@@ -549,9 +549,8 @@ void OrganizerCore::storeSettings()
       reason = tr("Unknown error %1").arg(result);
     }
 
-    const auto text =
-        tr("An error occurred trying to write back MO settings to %1: %2")
-            .arg(m_Settings.filename(), reason);
+    const auto text = tr("An error occurred trying to write back MO settings to %1: %2")
+                          .arg(m_Settings.filename(), reason);
     if (headless::active()) {
       headless::fail(text);
     } else {
@@ -2886,24 +2885,24 @@ bool OrganizerCore::checkGameRegistryKey()
 
     // Yes is the dialog's default and the change is non-destructive; failing
     // would make the first launch on a fresh prefix always refuse.
-    const auto answer = headless::active()
-        ? QMessageBox::Yes
-        : QMessageBox::question(
-        parent,
-        tr("Registry key does not match"),
-        tr("The game's installation path in the Wine registry does not match "
-           "the managed game path.\n\n"
-           "Registry Game Path:\n\t%1\n"
-           "Managed Game Path:\n\t%2\n\n"
-           "Change the path in the registry to match the managed game path?")
-            .arg(displayRegPath, winePath),
-        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
-        QMessageBox::Yes);
+    const auto answer =
+        headless::active()
+            ? QMessageBox::Yes
+            : QMessageBox::question(
+                  parent, tr("Registry key does not match"),
+                  tr("The game's installation path in the Wine registry does not match "
+                     "the managed game path.\n\n"
+                     "Registry Game Path:\n\t%1\n"
+                     "Managed Game Path:\n\t%2\n\n"
+                     "Change the path in the registry to match the managed game path?")
+                      .arg(displayRegPath, winePath),
+                  QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
+                  QMessageBox::Yes);
 
     if (answer == QMessageBox::Yes) {
       if (headless::active()) {
-        log::info("headless: registry key updated from '{}' to '{}'",
-                  displayRegPath, winePath);
+        log::info("headless: registry key updated from '{}' to '{}'", displayRegPath,
+                  winePath);
       }
       if (!prefix.writeHklmValue(subKey, valueName, winePath)) {
         log::error("Failed to update game registry key");

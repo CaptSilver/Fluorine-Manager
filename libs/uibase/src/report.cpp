@@ -35,25 +35,25 @@ namespace MOBase
 
 namespace
 {
-std::mutex g_headlessMutex;
-HeadlessReportHandler g_headlessHandler;
+  std::mutex g_headlessMutex;
+  HeadlessReportHandler g_headlessHandler;
 
-// Calls the handler outside the lock; returns false if none is set.
-bool callHeadlessHandler(const QString& message)
-{
-  HeadlessReportHandler handler;
+  // Calls the handler outside the lock; returns false if none is set.
+  bool callHeadlessHandler(const QString& message)
   {
-    std::lock_guard lock(g_headlessMutex);
-    handler = g_headlessHandler;
-  }
+    HeadlessReportHandler handler;
+    {
+      std::lock_guard lock(g_headlessMutex);
+      handler = g_headlessHandler;
+    }
 
-  if (!handler) {
-    return false;
-  }
+    if (!handler) {
+      return false;
+    }
 
-  handler(message);
-  return true;
-}
+    handler(message);
+    return true;
+  }
 }  // namespace
 
 void setHeadlessReportHandler(HeadlessReportHandler handler)

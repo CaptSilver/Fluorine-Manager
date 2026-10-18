@@ -5,48 +5,53 @@
 #include <uibase/log.h>
 #include <uibase/report.h>
 
-namespace headless {
+namespace headless
+{
 
-namespace {
-std::atomic<bool> g_active{false};
-std::mutex g_mutex;
-Notifier g_notifier;
-QString g_subject;
-std::optional<QString> g_firstFailure;
+namespace
+{
+  std::atomic<bool> g_active{false};
+  std::mutex g_mutex;
+  Notifier g_notifier;
+  QString g_subject;
+  std::optional<QString> g_firstFailure;
 
-// Records and notifies without logging; used for prompts that uibase has
-// already logged.
-void notifyAndRecord(const QString &reason) {
-  Notifier notifier;
-  QString summary;
+  // Records and notifies without logging; used for prompts that uibase has
+  // already logged.
+  void notifyAndRecord(const QString& reason)
   {
-    std::lock_guard lock(g_mutex);
-    if (!g_firstFailure) {
-      g_firstFailure = reason;
+    Notifier notifier;
+    QString summary;
+    {
+      std::lock_guard lock(g_mutex);
+      if (!g_firstFailure) {
+        g_firstFailure = reason;
+      }
+      notifier = g_notifier;
+      summary  = g_subject.isEmpty() ? QObject::tr("Fluorine couldn't start the game")
+                                     : QObject::tr("Couldn't start %1").arg(g_subject);
     }
-    notifier = g_notifier;
-    summary = g_subject.isEmpty()
-                  ? QObject::tr("Fluorine couldn't start the game")
-                  : QObject::tr("Couldn't start %1").arg(g_subject);
-  }
 
-  if (notifier) {
-    notifier(summary, reason);
+    if (notifier) {
+      notifier(summary, reason);
+    }
   }
-}
-} // namespace
+}  // namespace
 
-void activate(Notifier notifier) {
+void activate(Notifier notifier)
+{
   {
     std::lock_guard lock(g_mutex);
     g_notifier = std::move(notifier);
   }
   g_active = true;
-  MOBase::setHeadlessReportHandler(
-      [](const QString &m) { notifyAndRecord(m); });
+  MOBase::setHeadlessReportHandler([](const QString& m) {
+    notifyAndRecord(m);
+  });
 }
 
-void deactivateForTesting() {
+void deactivateForTesting()
+{
   g_active = false;
   {
     std::lock_guard lock(g_mutex);
@@ -57,24 +62,31 @@ void deactivateForTesting() {
   MOBase::setHeadlessReportHandler({});
 }
 
-bool active() { return g_active; }
+bool active()
+{
+  return g_active;
+}
 
-void setSubject(const QString &exeTitle) {
+void setSubject(const QString& exeTitle)
+{
   std::lock_guard lock(g_mutex);
   g_subject = exeTitle;
 }
 
-void fail(const QString &reason) {
+void fail(const QString& reason)
+{
   MOBase::log::error("{}", reason);
   notifyAndRecord(reason);
 }
 
-std::optional<QString> firstFailure() {
+std::optional<QString> firstFailure()
+{
   std::lock_guard lock(g_mutex);
   return g_firstFailure;
 }
 
-int runExitCode(RunOutcome outcome, int gameExitCode) {
+int runExitCode(RunOutcome outcome, int gameExitCode)
+{
   switch (outcome) {
   case RunOutcome::Stopped:
     return StoppedExitCode;
@@ -94,4 +106,4 @@ int runExitCode(RunOutcome outcome, int gameExitCode) {
   return gameExitCode;
 }
 
-} // namespace headless
+}  // namespace headless
