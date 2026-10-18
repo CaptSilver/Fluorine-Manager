@@ -43,6 +43,19 @@
 namespace
 {
 std::atomic<ProtonSettingsTab*> g_activeInstallTab = nullptr;
+
+QString defaultPrefixLocation()
+{
+  return fluorineDataDir() + "/Prefix";
+}
+
+// The configured prefix may be stored as the pfx directory or its parent.
+bool isDefaultPrefixLocation(const QString& path)
+{
+  const QString clean = QDir::cleanPath(path);
+  const QString base  = QDir::cleanPath(defaultPrefixLocation());
+  return clean == base || clean == base + "/pfx";
+}
 }
 
 ProtonSettingsTab::ProtonSettingsTab(Settings& s, SettingsDialog& d)
@@ -93,6 +106,8 @@ ProtonSettingsTab::ProtonSettingsTab(Settings& s, SettingsDialog& d)
                    &ProtonSettingsTab::onWinetricks);
   QObject::connect(ui->prefixLocationBrowseButton, &QPushButton::clicked, this,
                    &ProtonSettingsTab::onBrowsePrefixLocation);
+  QObject::connect(ui->customPrefixLocationCheckBox, &QCheckBox::clicked, this,
+                   &ProtonSettingsTab::onCustomPrefixLocationClicked);
   QObject::connect(ui->downloadSLRButton, &QPushButton::clicked, this,
                    &ProtonSettingsTab::onDownloadSLR);
 
@@ -305,18 +320,25 @@ void ProtonSettingsTab::refreshState()
     ui->protonProgressBar->setVisible(false);
   }
 
+  // Default mode keeps the prefix in Fluorine's data folder. A custom location
+  // is opt-in (see onCustomPrefixLocationClicked) and cannot be edited while a
+  // prefix exists; delete the prefix first to change mode.
+  const bool custom = active ? !isDefaultPrefixLocation(*prefix)
+                             : ui->customPrefixLocationCheckBox->isChecked();
+  {
+    const QSignalBlocker blocker(ui->customPrefixLocationCheckBox);
+    ui->customPrefixLocationCheckBox->setChecked(custom);
+  }
+  ui->customPrefixLocationCheckBox->setEnabled(!m_busy && !active);
+
   if (active) {
     ui->prefixLocationEdit->setText(*prefix);
-    ui->prefixLocationEdit->setReadOnly(true);
-  } else {
-    ui->prefixLocationEdit->setReadOnly(false);
-    if (ui->prefixLocationEdit->text().isEmpty()) {
-      ui->prefixLocationEdit->setText(
-          fluorineDataDir() + "/Prefix");
-    }
+  } else if (!custom || ui->prefixLocationEdit->text().isEmpty()) {
+    ui->prefixLocationEdit->setText(defaultPrefixLocation());
   }
+  ui->prefixLocationEdit->setReadOnly(active || !custom);
 
-  ui->prefixLocationBrowseButton->setEnabled(!m_busy && !active);
+  ui->prefixLocationBrowseButton->setEnabled(!m_busy && !active && custom);
   ui->createPrefixButton->setVisible(!active);
   ui->createPrefixButton->setEnabled(!m_busy && !active);
   ui->deletePrefixButton->setEnabled(!m_busy && active);
@@ -353,7 +375,9 @@ void ProtonSettingsTab::onCreatePrefix()
     return;
   }
 
-  const QString basePath = ui->prefixLocationEdit->text().trimmed();
+  const QString basePath = ui->customPrefixLocationCheckBox->isChecked()
+                               ? ui->prefixLocationEdit->text().trimmed()
+                               : defaultPrefixLocation();
   if (basePath.isEmpty()) {
     ui->protonStatusLabel->setText(tr("Select a prefix location first"));
     return;
@@ -425,7 +449,9 @@ void ProtonSettingsTab::onDeletePrefix()
     return;
   }
 
+  // Deleting the prefix returns to the supported default location.
   ui->prefixLocationEdit->clear();
+  ui->customPrefixLocationCheckBox->setChecked(false);
   ui->protonStatusLabel->setText(tr("No Prefix"));
   refreshState();
 }
@@ -542,6 +568,35 @@ void ProtonSettingsTab::onDownloadSLR()
     return downloadSlr(nullptr, nullptr, cancelPtr);
   }));
   progress->show();
+}
+
+void ProtonSettingsTab::onCustomPrefixLocationClicked(bool checked)
+{
+  if (checked) {
+    QMessageBox box(QMessageBox::Warning, tr("Custom Prefix Location"),
+                    tr("Fluorine's default prefix location is the only supported "
+                       "configuration.\n\n"
+                       "If you choose a custom location, no support will be "
+                       "provided for any problem on that prefix unless you first "
+                       "revert to the default location and the problem still "
+                       "occurs there.\n\n"
+                       "Do you read and understand this, and want to continue?"),
+                    QMessageBox::NoButton, parentWidget());
+    QPushButton* accept =
+        box.addButton(tr("I Understand"), QMessageBox::AcceptRole);
+    QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.exec();
+
+    if (box.clickedButton() != accept) {
+      ui->customPrefixLocationCheckBox->setChecked(false);
+      return;
+    }
+  } else {
+    ui->prefixLocationEdit->setText(defaultPrefixLocation());
+  }
+
+  refreshState();
 }
 
 void ProtonSettingsTab::onBrowsePrefixLocation()
