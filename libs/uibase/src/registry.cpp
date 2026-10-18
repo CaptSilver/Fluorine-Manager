@@ -99,8 +99,13 @@ static bool writeIniValueDirect(const QString& section, const QString& key,
       // Preserve everything up to and including '='
       lines[keyLine] = original.left(eqPos + 1) + value;
     } else {
-      // Key not found in section, insert it after the section header
-      lines.insert(sectionStart + 1, key + "=" + value);
+      // Key not found in section: append it after the section's last entry
+      // (like WritePrivateProfileString) so repeated writes keep their order.
+      int insertAt = sectionEnd;
+      while (insertAt > sectionStart + 1 && lines[insertAt - 1].trimmed().isEmpty()) {
+        --insertAt;
+      }
+      lines.insert(insertAt, key + "=" + value);
     }
   } else {
     // Section not found, append it
@@ -246,6 +251,60 @@ bool RemoveRegistryValue(const QString& section, const QString& key,
   for (int i = 0; i < lines.size(); ++i) {
     out << lines[i];
     if (i < lines.size() - 1) {
+      out << '\n';
+    }
+  }
+  out << '\n';
+  outFile.close();
+
+  return true;
+}
+
+bool RemoveRegistrySection(const QString& section, const QString& fileName)
+{
+  if (!QFileInfo::exists(fileName)) {
+    return true;  // nothing to remove
+  }
+
+  QFile file(fileName);
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    return false;
+  }
+  QStringList lines;
+  QTextStream in(&file);
+  while (!in.atEnd()) {
+    lines.append(in.readLine());
+  }
+  file.close();
+
+  const QString sectionHeader = "[" + section + "]";
+  bool inSection              = false;
+  bool changed                = false;
+  QStringList kept;
+  for (const QString& line : lines) {
+    const QString trimmed = line.trimmed();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inSection = trimmed.compare(sectionHeader, Qt::CaseInsensitive) == 0;
+    } else if (inSection && !trimmed.isEmpty() && !trimmed.startsWith(';') &&
+               !trimmed.startsWith('#') && trimmed.indexOf('=') > 0) {
+      changed = true;
+      continue;  // drop key=value entries, keep header, comments and blanks
+    }
+    kept.append(line);
+  }
+
+  if (!changed) {
+    return true;
+  }
+
+  QFile outFile(fileName);
+  if (!outFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    return false;
+  }
+  QTextStream out(&outFile);
+  for (int i = 0; i < kept.size(); ++i) {
+    out << kept[i];
+    if (i < kept.size() - 1) {
       out << '\n';
     }
   }
