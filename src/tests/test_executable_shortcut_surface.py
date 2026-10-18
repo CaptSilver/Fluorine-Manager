@@ -52,6 +52,8 @@ class ExecutableShortcutSurfaceTests(unittest.TestCase):
         self.assertIn('tr("Steam launch option")', source)
         self.assertIn('tr("Copy launch option")', source)
         self.assertIn('tr("Set in Steam\u2026")', source)
+        # QMenu hides action tooltips (the disabled "no Steam app id" reason) unless enabled.
+        self.assertIn("steamMenu->setToolTipsVisible(true);", source)
         self.assertIn("void copySteamLaunchOption();", header)
         self.assertIn("void setSteamLaunchOption();", header)
         self.assertIn("QAction* m_SteamCopy{nullptr};", header)
