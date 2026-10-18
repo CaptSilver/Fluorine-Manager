@@ -23,6 +23,7 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #include "profile.h"
 #include <ifiletree.h>
 #include <ipluginlist.h>
+#include <uibase/bethesdaplugin.h>
 
 namespace MOBase
 {
@@ -244,6 +245,8 @@ public:
   bool isMasterFlagged(const QString& name) const;
   bool isMediumFlagged(const QString& name) const;
   bool isLightFlagged(const QString& name) const;
+  bool isOverlayFlagged(const QString& name) const;
+  bool isLightFile(const QString& name) const;
   bool isBlueprintFlagged(const QString& name) const;
   bool hasNoRecords(const QString& name) const;
 
@@ -328,8 +331,8 @@ private:
     // the parse-failure catch branch, so downstream code is unaffected.
     ESPInfo(const QString& name, bool forceLoaded, bool forceEnabled,
             bool forceDisabled, const QString& originName, const QString& fullPath,
-            bool hasIni, std::set<QString> archives, bool lightSupported,
-            bool mediumSupported, bool blueprintSupported, bool parseHeader = true);
+            bool hasIni, std::set<QString> archives,
+            MOBase::BethesdaPluginDisplay support, bool parseHeader = true);
 
     QString name;
     QString fullPath;
@@ -347,6 +350,8 @@ private:
     bool isMasterFlagged;
     bool isMediumFlagged;
     bool isLightFlagged;
+    bool isOverlayFlagged;
+    bool respectsExtensions;
     bool isBlueprintFlagged;
     bool hasNoRecords;
     bool modSelected{false};
@@ -359,6 +364,12 @@ private:
     std::set<QString, MOBase::FileNameComparator> archives;
     std::set<QString, MOBase::FileNameComparator> masters;
     mutable std::set<QString, MOBase::FileNameComparator> masterUnset;
+
+    bool isLightFile() const
+    {
+      return MOBase::isBethesdaLight(isLightFlagged, hasLightExtension,
+                                     respectsExtensions, isOverlayFlagged);
+    }
 
     bool operator<(const ESPInfo& str) const { return (loadOrder < str.loadOrder); }
   };
@@ -398,6 +409,7 @@ private:
 
 private:
   OrganizerCore& m_Organizer;
+  MOBase::BethesdaPluginDisplay m_PluginDisplay;
 
   std::vector<ESPInfo> m_ESPs;
   mutable std::map<QString, QByteArray> m_LastSaveHash;

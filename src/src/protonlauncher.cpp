@@ -1180,6 +1180,16 @@ bool ProtonLauncher::launchDirect(env::NativeProcess& process) const
                       /*forwardAllChannels=*/true);
 }
 
+bool ProtonLauncher::defaultSteamDrmForGame(const QString& gameDirectory)
+{
+  if (gameDirectory.isEmpty()) {
+    return true;  // unknown install: keep the historical behavior
+  }
+  const QString path = QDir::cleanPath(gameDirectory);
+  return path.contains(QStringLiteral("/steamapps/"), Qt::CaseInsensitive) ||
+         QFileInfo::exists(QDir(path).filePath(QStringLiteral("steam_appid.txt")));
+}
+
 bool ProtonLauncher::ensureSteamRunning()
 {
   QProcess pgrep;
