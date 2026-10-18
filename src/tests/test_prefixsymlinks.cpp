@@ -311,3 +311,36 @@ TEST_F(PrefixSymlinks, RejectsSymlinkedAncestorBeforeMovingExistingLink)
             catalog);
   EXPECT_FALSE(QFileInfo(backupPath(prefix)).exists());
 }
+
+TEST_F(PrefixSymlinks, AcceptsSymlinkedPrefixRoot)
+{
+  // umu exposes the prefix as `<dir>/pfx`, which is itself a symlink.
+  QTemporaryDir temporary;
+  ASSERT_TRUE(temporary.isValid());
+  const QString realPrefix = QDir(temporary.path()).filePath(QStringLiteral("real-prefix"));
+  makePrefix(realPrefix);
+  const QString prefix = prefixPath(temporary);
+  ASSERT_TRUE(QFile::link(realPrefix, prefix));
+
+  EXPECT_TRUE(ensureSkyrimSpecialEditionAppDataPrivate(prefix));
+  EXPECT_TRUE(QFileInfo(appDataPath(prefix)).isDir());
+  EXPECT_FALSE(QFileInfo(appDataPath(prefix)).isSymLink());
+}
+
+TEST_F(PrefixSymlinks, AcceptsSymlinkedAncestorInsidePrefix)
+{
+  QTemporaryDir temporary;
+  ASSERT_TRUE(temporary.isValid());
+  const QString prefix = prefixPath(temporary);
+  makePrefix(prefix);
+
+  const QString appDataRoot = QDir(prefix).filePath(
+      QStringLiteral("drive_c/users/steamuser/AppData/Local"));
+  const QString internal = QDir(prefix).filePath(QStringLiteral("drive_c/local-data"));
+  ASSERT_TRUE(QDir(appDataRoot).removeRecursively());
+  ASSERT_TRUE(QDir().mkpath(internal));
+  ASSERT_TRUE(QFile::link(internal, appDataRoot));
+
+  EXPECT_TRUE(ensureSkyrimSpecialEditionAppDataPrivate(prefix));
+  EXPECT_TRUE(QFileInfo(QDir(internal).filePath(QStringLiteral("Skyrim Special Edition"))).isDir());
+}

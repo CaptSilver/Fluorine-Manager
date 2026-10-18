@@ -54,6 +54,7 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "fomodscreenshotdialog.h"
 #include "fomoddependency.h"
+#include "fomodpaths.h"
 #include "xmlreader.h"
 
 using namespace MOBase;
@@ -151,12 +152,8 @@ struct XmlParseError : std::runtime_error
   XmlParseError(const QString& message) : std::runtime_error(qUtf8Printable(message)) {}
 };
 
-static QString normalizeArchivePath(QString path)
-{
-  path.replace("\\", "/");
-  path = QDir::cleanPath(path);
-  return path == "." ? QString() : path;
-}
+using FomodPaths::normalizeArchivePath;
+using FomodPaths::normalizeFileDestination;
 
 static QString joinArchivePath(const QString& base, const QString& child)
 {
@@ -1100,9 +1097,13 @@ void FomodInstallerDialog::readFileList(XmlReader& reader, FileDescriptorList& f
         FileDescriptor* file           = new FileDescriptor(this);
         file->m_Source =
             normalizeArchivePath(attributes.value("source").toString());
+        file->m_IsFolder = reader.name().toString() == "folder";
         file->m_Destination =
             attributes.hasAttribute("destination")
-                ? normalizeArchivePath(attributes.value("destination").toString())
+                ? (file->m_IsFolder
+                       ? normalizeArchivePath(attributes.value("destination").toString())
+                       : normalizeFileDestination(
+                             attributes.value("destination").toString()))
                 : file->m_Source;
         file->m_Priority               = attributes.hasAttribute("priority")
                                              ? attributes.value("priority").toString().toInt()

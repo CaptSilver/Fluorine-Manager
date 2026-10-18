@@ -54,6 +54,14 @@ private:
   bool launchDirect(env::NativeProcess& process) const;
   static bool ensureSteamRunning();
 
+public:
+  // Default for the per-instance "Steam DRM" option when the user has not set
+  // it: only games installed in a Steam library need the Steam bridge. GOG,
+  // Epic and other installs must not start (or wait for) Steam.
+  static bool defaultSteamDrmForGame(const QString& gameDirectory);
+
+private:
+
   QString m_binary;
   QStringList m_arguments;
   QString m_workingDir;

@@ -226,10 +226,10 @@ void PluginList::refresh(const QString& profileName,
   auto gamePlugins           = m_Organizer.gameFeatures().gameFeature<GamePlugins>();
   const bool lightPluginsAreSupported =
       gamePlugins ? gamePlugins->lightPluginsAreSupported() : false;
-  const bool mediumPluginsAreSupported =
-      gamePlugins ? gamePlugins->mediumPluginsAreSupported() : false;
-  const bool blueprintPluginsAreSupported =
-      gamePlugins ? gamePlugins->blueprintPluginsAreSupported() : false;
+  const auto support =
+      BethesdaPluginDisplay::forGame(gamePlugins.get(), m_GamePlugin->gameShortName());
+  const bool supportChanged = support != m_PluginDisplay;
+  m_PluginDisplay           = support;
   const bool loadOrderMechanismNone =
       m_GamePlugin->loadOrderMechanism() == IPluginGame::LoadOrderMechanism::None;
 
@@ -346,11 +346,9 @@ void PluginList::refresh(const QString& profileName,
              info.fullPath.compare(fullPath, Qt::CaseInsensitive) != 0);
         const bool providerChanged = info.name != filename || pathChanged ||
                                      info.originName != originName;
-        if (providerChanged) {
+        if (providerChanged || supportChanged) {
           ESPInfo refreshed(filename, forceLoaded, forceEnabled, forceDisabled,
-                            originName, fullPath, hasIni, loadedArchives,
-                            lightPluginsAreSupported, mediumPluginsAreSupported,
-                            blueprintPluginsAreSupported,
+                            originName, fullPath, hasIni, loadedArchives, support,
                             m_GamePlugin->parsePluginHeader(filename));
           refreshed.enabled                  = info.enabled;
           refreshed.priority                 = info.priority;
@@ -369,9 +367,7 @@ void PluginList::refresh(const QString& profileName,
       }
 
       m_ESPs.emplace_back(filename, forceLoaded, forceEnabled, forceDisabled,
-                          originName, fullPath, hasIni, loadedArchives,
-                          lightPluginsAreSupported, mediumPluginsAreSupported,
-                          blueprintPluginsAreSupported,
+                          originName, fullPath, hasIni, loadedArchives, support,
                           m_GamePlugin->parsePluginHeader(filename));
       m_ESPs.rbegin()->priority = -1;
     } catch (const std::exception& e) {
@@ -1175,6 +1171,18 @@ bool PluginList::isLightFlagged(const QString& name) const
   }
 }
 
+bool PluginList::isOverlayFlagged(const QString& name) const
+{
+  const auto it = m_ESPsByName.find(name);
+  return it != m_ESPsByName.end() && m_ESPs[it->second].isOverlayFlagged;
+}
+
+bool PluginList::isLightFile(const QString& name) const
+{
+  const auto it = m_ESPsByName.find(name);
+  return it != m_ESPsByName.end() && m_ESPs[it->second].isLightFile();
+}
+
 bool PluginList::isBlueprintFlagged(const QString& name) const
 {
   auto iter = m_ESPsByName.find(name);
@@ -1288,47 +1296,12 @@ void PluginList::updateIndices()
 
 void PluginList::generatePluginIndexes()
 {
-  int numESLs    = 0;
-  int numESHs    = 0;
-  int numSkipped = 0;
-
-  auto gamePlugins = m_Organizer.gameFeatures().gameFeature<GamePlugins>();
-  const bool lightPluginsSupported =
-      gamePlugins ? gamePlugins->lightPluginsAreSupported() : false;
-  const bool mediumPluginsSupported =
-      gamePlugins ? gamePlugins->mediumPluginsAreSupported() : false;
-
-  std::vector<int> coreLightPlugins;
-  std::vector<int> coreMediumPlugins;
-
-  for (int l = 0; l < m_ESPs.size(); ++l) {
-    int i = m_ESPsByPriority.at(l);
-    if (!m_ESPs[i].enabled) {
-      m_ESPs[i].index = QString();
-      ++numSkipped;
-      continue;
-    }
-    if (mediumPluginsSupported && m_ESPs[i].isMediumFlagged) {
-      int ESHpos      = 253 + (numESHs / 256);
-      m_ESPs[i].index = QString("%1:%2")
-                            .arg(ESHpos, 2, 16, QChar('0'))
-                            .arg(numESHs % 256, 2, 16, QChar('0'))
-                            .toUpper();
-      ++numESHs;
-
-    } else if (lightPluginsSupported &&
-               (m_ESPs[i].hasLightExtension || m_ESPs[i].isLightFlagged)) {
-      int ESLpos      = 254 + (numESLs / 4096);
-      m_ESPs[i].index = QString("%1:%2")
-                            .arg(ESLpos, 2, 16, QChar('0'))
-                            .arg(numESLs % 4096, 3, 16, QChar('0'))
-                            .toUpper();
-      ++numESLs;
-    } else {
-      m_ESPs[i].index = QString("%1")
-                            .arg(l - numESHs - numESLs - numSkipped, 2, 16, QChar('0'))
-                            .toUpper();
-    }
+  BethesdaPluginIndexes indexes;
+  for (int priority = 0; priority < m_ESPs.size(); ++priority) {
+    auto& plugin = m_ESPs[m_ESPsByPriority.at(priority)];
+    plugin.index =
+        indexes.next(plugin.enabled, plugin.isOverlayFlagged, plugin.isMediumFlagged,
+                     m_PluginDisplay.light && plugin.isLightFile());
   }
   emit esplist_changed();
 }
@@ -1473,7 +1446,7 @@ QVariant PluginList::fontData(const QModelIndex& modelIndex) const
   if (m_ESPs[index].hasMasterExtension || m_ESPs[index].isMasterFlagged ||
       m_ESPs[index].hasLightExtension)
     result.setWeight(QFont::Bold);
-  if (m_ESPs[index].isLightFlagged || m_ESPs[index].hasLightExtension)
+  if (m_ESPs[index].isLightFile())
     result.setItalic(true);
   else if (m_ESPs[index].isMediumFlagged)
     result.setUnderline(true);
@@ -1571,7 +1544,7 @@ QVariant PluginList::tooltipData(const QModelIndex& modelIndex) const
                   "be added to your game settings, overwriting in case of conflicts.");
   }
 
-  if (esp.isLightFlagged && !esp.hasLightExtension) {
+  if (esp.isLightFlagged && (!esp.respectsExtensions || !esp.hasLightExtension)) {
     QString type = esp.hasMasterExtension ? "ESM" : "ESP";
     toolTip +=
         "<br><br>" +
@@ -1579,11 +1552,12 @@ QVariant PluginList::tooltipData(const QModelIndex& modelIndex) const
            "order but the records will be loaded in ESL space (FE/FF). You can have up "
            "to 4096 light plugins in addition to other plugin types.")
             .arg(type);
-  } else if (esp.isMediumFlagged && esp.hasMasterExtension) {
-    toolTip += "<br><br>" +
-               tr("This ESM is flagged as a medium plugin (ESH). It adheres to the ESM "
-                  "load order but loads records in ESH space (FD). You can have 256 "
-                  "medium plugins in addition to other plugin types.");
+  } else if (esp.isMediumFlagged) {
+    toolTip +=
+        "<br><br>" +
+        tr("This file is flagged as a medium plugin (ESH). It keeps its load-order "
+           "position but loads records in ESH space (FD). You can have 256 "
+           "medium plugins in addition to other plugin types.");
   }
 
   if (esp.isBlueprintFlagged) {
@@ -1608,12 +1582,17 @@ QVariant PluginList::tooltipData(const QModelIndex& modelIndex) const
 
   if (esp.forceDisabled) {
     auto feature = m_Organizer.gameFeatures().gameFeature<GamePlugins>();
-    if (feature && esp.hasLightExtension && feature->lightPluginsAreSupported()) {
+    if (feature && esp.hasLightExtension && !feature->lightPluginsAreSupported()) {
       toolTip += "<br><br>" + tr("Light plugins (ESL) are not supported by this game.");
     } else {
       toolTip += "<br><br>" + tr("This game does not currently permit custom plugin "
                                  "loading. There may be manual workarounds.");
     }
+  }
+
+  if (esp.isOverlayFlagged) {
+    toolTip += "<br><br>" + tr("Flagged as an overlay plugin. Displayed as XX and "
+                               "excluded from the indexed plugin count.");
   }
 
   // additional info
@@ -1669,7 +1648,7 @@ QVariant PluginList::iconData(const QModelIndex& modelIndex) const
     result.append(":/MO/gui/archive_conflict_neutral");
   }
 
-  if (esp.isLightFlagged && !esp.hasLightExtension) {
+  if (esp.isLightFlagged && (!esp.respectsExtensions || !esp.hasLightExtension)) {
     result.append(":/MO/gui/awaiting");
   }
 
@@ -1992,13 +1971,12 @@ QModelIndex PluginList::parent(const QModelIndex&) const
 PluginList::ESPInfo::ESPInfo(const QString& name, bool forceLoaded, bool forceEnabled,
                              bool forceDisabled, const QString& originName,
                              const QString& fullPath, bool hasIni,
-                             std::set<QString> archives, bool lightSupported,
-                             bool mediumSupported, bool blueprintSupported,
+                             std::set<QString> archives, BethesdaPluginDisplay support,
                              bool parseHeader)
     : name(name), fullPath(fullPath), enabled(forceLoaded), forceLoaded(forceLoaded),
       forceEnabled(forceEnabled), forceDisabled(forceDisabled), originName(originName),
-      formVersion(0), headerVersion(0.0f), hasIni(hasIni),
-      archives(archives.begin(), archives.end())
+      respectsExtensions(support.respectsExtensions), formVersion(0),
+      headerVersion(0.0f), hasIni(hasIni), archives(archives.begin(), archives.end())
 
 {
   if (!parseHeader) {
@@ -2009,6 +1987,7 @@ PluginList::ESPInfo::ESPInfo(const QString& name, bool forceLoaded, bool forceEn
     hasLightExtension    = (extension == "esl");
     isMasterFlagged      = false;
     isLightFlagged       = false;
+    isOverlayFlagged     = false;
     isMediumFlagged      = false;
     isBlueprintFlagged   = false;
     hasNoRecords         = false;
@@ -2050,12 +2029,13 @@ PluginList::ESPInfo::ESPInfo(const QString& name, bool forceLoaded, bool forceEn
     auto extension     = name.right(3).toLower();
     hasMasterExtension = (extension == "esm");
     hasLightExtension  = (extension == "esl");
-    isMasterFlagged    = file.isMaster();
-    isLightFlagged     = lightSupported && file.isLight(mediumSupported);
-    isMediumFlagged    = mediumSupported && file.isMedium();
-    isBlueprintFlagged = blueprintSupported &&
-                         (isMasterFlagged || hasMasterExtension || hasLightExtension) &&
-                         file.isBlueprint();
+    const auto flags   = BethesdaPluginFlags::fromHeader(file.headerFlags(), support);
+    isMasterFlagged    = flags.master;
+    isLightFlagged     = flags.light;
+    isMediumFlagged    = flags.medium;
+    isOverlayFlagged   = flags.overlay;
+    isBlueprintFlagged =
+        flags.blueprint && (isMasterFlagged || hasMasterExtension || hasLightExtension);
     hasNoRecords = file.isDummy();
 
     formVersion   = file.formVersion();
@@ -2072,6 +2052,7 @@ PluginList::ESPInfo::ESPInfo(const QString& name, bool forceLoaded, bool forceEn
     hasLightExtension  = false;
     isMasterFlagged    = false;
     isLightFlagged     = false;
+    isOverlayFlagged   = false;
     isMediumFlagged    = false;
     isBlueprintFlagged = false;
     hasNoRecords       = false;
