@@ -1,4 +1,5 @@
 #include "steamcloudsync.h"
+#include "steamcef.h"
 #include "vdfparser.h"
 
 #include <QCoreApplication>
@@ -25,7 +26,6 @@
 #include <QStorageInfo>
 #include <QTimer>
 #include <QUuid>
-#include "steamcef.h"
 #include <QWebSocket>
 #include <QElapsedTimer>
 #include <QRegularExpression>

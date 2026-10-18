@@ -173,16 +173,16 @@ namespace spawn
 
 namespace
 {
-// A headless run has no window to show the error in: it becomes a notification
-// and the launch fails.
-void reportLaunchProblem(QWidget* parent, const QString& title, const QString& text)
-{
-  if (headless::active()) {
-    headless::fail(text);
-    return;
+  // A headless run has no window to show the error in: it becomes a notification
+  // and the launch fails.
+  void reportLaunchProblem(QWidget* parent, const QString& title, const QString& text)
+  {
+    if (headless::active()) {
+      headless::fail(text);
+      return;
+    }
+    QMessageBox::critical(parent, title, text);
   }
-  QMessageBox::critical(parent, title, text);
-}
 }  // namespace
 
 void logSpawning(const SpawnParameters& sp, const QString& realCmd)
@@ -652,10 +652,12 @@ env::NativeProcess startBinary(QWidget* parent, const SpawnParameters& sp)
   if (!sp.useProton) {
     QFile binary(sp.binary.absoluteFilePath());
     if (binary.open(QIODevice::ReadOnly) && binary.peek(2) == "MZ") {
-      reportLaunchProblem(parent, QObject::tr("Windows executable requires Proton"),
+      reportLaunchProblem(
+          parent, QObject::tr("Windows executable requires Proton"),
           QObject::tr("'%1' is a Windows executable. Enable Use Proton for it in "
                       "Edit Executables, then select an installed Proton version "
-                      "in Settings > Wine/Proton.").arg(sp.binary.fileName()));
+                      "in Settings > Wine/Proton.")
+              .arg(sp.binary.fileName()));
       return {};
     }
   }
@@ -666,7 +668,8 @@ env::NativeProcess startBinary(QWidget* parent, const SpawnParameters& sp)
     }
     if (protonScript.isEmpty() || !QFileInfo(protonScript).isFile() ||
         !QFileInfo(protonScript).isExecutable()) {
-      reportLaunchProblem(parent, QObject::tr("Proton is not available"),
+      reportLaunchProblem(
+          parent, QObject::tr("Proton is not available"),
           QObject::tr("This executable is configured to use Proton, but the selected "
                       "Proton launcher is missing or cannot be executed.\n\n"
                       "Select an installed version in Settings > Wine/Proton. "
@@ -769,7 +772,7 @@ FileExecutionContext getFileExecutionContext(QWidget* parent, const QFileInfo& t
 
     if (java.isEmpty()) {
       if (headless::active()) {
-        return {.binary={}, .arguments={}, .type=FileExecutionTypes::Other};
+        return {.binary = {}, .arguments = {}, .type = FileExecutionTypes::Other};
       }
       java = QFileDialog::getOpenFileName(parent, QObject::tr("Select binary"),
                                           QString(), QObject::tr("Binary") + " (*)");

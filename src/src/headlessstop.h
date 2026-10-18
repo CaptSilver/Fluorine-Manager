@@ -6,7 +6,8 @@
 // Steam stops a game by sending SIGTERM to the launch command. Headless mode
 // turns that signal into an Unlock of the process wait so the normal cleanup
 // (unmounting the VFS, syncing saves) still runs.
-namespace headless {
+namespace headless
+{
 
 using SignalFallback = void (*)(int);
 
@@ -27,6 +28,6 @@ env::ProcessWaitAction waitAction();
 // Clears the stop and wait-started flags.
 void resetStopForTesting();
 
-} // namespace headless
+}  // namespace headless
 
 #endif

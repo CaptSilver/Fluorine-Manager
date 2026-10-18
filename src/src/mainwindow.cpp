@@ -3116,16 +3116,14 @@ void MainWindow::linkMenu()
 
 QString MainWindow::steamLaunchOptionLineFor(const Executable& exe) const
 {
-  const auto instance = InstanceManager::singleton().currentInstance();
-  const QString instanceId =
-      steamlaunch::instanceArgument(instance->isPortable(), instance->directory(),
-                                    instance->displayName());
+  const auto instance      = InstanceManager::singleton().currentInstance();
+  const QString instanceId = steamlaunch::instanceArgument(
+      instance->isPortable(), instance->directory(), instance->displayName());
 
   // -p is only needed when there is a choice of profile.
   QString profile;
   const QDir profilesDir(m_OrganizerCore.settings().paths().profiles());
-  const auto profileDirs =
-      profilesDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+  const auto profileDirs = profilesDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
   if (profileDirs.size() > 1 && m_OrganizerCore.currentProfile()) {
     profile = m_OrganizerCore.currentProfile()->name();
   }

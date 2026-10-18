@@ -97,10 +97,7 @@ public:
   // whether the command runs without a window, reporting problems as desktop
   // notifications; only `run --headless` does
   //
-  virtual bool headless() const
-  {
-    return false;
-  }
+  virtual bool headless() const { return false; }
 
 protected:
   // meta information about this command, returned by derived classes

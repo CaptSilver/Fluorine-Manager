@@ -49,8 +49,7 @@ void MOMultiProcess::setHeadlessPrimary(bool headless)
     return;
   }
   if (!m_SharedMem.lock()) {
-    MOBase::log::warn("cannot record headless state: {}",
-                      m_SharedMem.errorString());
+    MOBase::log::warn("cannot record headless state: {}", m_SharedMem.errorString());
     return;
   }
   *static_cast<char*>(m_SharedMem.data()) = headless ? 1 : 0;
@@ -67,8 +66,7 @@ bool MOMultiProcess::primaryIsHeadless() const
   return headless;
 }
 
-MOMultiProcess::MOMultiProcess(bool allowMultiple, QObject* parent,
-                               const QString& key)
+MOMultiProcess::MOMultiProcess(bool allowMultiple, QObject* parent, const QString& key)
     : QObject(parent), m_Key(key)
 {
   m_SharedMem.setKey(m_Key);
