@@ -269,6 +269,22 @@ target_link_libraries(test_fomoddependency PRIVATE
 )
 add_test(NAME test_fomoddependency COMMAND test_fomoddependency)
 
+add_executable(test_fomodpaths EXCLUDE_FROM_ALL test_fomodpaths.cpp)
+set_target_properties(test_fomodpaths PROPERTIES
+    AUTOMOC OFF
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+target_include_directories(test_fomodpaths PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/installer_fomod/src
+)
+target_link_libraries(test_fomodpaths PRIVATE
+    Qt6::Core
+    GTest::gtest
+    GTest::gtest_main
+)
+add_test(NAME test_fomodpaths COMMAND test_fomodpaths)
+
 add_executable(test_registry_ini EXCLUDE_FROM_ALL test_registry_ini.cpp)
 set_target_properties(test_registry_ini PROPERTIES AUTOMOC OFF CXX_STANDARD 23)
 target_compile_options(test_registry_ini PRIVATE
@@ -1101,7 +1117,7 @@ add_custom_target(fluorine-tests
             test_esptk_tes3 test_falloutnv_plugin_types test_bsatk_extraction test_executable_options test_steam_cloud
             test_conflict_sorting test_launch_environment test_faudioruntime
             test_plugincompatibility test_pefileutils test_curatedguide
-            test_metainiutils test_fomoddependency test_registry_ini test_persistentcookiejar test_fluorineupdater
+            test_metainiutils test_fomoddependency test_fomodpaths test_registry_ini test_persistentcookiejar test_fluorineupdater
             test_vfs_backend
             test_fluorineconfigownership
             test_prefixsymlinks
