@@ -254,7 +254,9 @@ ModListContextMenu::ModListContextMenu(const QModelIndex& index, OrganizerCore& 
 
   addSeparator();
 
-  // Add type-specific items
+  // Add type-specific items. isRegular() is also true for separators and backups, so
+  // the branch that adds the regular actions sets the flag instead.
+  bool regular = false;
   if (info->isOverwrite()) {
     addOverwriteActions(info);
   } else if (info->isBackup()) {
@@ -265,6 +267,11 @@ ModListContextMenu::ModListContextMenu(const QModelIndex& index, OrganizerCore& 
     addForeignActions(info);
   } else {
     addRegularActions(info);
+    regular = true;
+  }
+
+  if (regular) {
+    addPluginActions(info);
   }
 
   // add information for all except foreign
@@ -273,6 +280,24 @@ ModListContextMenu::ModListContextMenu(const QModelIndex& index, OrganizerCore& 
       view->actions().displayModInformation(m_index.data(ModList::IndexRole).toInt());
     });
     setDefaultAction(infoAction);
+  }
+}
+
+void ModListContextMenu::addPluginActions(ModInfo::Ptr mod)
+{
+  const auto actions = m_core.modList()->contextActions().visibleFor(mod.data());
+  if (actions.empty()) {
+    return;
+  }
+
+  addSeparator();
+  for (const auto& action : actions) {
+    // the lambda keeps the action and the mod alive for the menu's nested event loop
+    // (the vector above is gone by then). QMenu reads a lone '&' as a mnemonic.
+    QString label = action->label;
+    addAction(label.replace('&', "&&"), [action, mod, view = m_view] {
+      ModContextActions::trigger(*action, mod.data(), view->topLevelWidget());
+    });
   }
 }
 

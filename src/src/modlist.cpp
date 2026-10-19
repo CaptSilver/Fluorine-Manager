@@ -1029,6 +1029,14 @@ ModList::onModMoved(const std::function<void(const QString&, int, int)>& func)
   return m_ModMoved.connect(func);
 }
 
+ModContextActions::Handle ModList::addContextMenuAction(
+    const QString& label,
+    const std::function<void(MOBase::IModInterface*, QWidget*)>& triggered,
+    const std::function<bool(MOBase::IModInterface*)>& visible)
+{
+  return m_ContextActions.add({label, triggered, visible});
+}
+
 int ModList::dropPriority(int row, const QModelIndex& parent) const
 {
   if (row == -1) {

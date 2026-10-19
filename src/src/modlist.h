@@ -21,6 +21,7 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #define MODLIST_H
 
 #include "categories.h"
+#include "modcontextactions.h"
 #include "moddatacontent.h"
 #include "modinfo.h"
 #include "nexusinterface.h"
@@ -213,6 +214,14 @@ public:
           func);
   boost::signals2::connection
   onModMoved(const std::function<void(const QString&, int, int)>& func);
+
+  // The action stays in the menu for as long as the returned handle is kept.
+  ModContextActions::Handle addContextMenuAction(
+      const QString& label,
+      const std::function<void(MOBase::IModInterface*, QWidget*)>& triggered,
+      const std::function<bool(MOBase::IModInterface*)>& visible = {});
+
+  const ModContextActions& contextActions() const { return m_ContextActions; }
 
 public:  // implementation of virtual functions of QAbstractItemModel
   int rowCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -413,6 +422,8 @@ private:
   SignalModMoved m_ModMoved;
   SignalModRemoved m_ModRemoved;
   SignalModStateChanged m_ModStateChanged;
+
+  ModContextActions m_ContextActions;
 
   QElapsedTimer m_LastCheck;
 
