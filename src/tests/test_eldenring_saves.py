@@ -484,7 +484,7 @@ class RestoreBackupTests(SaveFolderCase):
     def test_a_save_that_cannot_be_copied_aside_is_not_overwritten(self) -> None:
         self.write("ER0000.co2", b"old")
         self.put(f"ER0000.co2.{STAMP}-manual", CO2)
-        with mock.patch.object(saves.ermsaves, "backup_save", side_effect=OSError(28, "disk full")):
+        with mock.patch.object(saves, "backup_save", side_effect=OSError(28, "disk full")):
             with self.assertRaises(errors.ErmError):
                 self.restore(f"ER0000.co2.{STAMP}-manual")
         self.assertEqual((self.folder / "ER0000.co2").read_bytes(), b"old")
@@ -621,7 +621,7 @@ class QuarantineVanillaTests(SaveFolderCase):
         self.assertIn("Steam Cloud", str(caught.exception))
 
     def test_a_move_that_fails_is_an_error_not_a_crash(self) -> None:
-        with mock.patch.object(saves.ermsaves.shutil, "move", side_effect=PermissionError("denied")):
+        with mock.patch.object(saves.shutil, "move", side_effect=PermissionError("denied")):
             with self.assertRaises(errors.ErmError):
                 self.quarantine()
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
@@ -680,7 +680,7 @@ class MoveToModdedTests(SaveFolderCase):
 
     def test_a_copy_that_fails_leaves_both_saves_where_they_were(self) -> None:
         self.write("ER0000_modded", b"the old modded character")
-        with mock.patch.object(saves.ermsaves, "backup_save", side_effect=OSError(28, "disk full")):
+        with mock.patch.object(saves, "backup_save", side_effect=OSError(28, "disk full")):
             with self.assertRaises(errors.ErmError):
                 self.move(self.folder / "ER0000.sl2")
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)

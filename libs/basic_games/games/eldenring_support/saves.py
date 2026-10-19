@@ -11,13 +11,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from . import atomic, procs
 from .ermlib import audit, github, paths
-from .ermlib import saves as ermsaves
 from .ermlib import steam
 from .ermlib.errors import ErmError, PathError, SafetyError
 from .ermlib.savefile import SaveFile
@@ -153,8 +153,7 @@ def backup_all(
 ) -> list[Path]:
     """Copy each of `files` into `backups_dir` as <name>.<stamp>-<label>, each checked against its source.
 
-    The stamp is required and always named by the caller: ermlib's backup_save
-    builds the name from whatever it is given, "None" included. A file whose
+    The stamp is required and always named by the caller. A file whose
     name is in `session_files` is copied under SESSION_LABEL instead: while a
     restore is pending, ER0000.sl2 holds what a modded session wrote, and a
     copy that parse_backup reads as modded-session is refused by
@@ -164,6 +163,41 @@ def backup_all(
     return _copy_aside(files, backups_dir, label, stamp, session_files)
 
 
+def backup_save(save_path, backups_dir, label: str = "", *, stamp: str) -> Path:
+    """Copy `save_path` into `backups_dir` as <name>.<stamp>[-<label>]; returns the copy.
+
+    The stamp is not checked here: _copy_aside and quarantine_vanilla validate it before calling.
+    """
+    save_path = Path(save_path)
+    backups_dir = Path(backups_dir)
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f"-{label}" if label else ""
+    dest = backups_dir / f"{save_path.name}.{stamp}{suffix}"
+    shutil.copy2(save_path, dest)
+    return dest
+
+
+def _move_to_quarantine(save_path, backups_dir, cloud_saves, steam_up, stamp) -> list[str]:
+    """Move `save_path` into backups_dir/quarantine after copying it to quarantine-backup; returns the lines to show.
+
+    The caller has already checked that `save_path` is a regular file.
+    """
+    if steam_up:
+        raise SafetyError("close Steam before quarantine (it may re-sync the save)")
+    save_path = Path(save_path)
+    backups_dir = Path(backups_dir)
+    backup_save(save_path, backups_dir / "quarantine-backup", label="orig", stamp=stamp)
+    qdir = backups_dir / "quarantine"
+    qdir.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(save_path), str(qdir / f"{save_path.name}.{stamp}"))
+    lines = [f"moved {save_path.name} out of the prefix into {qdir}"]
+    for cs in cloud_saves:
+        lines.append(f"purge Steam Cloud: account {cs['account_id']} — in Steam, disable Cloud for "
+                     f"Elden Ring, then delete the remote {cs['relpath']} (View → Settings → Cloud → "
+                     "Manage), or it will re-sync.")
+    return lines
+
+
 def _copy_aside(files, backups_dir, label: str, stamp: str, session_files=()) -> list[Path]:
     if not STAMP.fullmatch(str(stamp)):
         raise ErmError(f"a backup needs a time stamp, not {stamp!r}")
@@ -171,7 +205,7 @@ def _copy_aside(files, backups_dir, label: str, stamp: str, session_files=()) ->
     for source in files:
         named = SESSION_LABEL if Path(source).name in session_files else label
         try:
-            copy = ermsaves.backup_save(source, backups_dir, label=named, stamp=stamp)
+            copy = backup_save(source, backups_dir, label=named, stamp=stamp)
             same = github.sha256_file(copy) == github.sha256_file(source)
         except OSError as exc:
             raise ErmError(f"cannot back up {source}: {exc}") from exc
@@ -219,9 +253,9 @@ def parse_backup(path) -> Backup | None:
 def _files_under(root) -> list[Path]:
     """Every file under `root` at any depth; a folder that cannot be read is an ErmError naming it.
 
-    ermlib's list_backups walks with Path.rglob, which on Python 3.12 skips a
-    folder it cannot open without saying so. An unreadable quarantine/ would
-    drop out of the restore list, and it is where the vanilla save is filed.
+    Path.rglob on Python 3.12 skips a folder it cannot open without saying so.
+    An unreadable quarantine/ would drop out of the restore list, and it is
+    where the vanilla save is filed.
     """
     def refuse(exc: OSError) -> None:
         if isinstance(exc, FileNotFoundError) and Path(exc.filename) == Path(root):
@@ -321,7 +355,7 @@ def quarantine_vanilla(
     saves", and when ER0000.sl2 is a link or anything but a regular file,
     because moving a link would leave the real save where Steam can reach it.
     A copy is taken first, and both it and the moved file are hashed against
-    the original, because ermlib's quarantine checks neither. Returns the
+    the original, because the move itself checks neither. Returns the
     lines to show: where the file went and, per Steam account, what to purge
     from the cloud; the same lines are part of the error when a copy does not
     read back, since the file has moved by then.
@@ -348,11 +382,10 @@ def quarantine_vanilla(
     steam_up = (steam_running or steam.steam_running)()
     try:
         before = github.sha256_file(target)
-        report = ermsaves.quarantine(target, backups_dir, steam.cloud_saves(root), steam_up, stamp=stamp)
+        lines = _move_to_quarantine(target, backups_dir, steam.cloud_saves(root), steam_up, stamp)
         unequal = [copy for copy in (taken, orig) if github.sha256_file(copy) != before]
     except OSError as exc:
         raise ErmError(f"cannot quarantine {target}: {exc}") from exc
-    lines = [message for _, message in report.items]
     if unequal:
         raise ErmError(
             f"{VANILLA} was moved, but a copy did not read back the same. Compare {taken} and {orig} "
