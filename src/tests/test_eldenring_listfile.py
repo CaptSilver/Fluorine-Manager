@@ -492,14 +492,6 @@ class LayoutTests(unittest.TestCase):
     def test_an_empty_archive_lays_out_to_nothing(self) -> None:
         self.assertEqual(listfile.archive_layout(self.zip([]), None).files, [])
 
-    def test_differences_name_what_the_archive_would_not_have_put_there(self) -> None:
-        archive = self.zip(["Wrapper/regulation.bin", "Wrapper/a.bin"])
-        extra, missing = listfile.layout_differences(archive, None, ["regulation.bin", "mine.bin"])
-        self.assertEqual((extra, missing), (["mine.bin"], ["a.bin"]))
-
-    def test_differences_are_none_when_the_archive_cannot_be_laid_out(self) -> None:
-        self.assertIsNone(listfile.layout_differences(self.tmp / "none.rar", None, ["a"]))
-
 
 class Instance:
     """A Fluorine instance whose mods were installed from archives in downloads/.
@@ -528,10 +520,10 @@ class Instance:
         zipped = archive_files if archive_files is not None else files
         path = support.write_zip(self.organizer.downloads / archive, dict(zipped))
         if nexus_id or file_id:
-            archives.write_sidecar(
-                path, game_name="eldenring", mod_id=nexus_id or None, file_id=file_id, version=version,
-                mod_name=name, repository="Nexus",
-            )
+            lines = ["[General]", "gameName=eldenring", f"modID={nexus_id}", f"version={version}"]
+            if file_id:
+                lines.append(f"fileID={file_id}")
+            Path(f"{path}.meta").write_text("\n".join([*lines, "installed=false", ""]), encoding="utf-8")
         mod = self.modlist.add(
             name, enabled=enabled, files=files, nexus_id=nexus_id, version=version, installation_file=archive
         )

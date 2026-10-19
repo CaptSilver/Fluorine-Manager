@@ -234,7 +234,7 @@ class SaveFile(_CharactersMixin, _InventoryMixin):
             entries = [Entry(data, i) for i in range(count)]
         except (struct.error, ValueError, IndexError) as exc:
             raise NotAnEldenRingSave(f"malformed/truncated save: {exc}") from exc
-        # slots/profile_entry/regulation_entry all index fixed positions in this
+        # slots and profile_entry index fixed positions in this
         # list, so anything shorter is a BND4 but not a save we can read.
         if len(entries) != _SAVE_ENTRIES:
             raise NotAnEldenRingSave(
@@ -249,11 +249,3 @@ class SaveFile(_CharactersMixin, _InventoryMixin):
     @property
     def profile_entry(self):
         return self.entries[10]
-
-    @property
-    def regulation_entry(self):
-        return self.entries[11]
-
-    @property
-    def all_md5_ok(self):
-        return all(e.md5_ok for e in self.entries)

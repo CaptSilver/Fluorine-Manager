@@ -4,8 +4,7 @@ The plugin's support directory is loaded under a synthetic package name (the
 pattern in test_openmw_game_plugins.py). Its vendored ermlib is then also
 reachable as top-level `ermlib`, because the moved erm test fixtures import it
 that way. Both names must be the same module objects: two copies mean two
-ErmError classes and two CACHE_PATH globals, and assertRaises or a monkeypatch
-silently hits the wrong one.
+ErmError classes, and assertRaises or a monkeypatch silently hits the wrong one.
 
 The support directory is loaded once per process. A later load_support under
 another name registers that name as an alias of the first package and returns

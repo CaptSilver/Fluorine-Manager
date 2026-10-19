@@ -170,10 +170,6 @@ class Problem:
     # Shown, but nothing is wrong: the launch is not blocked by it.
     informational: bool = False
 
-    @property
-    def short(self) -> str:
-        return TITLES[self.key]
-
 
 def as_html(text: str) -> str:
     """Plain text as the HTML the problems panel renders: escaped, with line breaks kept."""
@@ -436,13 +432,13 @@ class Diagnosis:
 
     def _session_rows(self, context: Context) -> list[Problem]:
         rows: list[Problem] = []
-        up = procs.game_running()
-        if up:
+        names = procs.running_names()
+        if names is not None:
             rows.append(
                 Problem(
                     "GAME_RUNNING",
-                    "Elden Ring or me3 is running: " + ", ".join(f"{name} (pid {pid})" for pid, name in up)
-                    + ". A launch waits for it to exit, and nothing edits Game/ under it.",
+                    f"Elden Ring or me3 is running: {names}. "
+                    "A launch waits for it to exit, and nothing edits Game/ under it.",
                     informational=True,
                 )
             )
@@ -454,8 +450,7 @@ class Diagnosis:
                     "and once erm's Steam launch option is gone a Steam Play loads it under Easy Anti-Cheat. In "
                     'Tools > Tool Plugins > Elden Ring > Save tools…, "Quarantine ER0000.sl2…" or "Move a save to the modded '
                     'name…" takes it out of Steam\'s reach, and "Mark the session\'s save as reviewed" audits it and asks '
-                    "whether it ever ran under a profile without Seamless Co-op, as the import does. Until then the "
-                    "import is not marked done.",
+                    "whether it ever ran under a profile without Seamless Co-op.",
                     TOOL_SAVES,
                     informational=True,
                 )

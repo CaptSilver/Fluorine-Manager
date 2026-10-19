@@ -57,19 +57,27 @@ def game_running(root: Path | str = "/proc", uid: int | None = None) -> list[tup
     return found
 
 
+def running_names(running: Callable[[], list] | None = None) -> str | None:
+    """What is up, as "eldenring.exe (pid 4242), me3 (pid 4300)"; None when nothing is.
+
+    `running` defaults to game_running, looked up at call time so a test that
+    patches it is honoured. Every refusal builds its own message and control
+    flow around this one description.
+    """
+    up = (running or game_running)()
+    if not up:
+        return None
+    return ", ".join(f"{name} (pid {pid})" for pid, name in up)
+
+
 def refuse_while_running(running: Callable[[], list] | None, then: str) -> None:
     """Raise while the game or me3 is up.
 
-    `running` defaults to game_running, looked up at call time so a test that
-    patches it is honoured. `then` finishes the sentence "Quit the game, then ...".
+    `then` finishes the sentence "Quit the game, then ...".
     """
-    up = (running or game_running)()
-    if up:
-        raise ErmError(
-            "Elden Ring or me3 is still running ("
-            + ", ".join(f"{name} pid {pid}" for pid, name in up)
-            + f"). Quit the game, then {then}."
-        )
+    names = running_names(running)
+    if names is not None:
+        raise ErmError(f"Elden Ring or me3 is still running: {names}. Quit the game, then {then}.")
 
 
 def start_ticks(pid: int, root: Path | str = "/proc") -> int | None:

@@ -59,25 +59,14 @@ def pick_item(parent, title: str, label: str, items: list[str]) -> str | None:
     return chosen if accepted else None
 
 
-def choose_folder(parent, title: str, start: str) -> str | None:
-    from PyQt6.QtWidgets import QFileDialog
-
-    chosen = QFileDialog.getExistingDirectory(parent, title, start)
-    return chosen or None
-
-
-def _checklist(
-    parent, title: str, text: str, items: list[str], checked: list[str], reorder: bool = False
-) -> list[str] | None:
+def _checklist(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:
     """A dialog of tickable rows. Returns the ticked texts in list order, None when cancelled.
 
-    `checked` says which rows start ticked; `reorder` lets the user drag rows.
+    `checked` says which rows start ticked.
     An empty list is a real answer (tick nothing), which is why cancelling is None.
     """
     from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QAbstractItemView, QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout,
-    )
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
 
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
@@ -86,8 +75,6 @@ def _checklist(
     label.setWordWrap(True)
     layout.addWidget(label)
     listing = QListWidget()
-    if reorder:
-        listing.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
     for name in items:
         item = QListWidgetItem(name)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -104,14 +91,6 @@ def _checklist(
     return [row.text() for row in rows if row.checkState() == Qt.CheckState.Checked]
 
 
-def pick_profiles(parent, title: str, names: list[str]) -> list[str] | None:
-    """The ticked names in the order the list shows them, or None when cancelled.
-
-    The rows can be dragged to reorder them; every row starts ticked.
-    """
-    return _checklist(parent, title, "Profiles to import, in this order (drag to reorder):", names, names, reorder=True)
-
-
 def pick_files(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:
     """The ticked names of `items` in list order, or None when the dialog is cancelled.
 
@@ -121,8 +100,11 @@ def pick_files(parent, title: str, text: str, items: list[str], checked: list[st
 
 
 
-def show_text(parent, title: str, text: str) -> None:
-    """A scrollable, read-only text window, for reports too long for a message box."""
+def _text_dialog(parent, title: str, text: str, buttons):
+    """A scrollable, read-only text window with the given QDialogButtonBox buttons, not yet shown.
+
+    Returns (dialog, button box) so a caller can relabel a button before exec().
+    """
     from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
 
     dialog = QDialog(parent)
@@ -133,10 +115,18 @@ def show_text(parent, title: str, text: str) -> None:
     view.setReadOnly(True)
     view.setPlainText(text)
     layout.addWidget(view)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-    buttons.rejected.connect(dialog.reject)
-    buttons.accepted.connect(dialog.accept)
-    layout.addWidget(buttons)
+    box = QDialogButtonBox(buttons)
+    box.rejected.connect(dialog.reject)
+    box.accepted.connect(dialog.accept)
+    layout.addWidget(box)
+    return dialog, box
+
+
+def show_text(parent, title: str, text: str) -> None:
+    """A scrollable, read-only text window, for reports too long for a message box."""
+    from PyQt6.QtWidgets import QDialogButtonBox
+
+    dialog, _box = _text_dialog(parent, title, text, QDialogButtonBox.StandardButton.Close)
     dialog.exec()
 
 
@@ -217,21 +207,11 @@ def review(parent, title: str, text: str, accept: str) -> bool:
 
     For lists too long for a message box that the user has to read before saying yes.
     """
-    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox
 
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(title)
-    dialog.resize(760, 520)
-    layout = QVBoxLayout(dialog)
-    view = QPlainTextEdit()
-    view.setReadOnly(True)
-    view.setPlainText(text)
-    layout.addWidget(view)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.button(QDialogButtonBox.StandardButton.Ok).setText(accept)
-    buttons.accepted.connect(dialog.accept)
-    buttons.rejected.connect(dialog.reject)
-    layout.addWidget(buttons)
+    ok, cancel = QDialogButtonBox.StandardButton.Ok, QDialogButtonBox.StandardButton.Cancel
+    dialog, box = _text_dialog(parent, title, text, ok | cancel)
+    box.button(ok).setText(accept)
     return dialog.exec() == QDialog.DialogCode.Accepted
 
 

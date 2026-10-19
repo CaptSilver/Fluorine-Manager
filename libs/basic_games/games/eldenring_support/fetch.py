@@ -75,11 +75,7 @@ def _move_aside(paths: state.InstancePaths, folder: Path, name: str, stamp: str)
         old = Path(str(source) + suffix)
         if not os.path.lexists(old):
             continue
-        target, number = aside / old.name, 0
-        while os.path.lexists(target):
-            number += 1
-            target = aside / f"{old.name}.{number}"
-        atomic.move_durably(old, target)
+        atomic.move_durably(old, atomic.free_name(aside / old.name))
 
 
 def stage_under_name(

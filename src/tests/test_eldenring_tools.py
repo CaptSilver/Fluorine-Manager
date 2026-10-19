@@ -112,8 +112,6 @@ generated = support.module(PACKAGE, "generated")
 gate = support.module(PACKAGE, "gate")
 hardening = support.module(PACKAGE, "hardening")
 problems = support.module(PACKAGE, "problems")
-importer = support.module(PACKAGE, "importer")
-importfinish = support.module(PACKAGE, "importfinish")
 importsave = support.module(PACKAGE, "importsave")
 kinds = support.module(PACKAGE, "kinds")
 errors = support.module(PACKAGE, "ermlib.errors")
@@ -145,15 +143,14 @@ class CreatePluginsTests(ToolCase):
         self.assertEqual(
             [type(plugin).__name__ for plugin in plugins],
             [
-                "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
-                "HardenTool", "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool",
-                "EldenRingDiagnose",
+                "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "HardenTool",
+                "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool", "EldenRingDiagnose",
             ],
         )
 
     def test_every_tool_sits_in_the_elden_ring_submenu(self) -> None:
         shown = [plugin for plugin in PLUGINS.createPlugins() if isinstance(plugin, tools.EldenRingTool)]
-        self.assertEqual(len(shown), 10)
+        self.assertEqual(len(shown), 9)
         for plugin in shown:
             group, slash, entry = plugin.displayName().partition("/")
             self.assertEqual((group, slash), ("Elden Ring", "/"), plugin.displayName())
@@ -337,7 +334,7 @@ class SaveToolsTests(SaveToolsCase):
         with self.choose(0), mock.patch.object(session.procs, "game_running", return_value=[(42, "me3")]):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("pid 42", SHOWN[-1][2])
+        self.assertIn("(pid 42)", SHOWN[-1][2])
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
         self.assertIn("pending_restore", session.load_last_launch(self.paths))
 
@@ -569,7 +566,7 @@ class BackupToolTests(SaveToolsMenuCase):
         with self.menu(tools.BACKUP), mock.patch.object(session.procs, "game_running", return_value=[(4, "me3")]):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("me3 pid 4", SHOWN[-1][2])
+        self.assertIn("me3 (pid 4)", SHOWN[-1][2])
         self.assertFalse(self.paths.save_backups.exists())
 
 
@@ -1374,233 +1371,20 @@ class SetModKindToolTests(ModToolCase):
         self.assertIn("not a DLL here", SHOWN[-1][2])
 
 
-class ImportFromErmToolTests(ModToolCase):
+class SaveQuestionTests(ModToolCase):
     def setUp(self) -> None:
         super().setUp()
-        self.tool = tools.ImportFromErmTool()
+        self.tool = tools.SaveToolsTool()
         self.tool.init(self.organizer)
-        self.game.dataDirectory = lambda: SimpleNamespace(absolutePath=lambda: str(self.tmp / "game/Game"))
-        idle = mock.patch.object(tools.procs, "game_running", return_value=[])
-        idle.start()
-        self.addCleanup(idle.stop)
-        self.erm = self.tmp / "erm"
-        self.erm.mkdir()
-        (self.erm / "installed.json").write_text("{}")
-        (self.erm / "profiles").mkdir()
-        (self.erm / "profiles/b.toml").write_text("")
-        (self.erm / "profiles/a.toml").write_text("")
-        self.report = importer.Report()
-        self.report.ok("did a thing")
-        self.finish_mock = None
 
-    def drive(self, folder=None, profiles=("a",), run=None, finish=None, show_effect=None):
-        folder = str(self.erm) if folder is None else folder
-        self.save_dir = self.tmp / "saves/EldenRing/1234"
-        self.finish_mock = finish or mock.Mock(side_effect=lambda organizer, erm, report, **kw: report)
-        with mock.patch.object(tools.saves, "save_dir", return_value=self.save_dir), \
-                mock.patch.object(tools.qtui, "choose_folder", return_value=folder) as choose, \
-                mock.patch.object(tools.qtui, "pick_profiles", return_value=list(profiles)) as pick, \
-                mock.patch.object(tools.qtui, "show_text", side_effect=show_effect) as show, \
-                mock.patch.object(tools.importer, "run", run or mock.Mock(return_value=self.report)) as import_run, \
-                mock.patch.object(tools.importfinish, "finish", self.finish_mock):
-            self.tool.display()
-        return choose, pick, show, import_run
-
-    def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring/Import from erm…")
-        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
-
-    def test_the_chosen_folder_and_profiles_reach_the_importer_and_the_report_is_shown_once(self) -> None:
-        _, pick, show, import_run = self.drive(profiles=("b", "a"))
-        self.assertEqual(pick.call_args.args[2], ["a", "b"])
-        args, kwargs = import_run.call_args
-        self.assertEqual(args, (self.organizer, str(self.erm)))
-        self.assertEqual(kwargs["profiles"], ["b", "a"])
-        self.assertEqual(kwargs["version_info"], tools.mobase.VersionInfo)
-        self.assertEqual(kwargs["save_dir"], self.save_dir)
-        self.assertEqual(show.call_count, 1)
-        self.assertEqual(show.call_args.args[2], "ok   did a thing")
-        self.assertTrue(DIALOGS[-1].closed)
-
-    def test_the_second_part_gets_the_same_report_the_same_stamp_and_a_host_for_this_game(self) -> None:
-        _, _, _, import_run = self.drive()
-        args, kwargs = self.finish_mock.call_args
-        self.assertEqual(args, (self.organizer, str(self.erm), self.report))
-        self.assertEqual(kwargs["stamp"], import_run.call_args.kwargs["stamp"])
-        self.assertIsInstance(import_run.call_args.kwargs["report"], importer.Report)
-        host = kwargs["host"]
-        self.assertEqual(host.game_dir, self.tmp / "game/Game")
-        self.assertEqual(host.save_dir, self.save_dir)
-        self.assertIsInstance(kwargs["ui"], importfinish.Ui)
-
-    def test_the_busy_dialog_is_closed_before_the_second_part_asks_anything(self) -> None:
-        seen = []
-
-        def finish(organizer, erm, report, **kwargs):
-            seen.append(DIALOGS[-1].closed)
-            return report
-
-        self.drive(finish=mock.Mock(side_effect=finish))
-        self.assertEqual(seen, [True])
-
-    def test_the_confirmation_says_what_will_happen_to_game(self) -> None:
-        self.drive()
-        question = next(entry for entry in SHOWN if entry[0] == "question")
-        self.assertIn("move erm's files out of Game/", question[2])
-        self.assertIn("nothing is deleted", question[2])
-
-    def existing_profile(self, name: str) -> Path:
-        folder = Path(self.organizer.profilePath()).parent / name
-        folder.mkdir(parents=True)
-        return folder
-
-    def drive_choosing(self, picks, profiles=("a", "b")):
-        with mock.patch.object(tools, "_choose", side_effect=picks) as choose:
-            driven = self.drive(profiles=profiles)
-        return choose, driven
-
-    def test_a_profile_that_already_exists_is_asked_about_before_the_import_and_the_choice_reaches_it(self) -> None:
-        self.existing_profile("a")
-        choose, (_, _, _, import_run) = self.drive_choosing([1])
-        self.assertEqual(choose.call_count, 1)
-        text, labels = choose.call_args.args[2], choose.call_args.args[3]
-        self.assertIn("named a already exists", text)
-        self.assertIn(str(state.InstancePaths(self.organizer).profile_backups), text)
-        self.assertEqual(labels, tools.PROFILE_LABELS)
-        self.assertEqual(choose.call_args.kwargs["default"], 0)
-        self.assertEqual(import_run.call_args.kwargs["profile_choices"], {"a": importer.REPLACE_PROFILE})
-
-    def test_each_existing_profile_gets_its_own_question_and_keep_is_the_first_button(self) -> None:
-        self.existing_profile("a")
-        self.existing_profile("b")
-        choose, (_, _, _, import_run) = self.drive_choosing([0, 2])
-        self.assertEqual(choose.call_count, 2)
-        self.assertEqual(tools.PROFILE_LABELS[0], "Keep and reinstall missing mods")
-        self.assertEqual(
-            import_run.call_args.kwargs["profile_choices"],
-            {"a": importer.KEEP_PROFILE, "b": importer.SKIP_PROFILE},
-        )
-
-    def test_cancelling_a_profile_question_runs_nothing_at_all(self) -> None:
-        self.existing_profile("a")
-        _, (_, _, show, import_run) = self.drive_choosing([None])
-        import_run.assert_not_called()
-        self.finish_mock.assert_not_called()
-        show.assert_not_called()
-
-    def test_with_no_profile_in_the_way_nothing_is_asked_and_the_choices_are_empty(self) -> None:
-        choose, (_, _, _, import_run) = self.drive_choosing([])
-        choose.assert_not_called()
-        self.assertEqual(import_run.call_args.kwargs["profile_choices"], {})
-
-    def test_the_confirmation_says_the_backup_comes_first_and_that_overrides_are_recorded(self) -> None:
-        self.drive()
-        question = next(entry for entry in SHOWN if entry[0] == "question")
-        self.assertIn("backed up first", question[2])
-        self.assertIn("recorded in the instance", question[2])
-
-    def test_declining_runs_nothing(self) -> None:
-        ANSWER[0] = "no"
-        _, _, show, import_run = self.drive()
-        import_run.assert_not_called()
-        self.finish_mock.assert_not_called()
-        show.assert_not_called()
-
-    def test_cancelling_the_folder_or_the_profiles_runs_nothing(self) -> None:
-        with mock.patch.object(tools.qtui, "choose_folder", return_value=None), \
-                mock.patch.object(tools.importer, "run") as import_run:
-            self.tool.display()
-        import_run.assert_not_called()
-        with mock.patch.object(tools.qtui, "choose_folder", return_value=str(self.erm)), \
-                mock.patch.object(tools.qtui, "pick_profiles", return_value=None), \
-                mock.patch.object(tools.importer, "run") as import_run:
-            self.tool.display()
-        import_run.assert_not_called()
-
-    def test_ticking_no_profile_runs_nothing_and_says_so(self) -> None:
-        _, _, show, import_run = self.drive(profiles=())
-        import_run.assert_not_called()
-        self.assertEqual(SHOWN[-1][0], "information")
-        self.assertIn("No profile was ticked", SHOWN[-1][2])
-
-    def test_a_folder_without_installed_json_is_refused_before_anything_is_asked(self) -> None:
-        (self.erm / "installed.json").unlink()
-        _, pick, _, import_run = self.drive()
-        pick.assert_not_called()
-        import_run.assert_not_called()
-        self.assertEqual(SHOWN[-1][0], "critical")
-
-    def test_a_running_game_is_refused_before_anything_is_asked(self) -> None:
-        with mock.patch.object(tools.procs, "game_running", return_value=[(3, "me3")]):
-            choose, _, _, import_run = self.drive()
-        choose.assert_not_called()
-        import_run.assert_not_called()
-        self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("still running", SHOWN[-1][2])
-
-    def test_a_stopped_first_part_is_shown_and_the_second_part_does_not_run(self) -> None:
-        stop = mock.Mock(side_effect=importer.ImportStopped("the baselines differ"))
-        self.drive(run=stop)
-        self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("the baselines differ", SHOWN[-1][2])
-        self.assertTrue(DIALOGS[-1].closed)
-        self.finish_mock.assert_not_called()
-
-    def test_a_stopped_first_part_shows_the_error_with_the_report_of_what_was_done(self) -> None:
-        report = importer.Report()
-        report.ok("backed up ER0000.sl2")
-        stop = mock.Mock(side_effect=importer.ImportStopped("the baselines differ", report))
-        _, _, show, _ = self.drive(run=stop)
-        text = show.call_args.args[2]
-        self.assertIn("the baselines differ", text)
-        self.assertIn("backed up ER0000.sl2", text)
-        self.assertTrue(DIALOGS[-1].closed)
-
-    def test_the_busy_dialog_is_closed_before_a_stopped_report_is_shown(self) -> None:
-        seen = []
-        report = importer.Report()
-        report.ok("backed up ER0000.sl2")
-        stop = mock.Mock(side_effect=importer.ImportStopped("the baselines differ", report))
-        self.drive(run=stop, show_effect=lambda *args: seen.append(DIALOGS[-1].closed))
-        self.assertEqual(seen, [True])
-
-    def test_a_stopped_second_part_is_shown_with_what_both_parts_did(self) -> None:
-        report = importer.Report()
-        report.ok("moved files out of Game/")
-        stop = mock.Mock(side_effect=importer.ImportStopped("verify the game files in Steam", report))
-        _, _, show, _ = self.drive(finish=stop)
-        text = show.call_args.args[2]
-        self.assertIn("verify the game files in Steam", text)
-        self.assertIn("moved files out of Game/", text)
-
-    def test_an_unexpected_failure_is_shown_and_the_dialog_closed(self) -> None:
-        self.drive(run=mock.Mock(side_effect=RuntimeError("boom")))
-        self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertTrue(DIALOGS[-1].closed)
-
-    def test_the_problems_list_is_told_afterwards(self) -> None:
-        heard = []
-        stop = problems.subscribe(lambda: heard.append(1))
-        self.addCleanup(stop)
-        self.drive()
-        self.assertTrue(heard)
-
-
-class ImportUiTests(ModToolCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.tool = tools.ImportFromErmTool()
-        self.tool.init(self.organizer)
-        self.ui = self.tool._import_ui("T")
-
-    def test_the_answer_buttons_map_to_the_importers_answers(self) -> None:
+    def test_the_answer_buttons_map_to_the_answers(self) -> None:
         for index, expected in ((0, importsave.YES), (1, importsave.NO), (2, importsave.UNKNOWN), (None, None)):
             with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index) as choose:
-                self.assertEqual(self.ui.ask_answer("question"), expected)
+                self.assertEqual(self.tool._ask_answer("question"), expected)
         self.assertEqual(choose.call_args.args[2], "question")
         self.assertEqual(len(choose.call_args.args[3]), 3)
 
-    def test_the_action_buttons_follow_the_importers_order_and_default_to_the_preselected_one(self) -> None:
+    def test_the_action_buttons_follow_the_order_and_default_to_the_preselected_one(self) -> None:
         order = [importsave.QUARANTINE, importsave.MODDED, importsave.KEEP]
         labels = ["Quarantine ER0000.sl2", "Move it to the modded save", "Keep it as vanilla"]
         for index, preselect, expected in (
@@ -1608,78 +1392,9 @@ class ImportUiTests(ModToolCase):
             (2, importsave.KEEP, importsave.KEEP), (None, importsave.KEEP, None),
         ):
             with self.subTest(index=index, preselect=preselect), mock.patch.object(tools, "_choose", return_value=index) as choose:
-                self.assertEqual(self.ui.ask_action("what now", preselect), expected)
+                self.assertEqual(self.tool._ask_action("what now", preselect), expected)
                 self.assertEqual(choose.call_args.kwargs["default"], order.index(preselect))
                 self.assertEqual(choose.call_args.args[3], labels)
-
-    def test_the_adoption_list_is_read_first_and_then_the_verified_question_is_asked(self) -> None:
-        with mock.patch.object(tools.qtui, "review", return_value=True) as review, \
-                mock.patch.object(tools, "_choose", return_value=0) as choose:
-            self.assertEqual(self.ui.confirm_adoption("the list"), importfinish.VERIFIED)
-        self.assertEqual(review.call_args.args[2], "the list")
-        self.assertIn("verify", choose.call_args.args[2].lower())
-        with mock.patch.object(tools.qtui, "review", return_value=True), \
-                mock.patch.object(tools, "_choose", return_value=1):
-            self.assertEqual(self.ui.confirm_adoption("the list"), importfinish.UNVERIFIED)
-
-    def test_declining_the_list_or_closing_the_question_gives_none(self) -> None:
-        with mock.patch.object(tools.qtui, "review", return_value=False), \
-                mock.patch.object(tools, "_choose") as choose:
-            self.assertIsNone(self.ui.confirm_adoption("the list"))
-        choose.assert_not_called()
-        with mock.patch.object(tools.qtui, "review", return_value=True), \
-                mock.patch.object(tools, "_choose", return_value=None):
-            self.assertIsNone(self.ui.confirm_adoption("the list"))
-
-    def test_the_launch_option_dialog_has_one_button_and_cancel_means_stop(self) -> None:
-        with mock.patch.object(tools, "_choose", return_value=0) as choose:
-            self.assertTrue(self.ui.launch_option("it is set"))
-        self.assertEqual(len(choose.call_args.args[3]), 1)
-        with mock.patch.object(tools, "_choose", return_value=None):
-            self.assertFalse(self.ui.launch_option("it is set"))
-
-    def test_the_ui_carries_the_four_overrides(self) -> None:
-        for name in ("ask_save_route", "confirm_accept", "move_anyway", "ask_launcher"):
-            self.assertIsNotNone(getattr(self.ui, name), name)
-
-    def test_the_save_route_buttons_map_to_the_importers_routes_and_answer_the_questions_is_first(self) -> None:
-        for index, expected in ((0, importsave.ROUTE_QUESTIONS), (1, importsave.ROUTE_ACCEPT), (None, None)):
-            with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index) as choose:
-                self.assertEqual(self.ui.ask_save_route("text"), expected)
-        self.assertEqual(choose.call_args.args[3], tools.SAVE_ROUTE_LABELS)
-        self.assertEqual(choose.call_args.kwargs["default"], 0)
-        self.assertIn("Accept the current ER0000.sl2 as my vanilla save", tools.SAVE_ROUTE_LABELS[1])
-
-    def test_accepting_the_save_is_one_button_and_cancel_means_no(self) -> None:
-        with mock.patch.object(tools, "_choose", return_value=0) as choose:
-            self.assertTrue(self.ui.confirm_accept("text"))
-        self.assertEqual(len(choose.call_args.args[3]), 1)
-        with mock.patch.object(tools, "_choose", return_value=None):
-            self.assertFalse(self.ui.confirm_accept("text"))
-
-    def test_the_move_now_buttons_map_to_the_importers_choices(self) -> None:
-        for index, expected in ((0, importfinish.MOVE_AND_CHECK), (1, importfinish.MOVE_ONLY), (None, None)):
-            with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index):
-                self.assertEqual(self.ui.move_anyway("text"), expected)
-
-    def test_the_launcher_buttons_are_the_offered_actions_then_leave_and_leave_is_the_default(self) -> None:
-        options = [hardening.ACT_REHARDEN, hardening.ACT_UNHARDEN]
-        for index, expected in ((0, hardening.ACT_REHARDEN), (1, hardening.ACT_UNHARDEN), (2, None), (None, None)):
-            with self.subTest(index), mock.patch.object(tools, "_choose", return_value=index) as choose:
-                self.assertEqual(self.ui.ask_launcher("text", options), expected)
-        self.assertEqual(choose.call_args.args[3], [*options, tools.LEAVE_LAUNCHER])
-        self.assertEqual(choose.call_args.kwargs["default"], 2)
-
-    def test_the_list_to_move_goes_through_the_scrollable_review(self) -> None:
-        with mock.patch.object(tools.qtui, "review", return_value=True) as review:
-            self.assertTrue(self.ui.review("T", "the files", "Move them"))
-        self.assertEqual(review.call_args.args[1:], ("T", "the files", "Move them"))
-
-    def test_the_busy_callable_makes_a_busy_dialog(self) -> None:
-        with self.ui.busy("working") as busy:
-            busy.update("still working")
-        self.assertTrue(DIALOGS[-1].closed)
-        self.assertIn("still working", DIALOGS[-1].labels)
 
 
 EAC = b"MZ real easy anti cheat launcher"
@@ -1706,8 +1421,8 @@ class HardenToolCase(ModToolCase):
         self.addCleanup(problems.subscribe(lambda: self.heard.append(1)))
         for patcher in (
             mock.patch.object(hardening, "is_immutable", side_effect=lambda path: self.locked),
-            mock.patch.object(hardening.ermharden, "set_immutable", side_effect=self.fake_lock),
-            mock.patch.object(hardening.ermharden.subprocess, "run", side_effect=AssertionError("real pkexec")),
+            mock.patch.object(hardening, "set_immutable", side_effect=self.fake_lock),
+            mock.patch.object(hardening.subprocess, "run", side_effect=AssertionError("real pkexec")),
             mock.patch.object(hardening.procs, "game_running", side_effect=lambda: list(self.up)),
         ):
             patcher.start()
@@ -2315,7 +2030,7 @@ class ImportListToolTests(ListToolCase):
         with mock.patch.object(tools.procs, "game_running", return_value=[(42, "eldenring.exe")]):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("eldenring.exe pid 42", SHOWN[-1][2])
+        self.assertIn("eldenring.exe (pid 42)", SHOWN[-1][2])
         self.assertEqual(FakeFetchDialog.instances, [])
 
     def test_a_file_that_is_not_a_list_is_shown_as_an_error(self) -> None:

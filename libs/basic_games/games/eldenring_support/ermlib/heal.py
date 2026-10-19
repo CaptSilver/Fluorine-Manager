@@ -25,10 +25,6 @@ from .errors import ErmError
 from .formats import bnd4, param, regulation
 from . import gamebuild
 
-# Lives under tools/, which is already gitignored runtime state -- these are
-# derived artifacts, not something a fresh clone should carry.
-BASELINE_DIR = Path("tools/baselines")
-
 # The game-relative path a regulation merge occupies -- the same string in the
 # profile's [[merges]] entry, in every mod's package, and in the game dir.
 REGULATION = "regulation.bin"
@@ -38,11 +34,11 @@ class HealError(ErmError):
     """A heal could not be planned or completed."""
 
 
-def baseline_path(regver, base=BASELINE_DIR):
+def baseline_path(regver, base):
     return Path(base) / f"regulation-{regver}.bin"
 
 
-def adopt_baseline(game_dir, live, base=BASELINE_DIR):
+def adopt_baseline(game_dir, live, base):
     """Keep the installed game's regulation.bin as the merge baseline.
 
     The baseline is what rows get transplanted onto, not what they are compared
@@ -273,8 +269,7 @@ def verify_rebase(merged_blob, baseline_blob, mod_blobs, live):
     return tuple(problems)
 
 
-def prepare_rebase(game_dir, live, ancestor, contributors, base=BASELINE_DIR,
-                   cache_path=None):
+def prepare_rebase(game_dir, live, ancestor, contributors, base, cache_path):
     """The per-path bases a merge should fold onto for the installed build.
 
     The question is whether the merge is about to be built against an ancestor
@@ -296,8 +291,8 @@ def prepare_rebase(game_dir, live, ancestor, contributors, base=BASELINE_DIR,
     file in the ancestor slot would read every row the patch added as a mod
     deletion.
 
-    `cache_path` is where the ancestor's build stamp is memoised; None uses
-    gamebuild.CACHE_PATH.
+    `base` is the folder the baselines are kept in; `cache_path` is where the
+    ancestor's build stamp is memoised.
     """
     if ancestor is None or not contributors:
         return {}

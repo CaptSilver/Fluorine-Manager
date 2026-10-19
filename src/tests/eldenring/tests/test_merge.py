@@ -518,7 +518,7 @@ def test_param_rows_keeps_an_untouched_field_from_vanilla():
 
 
 def test_param_rows_folds_across_three_mods_with_vanilla_constant():
-    """conflicts.resolve() folds pairwise, so N contributors means N-1 merges
+    """merge_engine.py folds pairwise, so N contributors means N-1 merges
     with vanilla as the reference every time. Each mod's rows have to survive
     the folds that come after it."""
     van = _regulation({1: (SP, {1: bytes(8), 2: bytes(8), 3: bytes(8)}, 8)})
@@ -793,7 +793,7 @@ def test_describe_note_renders_the_sentence_and_not_the_note():
 
 
 def test_esd_three_way_without_a_notes_list_does_not_raise():
-    """conflicts.resolve() only threads a notes list through for strategies
+    """merge_engine.py only threads a notes list through for strategies
     that ask for it; called bare (as the registration tests above do), the
     strategy must not require one."""
     from ermlib.formats import esd

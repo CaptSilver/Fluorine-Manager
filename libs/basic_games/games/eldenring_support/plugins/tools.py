@@ -15,11 +15,12 @@ from PyQt6.QtWidgets import QMessageBox
 import mobase
 
 from .. import (
-    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importer, importfinish, importsave, kinds, listfile,
+    archives, atomic, deploy, fetch, fsprobe, gate, generated, hardening, importsave, kinds, listfile,
     listimport, me3_host, problems, procs, qtui, saves, session, state,
 )
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
+from ..report import Report
 
 GAME_NAME = "Elden Ring"
 AUTHOR = "Fluorine Elden Ring contributors"
@@ -64,16 +65,16 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
         # "Elden Ring" submenu; a window title reads better with a colon.
         return self.displayName().replace("/", ": ", 1)
 
-    def _ask_answer(self, text: str, title: str | None = None) -> str | None:
+    def _ask_answer(self, text: str) -> str | None:
         answers = [importsave.YES, importsave.NO, importsave.UNKNOWN]
         labels = ["Yes, it did", "No, it never did", "I do not know"]
-        index = _choose(self._parent, title or self.dialogTitle(), text, labels)
+        index = _choose(self._parent, self.dialogTitle(), text, labels)
         return None if index is None else answers[index]
 
-    def _ask_action(self, text: str, preselect: str, title: str | None = None) -> str | None:
+    def _ask_action(self, text: str, preselect: str) -> str | None:
         actions = [importsave.QUARANTINE, importsave.MODDED, importsave.KEEP]
         index = _choose(
-            self._parent, title or self.dialogTitle(), text, [ACTION_LABELS[a] for a in actions],
+            self._parent, self.dialogTitle(), text, [ACTION_LABELS[a] for a in actions],
             default=actions.index(preselect),
         )
         return None if index is None else actions[index]
@@ -208,29 +209,6 @@ ACTION_LABELS = {
     importsave.MODDED: "Move it to the modded save",
     importsave.KEEP: "Keep it as vanilla",
 }
-
-CONFIRM_IMPORT = (
-    "This will back up your save files, install erm's mods from its vendor/ folder (nothing is downloaded), "
-    "create a Fluorine profile for each ticked erm profile, then move erm's files out of Game/ into this "
-    "instance's quarantine-game folder (nothing is deleted), record what is left as vanilla and check Steam's "
-    "launch option.\n\n"
-    "You are shown each list before anything in Game/ moves. Close Steam if you want ER0000.sl2 quarantined, "
-    "and keep it open when you are asked to clear the launch option.\n\n"
-    "The save files are backed up first whatever you choose later. Every choice that goes around one of the "
-    "import's checks is listed in the report and recorded in the instance."
-)
-PROFILE_EXISTS = (
-    "A Fluorine profile named {name} already exists.\n\n"
-    "Keep it: it stays as it is, and any of its mods that are missing from mods/ are installed again from the "
-    "archive in downloads/ (nothing is downloaded), enabled and put back in the erm profile's order.\n"
-    "Replace it: the old profile folder is moved to {backups} first, then a new profile is made from erm's.\n"
-    "Skip it: nothing is done for this profile."
-)
-PROFILE_LABELS = ["Keep and reinstall missing mods", "Replace (back up the old one first)", "Skip this profile"]
-SAVE_ROUTE_LABELS = ["Answer the questions about it", "Accept the current ER0000.sl2 as my vanilla save"]
-ACCEPT_LABEL = "Accept it as my vanilla save"
-MOVE_LABELS = ["Move them, then check the launch option", "Move them and leave the launch option alone"]
-LEAVE_LAUNCHER = "Leave the launcher as it is"
 
 
 UNCHECKED = (
@@ -597,7 +575,7 @@ class SaveToolsTool(EldenRingTool):
         """The import's own review of ER0000.sl2 (audit, question, action), run from here. The report to show."""
         self._refuse_pending(pending)
         folder, _ = saves.save_files(self._organizer)
-        report = importer.Report()
+        report = Report()
         importsave.review(
             self._organizer, paths, folder, session.now_stamp(), report,
             ask_answer=self._ask_answer, ask_action=self._ask_action,
@@ -737,9 +715,8 @@ class SyncDeployedTool(EldenRingTool):
         busy = None
         try:
             # Inside the try so a refused run tells the listeners too.
-            up = procs.game_running()
-            if up:
-                names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+            names = procs.running_names()
+            if names is not None:
                 raise ErmError(f"{names} is running. Game/ is not edited under a running game; quit it and try again.")
             game_dir = Path(self._organizer.managedGame().dataDirectory().absolutePath())
             paths = state.InstancePaths(self._organizer)
@@ -929,149 +906,6 @@ class SetModKindTool(EldenRingTool):
         )
 
 
-class ImportFromErmTool(EldenRingTool):
-    def name(self) -> str:
-        return "Elden Ring Import from erm"
-
-    def description(self) -> str:
-        return (
-            "Install erm's mods as Fluorine mods, create a profile for each erm profile, move erm's files out of "
-            "Game/ and check Steam's launch option."
-        )
-
-    def displayName(self) -> str:
-        return "Elden Ring/Import from erm…"
-
-    def tooltip(self) -> str:
-        return (
-            "Copy erm's mods, profiles and records into this instance, then move erm's files out of Game/ into "
-            "quarantine and check Steam's launch option. Nothing is deleted."
-        )
-
-    def run(self) -> None:
-        title = self.dialogTitle()
-        procs.refuse_while_running(None, "run the import")
-        folder = qtui.choose_folder(self._parent, title, str(Path.home()))
-        if folder is None:
-            return
-        if not os.path.isfile(Path(folder) / "installed.json"):
-            QMessageBox.critical(self._parent, title, f"{folder} has no installed.json; choose the erm folder.")
-            return
-        names = qtui.pick_profiles(self._parent, title, importer.erm_profile_names(folder))
-        if names is None:
-            return
-        if not names:
-            QMessageBox.information(self._parent, title, "No profile was ticked, so nothing was imported.")
-            return
-        if QMessageBox.question(self._parent, title, CONFIRM_IMPORT) != QMessageBox.StandardButton.Yes:
-            return
-        choices = self._profile_choices(title, names)
-        if choices is None:
-            return
-        game = self._organizer.managedGame()
-        library = saves.library_root(game.gameDirectory().absolutePath())
-        save_dir = saves.save_dir(library)
-        stamp = session.now_stamp()
-        report = importer.Report()
-        stopped = None
-        busy = Busy(title, self._parent)
-        try:
-            report = importer.run(
-                self._organizer, folder, save_dir=save_dir, profiles=names, version_info=mobase.VersionInfo,
-                stamp=stamp, report=report, profile_choices=choices,
-            )
-        except importer.ImportStopped as exc:
-            stopped = exc
-        finally:
-            busy.close()
-        if stopped is None:
-            host = importfinish.Host(
-                game_dir=Path(game.dataDirectory().absolutePath()), library=library, save_dir=save_dir
-            )
-            try:
-                importfinish.finish(
-                    self._organizer, folder, report, host=host, ui=self._import_ui(title), stamp=stamp
-                )
-            except importer.ImportStopped as exc:
-                stopped = exc
-        problems.invalidate()
-        if stopped is not None:
-            self._show_stopped(title, stopped, report)
-            return
-        qtui.show_text(self._parent, title, report.text())
-
-    def _profile_choices(self, title: str, names: list[str]) -> dict[str, str] | None:
-        """What to do with each ticked profile that a Fluorine profile already has; None when the user cancels.
-
-        Asked before the import starts, so nothing has been done when Cancel is pressed and no
-        dialog opens under the import's busy window.
-        """
-        chosen: dict[str, str] = {}
-        backups = state.InstancePaths(self._organizer).profile_backups
-        for name in importer.existing_profiles(self._organizer, names):
-            picked = _choose(
-                self._parent, title, PROFILE_EXISTS.format(name=name, backups=backups), PROFILE_LABELS, default=0
-            )
-            if picked is None:
-                return None
-            chosen[name] = importer.PROFILE_CHOICES[picked]
-        return chosen
-
-    def _show_stopped(self, title: str, exc: importer.ImportStopped, report: importer.Report) -> None:
-        done = exc.report if exc.report is not None else report
-        if done.lines:
-            qtui.show_text(
-                self._parent, title,
-                f"The import stopped: {exc}\n\nWhat was done before it stopped:\n{done.text()}",
-            )
-        else:
-            QMessageBox.critical(self._parent, title, str(exc))
-
-    def _import_ui(self, title: str) -> importfinish.Ui:
-        """The dialogs of the second part of the import, built from this tool's message boxes."""
-        parent = self._parent
-
-        def confirm_adoption(text: str) -> str | None:
-            if not qtui.review(parent, title, text, "Continue"):
-                return None
-            picked = _choose(
-                parent, title, "Did you verify the game files in Steam before this?",
-                ["Yes, I verified them", "No, record Game/ as it is"],
-            )
-            return None if picked is None else (importfinish.VERIFIED, importfinish.UNVERIFIED)[picked]
-
-        def launch_option(text: str) -> bool:
-            return _choose(parent, title, text, ["I cleared it, check again"]) == 0
-
-        def ask_save_route(text: str) -> str | None:
-            picked = _choose(parent, title, text, SAVE_ROUTE_LABELS, default=0)
-            return None if picked is None else (importsave.ROUTE_QUESTIONS, importsave.ROUTE_ACCEPT)[picked]
-
-        def confirm_accept(text: str) -> bool:
-            return _choose(parent, title, text, [ACCEPT_LABEL]) == 0
-
-        def move_anyway(text: str) -> str | None:
-            picked = _choose(parent, title, text, MOVE_LABELS)
-            return None if picked is None else (importfinish.MOVE_AND_CHECK, importfinish.MOVE_ONLY)[picked]
-
-        def ask_launcher(text: str, options: list[str]) -> str | None:
-            picked = _choose(parent, title, text, [*options, LEAVE_LAUNCHER], default=len(options))
-            return options[picked] if picked is not None and picked < len(options) else None
-
-        return importfinish.Ui(
-            ask_answer=lambda text: self._ask_answer(text, title),
-            ask_action=lambda text, preselect: self._ask_action(text, preselect, title),
-            review=lambda heading, text, accept: qtui.review(parent, heading, text, accept),
-            confirm_adoption=confirm_adoption,
-            launch_option=launch_option,
-            busy=lambda heading: Busy(heading, parent),
-            ask_save_route=ask_save_route,
-            confirm_accept=confirm_accept,
-            move_anyway=move_anyway,
-            ask_launcher=ask_launcher,
-        )
-
-
 LIST_FILTER = "Elden Ring lists (*.erlist.json);;All files (*)"
 _NOT_FILE_SAFE = re.compile(r"[^A-Za-z0-9._ -]+")
 
@@ -1252,7 +1086,7 @@ class ImportListTool(EldenRingTool):
             busy.update("Checking the installed mods against the list")
             with archives.hash_cache(paths) as cache:
                 findings = listimport.findings_for_install(self._organizer, doc, cache)
-        reports: list[importer.Report] = []
+        reports: list[Report] = []
         dialog = qtui.FetchDialog(title, self._parent, fetcher.summary)
         run = listimport.ImportRun(
             self._organizer, doc, findings, fetcher=fetcher, version_info=mobase.VersionInfo,

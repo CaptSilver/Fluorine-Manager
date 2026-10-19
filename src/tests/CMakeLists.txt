@@ -1590,15 +1590,16 @@ add_test(NAME test_stalkeranomaly_save_fallback
 # ---------------------------------------------------------------------------
 # Elden Ring plugin: the vendored erm library's tests
 # ---------------------------------------------------------------------------
-# dcx.py loads <MO2_LIBS_DIR>/libzstd.so.1 by absolute path in the bundle, and
-# ctest has no staged bundle. Give the bundled-library case a lib/ of its own:
+# dcx.py loads <MO2_LIBS_DIR>/libzstd.so.1 by absolute path in the bundle and
+# has no other zstd, and ctest has no staged bundle. Every ZSTD case in
+# test_erm_suite loads this copy through conftest's MO2_LIBS_DIR, so give it a lib/ of its own:
 # the build container's libzstd under the name dcx.py asks for. configure_file
 # with a fixed destination, because file(COPY) would keep the versioned
 # libzstd.so.1.5.x name that find_library resolves to (file(COPY_FILE) needs
 # CMake 3.21, and this tree asks for 3.16).
 find_library(ZSTD_RUNTIME zstd)
 if(NOT ZSTD_RUNTIME)
-    message(FATAL_ERROR "libzstd not found: test_erm_suite needs a copy to check the bundled-library path")
+    message(FATAL_ERROR "libzstd not found: test_erm_suite's ZSTD cases load a copy from the bundle layout, and dcx.py has no other zstd")
 endif()
 get_filename_component(ZSTD_RUNTIME_REAL "${ZSTD_RUNTIME}" REALPATH)
 configure_file("${ZSTD_RUNTIME_REAL}"
@@ -1614,8 +1615,8 @@ add_test(NAME test_erm_suite
             ${CMAKE_CURRENT_SOURCE_DIR}/eldenring)
 # ENVIRONMENT is a list property: set everything in this one call, because a
 # second set_tests_properties for it replaces the value instead of adding to it.
-# FLUORINE_ER_TESTLIBS, not MO2_BASE_DIR: that would put every test_dcx case
-# into bundle mode. The one bundled-library case sets MO2_BASE_DIR itself.
+# FLUORINE_ER_TESTLIBS, not MO2_LIBS_DIR: the suite's conftest sets
+# MO2_LIBS_DIR from it per test, so a case can repoint or unset it.
 set_tests_properties(test_erm_suite PROPERTIES
     ENVIRONMENT "FLUORINE_OOZ_LIB=$<TARGET_FILE:ooz>;FLUORINE_ER_TESTLIBS=${CMAKE_BINARY_DIR}/eldenring-testlibs")
 add_dependencies(fluorine-tests ooz)
@@ -1680,6 +1681,10 @@ add_test(
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_kinds.py
 )
 add_test(
+    NAME test_eldenring_report
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_report.py
+)
+add_test(
     NAME test_eldenring_checker
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_checker.py
 )
@@ -1720,24 +1725,8 @@ add_test(
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_prepare.py
 )
 add_test(
-    NAME test_eldenring_importer
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importer.py
-)
-add_test(
-    NAME test_eldenring_importgame
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importgame.py
-)
-add_test(
-    NAME test_eldenring_importfinish
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importfinish.py
-)
-add_test(
     NAME test_eldenring_importsave
     COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importsave.py
-)
-add_test(
-    NAME test_eldenring_importoverrides
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_eldenring_importoverrides.py
 )
 add_test(
     NAME test_eldenring_deploy

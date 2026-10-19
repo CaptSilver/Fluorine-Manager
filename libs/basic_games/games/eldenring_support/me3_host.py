@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import atomic, state
+from . import atomic, fsprobe, state
 from .ermlib import github
 from .ermlib.errors import ErmError, IntegrityError
 
@@ -88,7 +88,7 @@ def binary_present() -> bool:
     A binary that cannot be executed is as good as absent.
     """
     binary = binary_path()
-    return _is_file(binary) and os.access(binary, os.X_OK)
+    return fsprobe.is_file(binary) and os.access(binary, os.X_OK)
 
 
 def windows_bin_dir() -> Path:
@@ -134,26 +134,11 @@ def _check(cache: dict) -> Status:
     components = [
         (windows_bin_dir() / Path(member).name, member) for member in WINDOWS_BIN_MEMBERS
     ]
-    if any(not _is_file(path) for path, _ in components):
+    if any(not fsprobe.is_file(path) for path, _ in components):
         return Status(WINDOWS_BIN_MISSING, version, shadows)
     if not all(_matches(files, path, member) for path, member in components):
         return Status(WINDOWS_BIN_MISMATCH, version, shadows)
     return Status(OK, version, shadows)
-
-
-def _is_file(path: Path) -> bool:
-    # Path.is_file() lets EACCES from an unsearchable parent escape on 3.12.
-    try:
-        return stat.S_ISREG(path.stat().st_mode)
-    except (OSError, ValueError):
-        return False
-
-
-def _is_dir(path: Path) -> bool:
-    try:
-        return stat.S_ISDIR(path.stat().st_mode)
-    except (OSError, ValueError):
-        return False
 
 
 def _section(cache: dict, name: str) -> dict:
@@ -209,7 +194,7 @@ def _run_version(binary: Path) -> str | None:
 
 def _shadow_dirs(binary: Path) -> tuple[str, ...]:
     candidates = (binary.parent / "win64", Path("/usr/lib64/me3/x86_64-windows"))
-    return tuple(str(path) for path in candidates if _is_dir(path))
+    return tuple(str(path) for path in candidates if fsprobe.is_dir(path))
 
 
 Progress = Callable[[str], None]

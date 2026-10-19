@@ -68,9 +68,9 @@ class EldenRingGame(BasicGame):
     def init(self, organizer) -> bool:
         if not super().init(organizer):
             return False
-        # A crash between the importer changing the installer settings and
+        # A crash between the list import changing the installer settings and
         # restoring them leaves a record; put them back before anything else.
-        # Written only by this plugin's importers, so no isActive guard.
+        # Written only by this plugin's list import, so no isActive guard.
         kinds.restore_interrupted(organizer)
         self._register_feature(checker.EldenRingModDataChecker())
         self._gate = gate.LaunchGate(

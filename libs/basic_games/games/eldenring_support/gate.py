@@ -16,14 +16,13 @@ from __future__ import annotations
 
 import contextlib
 import os
-import stat
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, deploy, doctor, environment, hardening, inventory, listfile, me3, me3_host, pe, prepare as preparing,
+    archives, deploy, doctor, environment, fsprobe, hardening, inventory, listfile, me3, me3_host, pe, prepare as preparing,
     problems, procs, qtui, saves, session, state,
 )
 from .ermlib.errors import ErmError
@@ -49,8 +48,6 @@ ACTIVE_LIST_MISMATCH = preparing.ACTIVE_LIST_MISMATCH
 
 ME3, VETO, UNTOUCHED = "me3", "veto", "untouched"
 
-_Veto = Veto
-
 _SAVE_TOOLS = 'Tools > Tool Plugins > Elden Ring > Save tools…'
 
 # The entry's options whose value is a path. Compared by realpath, because
@@ -72,21 +69,6 @@ class _NoBusy:
 
     def update(self, message: str) -> None:
         return None
-
-
-def _is_file(path) -> bool:
-    # Path.is_file re-raises EACCES on the bundled Python.
-    try:
-        return stat.S_ISREG(os.stat(path).st_mode)
-    except (OSError, ValueError):
-        return False
-
-
-def _is_dir(path) -> bool:
-    try:
-        return stat.S_ISDIR(os.stat(path).st_mode)
-    except (OSError, ValueError):
-        return False
 
 
 def _inside(path: str, folder: str) -> bool:
@@ -169,7 +151,7 @@ class LaunchGate:
             if mode == UNTOUCHED:
                 return True
             if mode == VETO:
-                raise _Veto(
+                raise Veto(
                     "Launch mode",
                     f"{Path(binary).name} is a Windows program inside the Elden Ring "
                     "folder. Started from Fluorine it would run in Fluorine's own Wine "
@@ -181,7 +163,7 @@ class LaunchGate:
             self._launch_me3(binary, _dir_text(cwd), args)
             self._problems_changed()
             return True
-        except _Veto as veto:
+        except Veto as veto:
             self._report_veto(veto)
             return False
         except Exception:
@@ -222,7 +204,7 @@ class LaunchGate:
         except OSError as exc:
             # The snapshot is on disk but the launch is not happening.
             self._session_stamp = None
-            raise _Veto(
+            raise Veto(
                 "Build stamp",
                 f"cannot write {paths.build_stamp}: {exc}",
                 "Nothing was launched.",
@@ -263,13 +245,13 @@ class LaunchGate:
             try:
                 found = self._verify(doc, prepared)
             except listfile.ListFormatError as exc:
-                raise _Veto("Active list", f"The profile's active list cannot be used: {exc}", fix, ACTIVE_LIST_MISMATCH) from exc
+                raise Veto("Active list", f"The profile's active list cannot be used: {exc}", fix, ACTIVE_LIST_MISMATCH) from exc
         prepared.warnings.extend(
             f"{item.subject}: {item.text}" if item.subject else item.text for item in found if not item.blocking
         )
         blocked = listfile.blocking(found)
         if blocked:
-            raise _Veto(
+            raise Veto(
                 "Active list",
                 "This setup is not the one the profile's active list describes:\n" + listfile.describe(blocked),
                 fix,
@@ -292,7 +274,7 @@ class LaunchGate:
         found = doctor.scan_game_dir(game_dir)
         if found:
             names = "\n".join(f"  {path}" for path in found)
-            raise _Veto(
+            raise Veto(
                 "Game folder",
                 "These files in Game/ load mods or replace content on their own, so a "
                 f"launch through me3 would not be the one the mod list describes:\n{names}",
@@ -351,7 +333,7 @@ class LaunchGate:
         try:
             return session.load_last_launch(paths)
         except session.LaunchStateError as exc:
-            raise _Veto(
+            raise Veto(
                 "Last launch record",
                 str(exc),
                 "This file remembers whether the last modded session changed your "
@@ -361,13 +343,11 @@ class LaunchGate:
 
     # Nothing may be running, and the last session must be settled.
     def _session_checks(self, paths: state.InstancePaths, data: dict) -> None:
-        up = self._running()
-        if up:
-            raise _Veto(
+        names = procs.running_names(self._running)
+        if names is not None:
+            raise Veto(
                 "Session check",
-                "Elden Ring or me3 is already running: "
-                + ", ".join(f"{name} (pid {pid})" for pid, name in up)
-                + ".",
+                f"Elden Ring or me3 is already running: {names}.",
                 "Wait for it to exit, then press Run again.",
                 GAME_RUNNING,
             )
@@ -378,7 +358,7 @@ class LaunchGate:
             raise self.pending_veto(session.with_moved(paths, data["pending_restore"]))
 
     @staticmethod
-    def pending_veto(pending: dict) -> _Veto:
+    def pending_veto(pending: dict) -> Veto:
         names = ", ".join(pending.get("changed") or saves.GUARDED[:1])
         reason = pending.get("reason")
         if reason == "unseen-session":
@@ -418,7 +398,7 @@ class LaunchGate:
                 f"Open {_SAVE_TOOLS} and try the restore again. If it cannot finish, the same "
                 "dialog can stop trying; the files named above stay where they are."
             )
-        return _Veto("Session check", why, fix, SAVE_RESTORE_PENDING)
+        return Veto("Session check", why, fix, SAVE_RESTORE_PENDING)
 
     # Make sure the pinned me3 is installed. Silent: it adopts a matching
     # install and downloads the pinned release when there is none.
@@ -433,7 +413,7 @@ class LaunchGate:
                 reason = str(exc) if isinstance(exc, ErmError) else f"{type(exc).__name__}: {exc}"
                 if not isinstance(exc, ErmError):
                     self._warn(f"Elden Ring launch gate: me3 install failed\n{traceback.format_exc()}")
-                raise _Veto(
+                raise Veto(
                     "me3 host",
                     reason,
                     'Run Tools > Tool Plugins > Elden Ring > Install me3… to retry by hand.',
@@ -448,7 +428,7 @@ class LaunchGate:
         try:
             paths.root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise _Veto(
+            raise Veto(
                 "me3 profile",
                 f"cannot create the working folder {paths.root}: {exc}",
                 "me3 cannot start without it.",
@@ -457,7 +437,7 @@ class LaunchGate:
         for label, path in natives:
             verdict = pe.pe_dll_ok(path)
             if not verdict:
-                raise _Veto(
+                raise Veto(
                     "me3 profile",
                     f"{label}: {path} {verdict.reason}.",
                     "me3 gives up on every mod, the save redirect included, when one "
@@ -472,13 +452,13 @@ class LaunchGate:
             )
             me3.write_profile(paths.current_me3, text)
         except (OSError, ValueError) as exc:
-            raise _Veto("me3 profile", f"cannot write {paths.current_me3}: {exc}") from exc
+            raise Veto("me3 profile", f"cannot write {paths.current_me3}: {exc}") from exc
         for path, check, what in (
-            (paths.root, _is_dir, "working folder"),
-            (paths.current_me3, _is_file, "profile"),
+            (paths.root, fsprobe.is_dir, "working folder"),
+            (paths.current_me3, fsprobe.is_file, "profile"),
         ):
             if not check(path):
-                raise _Veto("me3 profile", f"the {what} {path} is not there after writing it.")
+                raise Veto("me3 profile", f"the {what} {path} is not there after writing it.")
         self._check_entry(paths, binary, cwd, args, prepared.warnings)
 
     def _check_entry(
@@ -491,7 +471,7 @@ class LaunchGate:
         )
         installed = os.path.realpath(me3_host.binary_path())
         if os.path.realpath(binary) != installed:
-            raise _Veto(
+            raise Veto(
                 step,
                 f"The entry starts {binary}, not the me3 the plugin manages ({installed}).",
                 fix,
@@ -502,10 +482,10 @@ class LaunchGate:
         except ValueError as exc:
             # entry_args refuses a path it cannot quote, such as one with a
             # double quote in it.
-            raise _Veto(step, f"The entry cannot be checked: {exc}", fix) from exc
+            raise Veto(step, f"The entry cannot be checked: {exc}", fix) from exc
         given = me3.split_command(args)
         if not self._same_arguments(given, wanted):
-            raise _Veto(
+            raise Veto(
                 step,
                 "Its arguments are not the ones the plugin gives it. me3 takes options "
                 "that load extra code or override the save redirect, so the line is "
@@ -514,9 +494,9 @@ class LaunchGate:
                 fix,
             )
         if os.path.realpath(cwd) != os.path.realpath(paths.root):
-            raise _Veto(step, f"Its working folder is {cwd}, not {paths.root}.", fix)
+            raise Veto(step, f"Its working folder is {cwd}, not {paths.root}.", fix)
         if os.path.lexists(paths.root / "me3.toml"):
-            raise _Veto(
+            raise Veto(
                 step,
                 f"{paths.root / 'me3.toml'} exists. me3 reads a me3.toml from its working "
                 "folder and it could change what gets loaded.",
@@ -531,7 +511,7 @@ class LaunchGate:
         try:
             return qtui.instance_wrapper_options(self._organizer.basePath(), binary_real=me3_host.binary_path())
         except qtui.SettingsUnreadable as exc:
-            raise _Veto(
+            raise Veto(
                 "Settings",
                 f"{exc}, so the wrapper options of the me3 entry cannot be checked. They become "
                 "environment variables and a program started in front of me3.",
@@ -547,7 +527,7 @@ class LaunchGate:
         wrappers = self._wrapper_options()
         if wrappers:
             listed = "; ".join(f"{title}: {options}" for title, options in wrappers)
-            raise _Veto(
+            raise Veto(
                 step,
                 f"An entry for me3 carries wrapper options ({listed}). They become environment "
                 "variables and a program started in front of me3, and the gate is never shown "
@@ -557,14 +537,14 @@ class LaunchGate:
             )
         for finding in environment.scan_me3_config(environment.me3_config_files()):
             if finding.blocking and finding.key == environment.STEAM_DIR:
-                raise _Veto(
+                raise Veto(
                     step,
                     f"{finding.path} sets {finding.key}: {finding.note}.",
                     f"Remove the {finding.key} key from that file.",
                     ME3_CONFIG_STEAM_DIR,
                 )
             if finding.blocking:
-                raise _Veto(
+                raise Veto(
                     step,
                     f"{finding.path} is not a file the gate can read: {finding.note}.",
                     "Replace it with a regular file, or remove the link, so that it can be checked.",
@@ -597,7 +577,7 @@ class LaunchGate:
         try:
             folder, files = session.take_snapshot(paths, save_dir, stamp)
         except session.SnapshotError as exc:
-            raise _Veto(
+            raise Veto(
                 "Save snapshot",
                 str(exc),
                 "Nothing was launched. The game is not started without a copy of your "
@@ -625,7 +605,7 @@ class LaunchGate:
         try:
             session.save_last_launch(paths, data)
         except OSError as exc:
-            raise _Veto(
+            raise Veto(
                 "Save snapshot",
                 f"cannot write {paths.last_launch}: {exc}",
                 "Nothing was launched. Without that record a changed save could not be restored.",
@@ -635,7 +615,7 @@ class LaunchGate:
     def _library(self) -> Path | None:
         return saves.library_root(self._game.gameDirectory().absolutePath())
 
-    def _report_veto(self, veto: _Veto) -> None:
+    def _report_veto(self, veto: Veto) -> None:
         self._record_veto(veto.key, veto.step, veto.text())
         with contextlib.suppress(Exception):
             self._show_veto(TITLE, veto.text())

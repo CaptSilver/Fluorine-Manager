@@ -12,10 +12,7 @@ ZSTD: nothing has ever demonstrated the game accepting a DFLT regulation on a
 current build.
 """
 import ctypes
-import ctypes.util
-import importlib
 import os
-import platform
 import struct
 import zlib
 
@@ -47,49 +44,6 @@ class DcxError(ErmError):
     """A DCX container was malformed, or used a compression we can't read."""
 
 
-def _stdlib_zstd(mod):
-    """Python 3.14's compression.zstd."""
-    P = mod.CompressionParameter
-
-    def compress(payload, level, window_log):
-        c = mod.ZstdCompressor(options={P.compression_level: level,
-                                        P.window_log: window_log})
-        return c.compress(payload) + c.flush()
-
-    return lambda body, _size: mod.decompress(body), compress, mod.ZstdError
-
-
-def _pyzstd(mod):
-    """pyzstd — closest to the stdlib module, which it was the basis for."""
-    def compress(payload, level, window_log):
-        c = mod.ZstdCompressor({mod.CParameter.compressionLevel: level,
-                                mod.CParameter.windowLog: window_log})
-        return c.compress(payload) + c.flush()
-
-    return lambda body, _size: mod.decompress(body), compress, mod.ZstdError
-
-
-def _zstandard(mod):
-    """python-zstandard, which needs more coaxing than the other two.
-
-    Its one-shot decompress refuses a frame that doesn't declare its content
-    size, and ours deliberately don't — so it gets the size from the DCX header,
-    which knew it all along. Its one-shot compress has the mirror problem: it
-    WRITES that size into the frame header, which no shipped file does, so
-    compression goes through the chunker instead.
-    """
-    def decompress(body, size):
-        return mod.ZstdDecompressor().decompress(body, max_output_size=size)
-
-    def compress(payload, level, window_log):
-        params = mod.ZstdCompressionParameters(compression_level=level,
-                                               window_log=window_log)
-        chunker = mod.ZstdCompressor(compression_params=params).chunker()
-        return b"".join(chunker.compress(payload)) + b"".join(chunker.finish())
-
-    return decompress, compress, mod.ZstdError
-
-
 class _LibZstdError(Exception):
     """libzstd reported an error through its return code."""
 
@@ -110,35 +64,21 @@ class _ZstdBuffer(ctypes.Structure):
 BUNDLED_LIBZSTD = "libzstd.so.1"
 
 
-def _in_bundle():
-    """True under the Fluorine launcher, which exports MO2_BASE_DIR."""
-    return bool(os.environ.get("MO2_BASE_DIR"))
-
-
 def _open_libzstd():
-    """Load libzstd, from the bundle when there is one.
+    """Load the libzstd Fluorine ships, <MO2_LIBS_DIR>/libzstd.so.1.
 
-    Inside the bundle the only candidate is <MO2_LIBS_DIR>/libzstd.so.1, by
-    absolute path. A failure there is a DcxError, not an ImportError, so the
-    backend loop in _zstd() stops instead of moving on: find_library() asks
+    The path is absolute and there is no fallback. find_library() would ask
     ldconfig for the host's copy, and zstd output differs between library
     versions. Co-op partners compare the regulation.bin each machine builds,
     so one of them quietly compressing with another libzstd would show up as a
     failure to connect.
     """
-    if not _in_bundle():
-        name = ctypes.util.find_library("zstd") or "libzstd.so.1"
-        try:
-            lib = ctypes.CDLL(name)
-            lib.ZSTD_versionNumber()
-        except (OSError, AttributeError) as exc:
-            raise ImportError(f"libzstd not usable via ctypes ({exc})") from exc
-        return lib
     libs_dir = os.environ.get("MO2_LIBS_DIR")
     if not libs_dir:
         raise DcxError(
-            "MO2_BASE_DIR is set but MO2_LIBS_DIR is not, so the libzstd "
-            "shipped with Fluorine cannot be located")
+            "MO2_LIBS_DIR is not set, so the libzstd shipped with Fluorine "
+            "cannot be located; ZSTD data (regulation.bin) cannot be read or "
+            "written")
     path = os.path.join(libs_dir, BUNDLED_LIBZSTD)
     try:
         lib = ctypes.CDLL(path)
@@ -146,20 +86,17 @@ def _open_libzstd():
     except (OSError, AttributeError) as exc:
         raise DcxError(
             f"the libzstd shipped with Fluorine could not be loaded from "
-            f"{path}: {exc}") from exc
+            f"{path}: {exc}; ZSTD data (regulation.bin) cannot be read or "
+            f"written") from exc
     return lib
 
 
-def _ctypes_libzstd(_unused=None):
-    """libzstd through ctypes — no Python package required.
+def _zstd():
+    """(decompress, compress, error_type) over the bundled libzstd, via ctypes.
 
-    This is the one backend that needs nothing installed: anything that ships
-    the zstd tool ships the shared library, which on SteamOS pacman itself
-    depends on. It follows the same shape as the vendored Kraken decoder, which
-    erm has always driven through ctypes.
-
-    Output is byte-identical to the Python bindings, which matters because a
-    regulation.bin is built on each machine and co-op compares the file.
+    Resolved on use, never at import, so a missing library only blocks ZSTD
+    and not every other codec in this module. It follows the same shape as the
+    vendored Kraken decoder.
     """
     lib = _open_libzstd()
 
@@ -221,70 +158,18 @@ def _ctypes_libzstd(_unused=None):
     return decompress, compress, _LibZstdError
 
 
-# Tried in order, cheapest install first: the stdlib module (3.14+) needs
-# nothing at all, then the system libzstd through ctypes, which needs only the
-# shared library any box with the zstd tool already has — that one is what makes
-# erm work on SteamOS, where there is no pip and no Python 3.14 — and the pip
-# packages last. They all wrap libzstd: whichever ones are installed here are
-# checked against each other for byte-identical output, and the frame digest is
-# pinned outright, because co-op partners have to end up with the same
-# regulation.bin.
-_BACKENDS = (("compression.zstd", _stdlib_zstd), (None, _ctypes_libzstd),
-             ("pyzstd", _pyzstd), ("zstandard", _zstandard))
-
-
-def _backends():
-    """The backends _zstd() tries. Inside the bundle that is the bundled
-    libzstd alone: the stdlib module and the pip packages carry their own
-    libzstd, whose output may differ from the one Fluorine ships. Read from
-    the environment on each call rather than at import, so there is no state
-    to reset between a bundled run and a dev-box run."""
-    return ((None, _ctypes_libzstd),) if _in_bundle() else _BACKENDS
-
-
-def _zstd():
-    """(decompress, compress, error_type) from the first available zstd backend.
-
-    Resolved on use, never at import. `compression.zstd` arrived in Python 3.14;
-    importing it at module scope took all of erm down on an older interpreter,
-    including every command that has nothing to do with ZSTD.
-    """
-    for name, adapt in _backends():
-        try:
-            return adapt(importlib.import_module(name) if name else None)
-        except ImportError:
-            continue
-    raise DcxError(
-        f"regulation.bin is ZSTD-compressed and this machine has no zstd erm can "
-        f"reach. Python here is {platform.python_version()} (compression.zstd "
-        f"needs 3.14+), libzstd.so isn't loadable, and neither pyzstd nor "
-        f"zstandard is installed. Installing the `zstd` package is usually "
-        f"enough — erm uses its shared library directly. Nothing else in erm "
-        f"needs this; only a regulation merge is blocked.")
-
-
 def zstd_version():
     """ZSTD_versionNumber() of the libzstd a merge would compress with, or None.
 
     major * 10000 + minor * 100 + patch, so 1.5.7 is 10507. Compressed bytes
     differ between libzstd versions, which makes this one of the inputs that
     says whether a built regulation.bin is still the one co-op partners expect.
-    None when no backend loads; the merge itself reports that.
+    None when the bundled library doesn't load; the merge itself reports that.
     """
-    for name, _adapt in _backends():
-        try:
-            if name is None:
-                return int(_open_libzstd().ZSTD_versionNumber())
-            module = importlib.import_module(name)
-        except ImportError:
-            continue
-        except DcxError:
-            return None
-        info = getattr(module, "zstd_version_info", None) or getattr(module, "ZSTD_VERSION", None)
-        if info:
-            major, minor, patch = info[:3]
-            return major * 10000 + minor * 100 + patch
-    return None
+    try:
+        return int(_open_libzstd().ZSTD_versionNumber())
+    except DcxError:
+        return None
 
 
 def read(data):
@@ -301,8 +186,8 @@ def read(data):
         raise DcxError(
             f"DCX is truncated: header claims {compressed} compressed bytes, "
             f"file holds {len(body)}")
-    # ooz.decompress refuses this field on its own, but two of the four zstd
-    # backends size their output buffer from it too, and the length check after
+    # ooz.decompress refuses this field on its own, but the libzstd decoder
+    # sizes its output buffer from it too, and the length check after
     # decompression comes far too late to stop a 4 GB allocation. Gate it once,
     # here, so every method is covered rather than only Kraken.
     if uncompressed > ooz.MAX_UNCOMPRESSED_SIZE:

@@ -536,7 +536,7 @@ class FailureTests(ImportCase):
         self.game_running.return_value = [(4242, "eldenring.exe")]
         self.settle()
         self.assertEqual(self.organizer.install_calls, [])
-        self.assertIn("eldenring.exe pid 4242", self.report_text())
+        self.assertIn("eldenring.exe (pid 4242)", self.report_text())
         self.assertIsNone(state.read_profile_rules(self.organizer.profilePath())["active_list"])
         self.assertEqual(len(self.reports), 1)
 

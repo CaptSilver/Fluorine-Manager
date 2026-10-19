@@ -638,7 +638,7 @@ class RestorePendingTests(SessionCase):
         with self.assertRaises(errors.ErmError) as caught:
             session.restore_pending(self.paths, running=lambda: [(8, "me3"), (9, "eldenring.exe")])
         self.assertIn("still running", str(caught.exception))
-        self.assertIn("me3 pid 8", str(caught.exception))
+        self.assertIn("me3 (pid 8)", str(caught.exception))
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
         self.assertIn("pending_restore", self.data())
 
@@ -802,7 +802,7 @@ class KeepSessionSaveTests(SessionCase):
         with self.assertRaises(errors.ErmError) as caught:
             session.keep_session_save(self.paths, running=lambda: [(8, "me3")])
         self.assertIn("still running", str(caught.exception))
-        self.assertIn("me3 pid 8", str(caught.exception))
+        self.assertIn("me3 (pid 8)", str(caught.exception))
         self.assertTrue((self.paths.save_snapshots / STAMP).is_dir())
         self.assertIn("pending_restore", json.loads(self.paths.last_launch.read_text()))
 

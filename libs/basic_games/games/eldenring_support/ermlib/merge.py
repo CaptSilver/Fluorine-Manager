@@ -2,7 +2,7 @@
 
 me3 mounts one file per path, last writer wins, so two mods shipping the same
 archive means one of them silently isn't there. Where the conflict is resolvable
-we merge; where it isn't, conflicts.py refuses to guess.
+we merge; where it isn't, merge_engine.py refuses to guess.
 """
 from typing import NamedTuple
 
@@ -505,7 +505,7 @@ def esd_three_way(base, other, vanilla, notes=None):
     itself.
 
     `notes` is what esdmerge hands back when it couldn't carry something across
-    cleanly -- passed in by the caller (conflicts.resolve, ultimately the apply
+    cleanly -- passed in by the caller (merge_engine, ultimately the apply
     report) rather than printed here, since a library function has no business
     deciding how its own diagnostics reach a user.
 
@@ -582,14 +582,14 @@ def describe_note(note):
 STRATEGIES = {"fmg-union": fmg_union, "fmg-3way": fmg_three_way,
               "param-rows": param_rows, "tpf-union": tpf_union,
               "esd-3way": esd_three_way}
-# Strategies that need the vanilla file the mods branched from. conflicts.py
+# Strategies that need the vanilla file the mods branched from. merge_engine.py
 # resolves it from the merge declaration and refuses if it isn't declared.
 NEEDS_VANILLA = frozenset({"fmg-3way", "param-rows", "esd-3way"})
 # Strategies that report back things they couldn't carry over cleanly.
-# conflicts.py only threads a notes list through for these -- every other
+# merge_engine.py only threads a notes list through for these -- every other
 # strategy keeps the plain two/three-argument call it always had.
 NEEDS_NOTES = frozenset({"esd-3way", "param-rows"})
 # Strategies that can be told the base they were handed is the installed
-# game's own file. conflicts.py sets it on the one fold step that leads with
+# game's own file. merge_engine.py sets it on the one fold step that leads with
 # a caller-supplied base, and never infers it from the data.
 TAKES_GAME_BASE = frozenset({"param-rows"})

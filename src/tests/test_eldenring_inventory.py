@@ -477,14 +477,14 @@ class CheckTests(CheckCase):
 
     def _hash_fails(self, rel: str, make_error):
         """sha256_file as a file that vanishes or cannot be read just before it is read."""
-        real = inventory.github.sha256_file
+        real = inventory.state.github.sha256_file
 
         def failing(path, *args, **kwargs):
             if Path(path) == self.game / rel:
                 raise make_error(path)
             return real(path, *args, **kwargs)
 
-        return mock.patch.object(inventory.github, "sha256_file", failing)
+        return mock.patch.object(inventory.state.github, "sha256_file", failing)
 
     def test_a_file_that_vanishes_while_it_is_hashed_is_reported_removed(self) -> None:
         touch(self.game / "steam_api64.dll")
@@ -544,7 +544,7 @@ class CheckTests(CheckCase):
         with mock.patch.object(inventory, "HASH_CAP", 10):
             recorded = self.adopt("DLC.bdt", *self.vanilla())
         touch(self.game / "DLC.bdt")
-        with mock.patch.object(inventory.github, "sha256_file") as hashed:
+        with mock.patch.object(inventory.state.github, "sha256_file") as hashed:
             found = self.check(recorded)
         hashed.assert_not_called()
         self.assertFalse(found.blocking())
@@ -552,7 +552,7 @@ class CheckTests(CheckCase):
         self.assertIsNone(found.refreshed["DLC.bdt"].sha256)
 
     def test_only_entries_whose_stat_moved_are_read(self) -> None:
-        with mock.patch.object(inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+        with mock.patch.object(inventory.state.github, "sha256_file", wraps=inventory.state.github.sha256_file) as hashed:
             self.check()
             self.assertEqual(hashed.call_count, 0)
             touch(self.game / "steam_api64.dll")
@@ -562,7 +562,7 @@ class CheckTests(CheckCase):
     def test_the_hash_cache_keeps_a_second_pass_from_reading_again(self) -> None:
         touch(self.game / "steam_api64.dll")
         cache: dict = {}
-        with mock.patch.object(inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+        with mock.patch.object(inventory.state.github, "sha256_file", wraps=inventory.state.github.sha256_file) as hashed:
             self.check(cache=cache)
             self.check(cache=cache)
         self.assertEqual(hashed.call_count, 1)
@@ -575,7 +575,7 @@ class CheckTests(CheckCase):
         every = names + ["eldenring.exe", "movie/intro.bk2", "sd/sd.bdt", "steam_api64.dll"]
         for name in every:
             touch(self.game / name)
-        with mock.patch.object(inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+        with mock.patch.object(inventory.state.github, "sha256_file", wraps=inventory.state.github.sha256_file) as hashed:
             found = self.check(recorded)
             self.assertEqual(hashed.call_count, len(every))
             self.assertFalse(found.blocking())
@@ -803,14 +803,14 @@ class DiffCase(InventoryCase):
 
     def _hash_fails(self, rel: str, make_error):
         """sha256_file as a file that vanishes or cannot be read just before it is read."""
-        real = inventory.github.sha256_file
+        real = inventory.state.github.sha256_file
 
         def failing(path, *args, **kwargs):
             if Path(path) == self.game / rel:
                 raise make_error(path)
             return real(path, *args, **kwargs)
 
-        return mock.patch.object(inventory.github, "sha256_file", failing)
+        return mock.patch.object(inventory.state.github, "sha256_file", failing)
 
 
 class DiffTests(DiffCase):

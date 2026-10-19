@@ -48,10 +48,7 @@ class Ui:
 
 
 def adoption_refusal(game_dir: Path, manifest: deploy.Manifest, found: inventory.Candidates) -> str | None:
-    """Why nothing can be recorded as vanilla now, None when it can.
-
-    The adopt fix and the erm import ask the same question of the same Game/.
-    """
+    """Why nothing can be recorded as vanilla now, None when it can."""
     hits = [Path(hit).relative_to(game_dir).as_posix() for hit in doctor.scan_game_dir(game_dir)]
     if hits:
         return (
@@ -111,11 +108,10 @@ class Fixes:
         return paths, game_dir, saves.library_root(self._game.gameDirectory().absolutePath())
 
     def _refuse_while_running(self) -> bool:
-        up = self._running()
-        if up:
-            names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+        names = procs.running_names(self._running)
+        if names is not None:
             self._ui.inform(TITLE, f"{names} is running. Game/ is not read or edited under a running game; quit it first.")
-        return bool(up)
+        return names is not None
 
     def _live(self, paths: state.InstancePaths, game_dir: Path, library: Path | None) -> gamebuild.BuildId:
         if library is None:
@@ -210,7 +206,7 @@ class Fixes:
     def _is_code(rel: str, vanilla: inventory.Inventory) -> bool:
         """Whether `rel` could carry code, so a dialog must not pre-tick it."""
         return (
-            rel.lower().endswith(inventory.PROGRAM_EXTENSIONS)
+            rel.lower().endswith(deploy.PROGRAM_EXTENSIONS)
             or rel.lower().rsplit("/", 1)[-1] in doctor.BLOCKLIST_FILES
             or rel in vanilla.links
         )

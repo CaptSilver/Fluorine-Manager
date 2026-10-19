@@ -186,25 +186,24 @@ def test_zstd_round_trip():
 
 def test_read_refuses_an_impossible_uncompressed_size_before_reaching_a_decoder(monkeypatch):
     """The uncompressed size is a bare big-endian u32 out of an untrusted file,
-    and two of the four zstd backends size their output buffer straight from it
-    — 4 GB of it, twice over, on the ctypes backend SteamOS relies on. The size
-    check after decompression is far too late, so gate the field up front, the
-    way the Kraken branch already does."""
+    and the bundled libzstd decoder sizes its output buffer straight from it
+    — 4 GB of it. The size check after decompression is far too late, so gate
+    the field up front, the way the Kraken branch already does."""
     blob = bytearray(dcx.write_zstd(b"payload"))
     struct.pack_into(">I", blob, 0x1C, 0xFFFFFFFF)
 
-    def no_backend():
+    def no_decoder():
         raise AssertionError("a decoder was reached with an impossible size")
 
-    monkeypatch.setattr(dcx, "_zstd", no_backend)
+    monkeypatch.setattr(dcx, "_zstd", no_decoder)
     with pytest.raises(dcx.DcxError, match="refusing to allocate"):
         dcx.read(bytes(blob))
 
 
 def test_zstd_frame_omits_the_content_size_flag():
-    """Real regulation.bin frames carry FHD 0x00. The stdlib's ONE-SHOT
-    compressor sets bit 7 (frame content size present), which no shipped file
-    does; only the streaming compressor matches. Guarding it here because the
+    """Real regulation.bin frames carry FHD 0x00. libzstd's one-shot
+    ZSTD_compress() sets bit 7 (frame content size present), which no shipped
+    file does; only the streaming compressor matches. Guarding it here because the
     one-shot call is the obvious way to write this and produces a frame that
     differs structurally from every file the game has ever loaded."""
     blob = dcx.write_zstd(b"x" * 4096)
@@ -278,98 +277,40 @@ def test_zstd_window_matches_the_byte_shipped_regulations_carry():
     assert blob[dcx.HEADER_SIZE + 5] == 0x30
 
 
-def _without_zstd(monkeypatch):
-    """Simulate a machine with no zstd at all: an interpreter older than 3.14
-    and none of the pip backends installed."""
-    import importlib as _il
-    real = _il.import_module
-    blocked = {name for name, _adapt in dcx._BACKENDS if name}
-
-    def missing(name, *args, **kwargs):
-        if name in blocked:
-            raise ImportError(f"No module named {name!r}")
-        return real(name, *args, **kwargs)
-
-    monkeypatch.setattr(dcx.importlib, "import_module", missing)
-
-    # The ctypes backend has no module to hide -- it reaches the shared library
-    # directly, which is exactly why it works where nothing is installed.
-    def no_libzstd(_unused=None):
-        raise ImportError("libzstd not available")
-
-    monkeypatch.setattr(dcx, "_BACKENDS",
-                        tuple((n, no_libzstd if a is dcx._ctypes_libzstd else a)
-                              for n, a in dcx._BACKENDS))
+def _without_zstd(monkeypatch, tmp_path):
+    """A bundle whose lib/ holds no libzstd."""
+    monkeypatch.setenv("MO2_LIBS_DIR", str(tmp_path))
 
 
-def test_the_other_codecs_still_work_without_the_zstd_module(monkeypatch):
-    """compression.zstd arrived in Python 3.14 and SteamOS ships older. Importing
-    it at module scope took EVERY erm command down there — not just merging, but
-    anything that touches ermlib.formats at all. Only regulation.bin is ZSTD."""
+def test_the_other_codecs_still_work_without_libzstd(monkeypatch, tmp_path):
+    """Only regulation.bin is ZSTD, so a missing libzstd must not take the
+    DFLT path down with it."""
     payload = b"BND4" + bytes(range(256)) * 10
     dflt = dcx.write_dflt(payload)
-    _without_zstd(monkeypatch)
+    _without_zstd(monkeypatch, tmp_path)
     assert dcx.read(dflt) == payload
     assert dcx.write_dflt(payload) == dflt
 
 
-def test_writing_zstd_with_no_backend_says_what_to_install(monkeypatch):
-    _without_zstd(monkeypatch)
-    with pytest.raises(dcx.DcxError, match="pyzstd"):
+def test_writing_zstd_with_no_libzstd_names_the_missing_library(monkeypatch, tmp_path):
+    _without_zstd(monkeypatch, tmp_path)
+    with pytest.raises(dcx.DcxError, match="libzstd.so.1"):
         dcx.write_zstd(b"payload" * 100)
 
 
-def test_reading_zstd_without_the_module_fails_as_a_dcx_error(monkeypatch):
-    """An ImportError escaping here would surface as a crash rather than the
+def test_reading_zstd_without_libzstd_fails_as_a_dcx_error(monkeypatch, tmp_path):
+    """An OSError escaping here would surface as a crash rather than the
     ordinary 'this archive needs something you don't have' path callers handle."""
     blob = dcx.write_zstd(b"payload" * 100)
-    _without_zstd(monkeypatch)
-    with pytest.raises(dcx.DcxError, match="no zstd erm can reach"):
+    _without_zstd(monkeypatch, tmp_path)
+    with pytest.raises(dcx.DcxError, match="libzstd.so.1"):
         dcx.read(blob)
-
-
-def _available_backends():
-    out = []
-    for name, adapt in dcx._BACKENDS:
-        try:
-            out.append((name or "ctypes-libzstd",
-                        adapt(dcx.importlib.import_module(name) if name else None)))
-        except ImportError:
-            pass
-    return out
 
 
 # Deterministic and bigger than the 64 KiB window, so window_log actually shows
 # up in the frame rather than being elided.
 _PINNED_PAYLOAD = bytes((i * 7919 + (i >> 3)) & 0xFF for i in range(300000))
 _PINNED_FRAME_SHA256 = "2d587b5079b7baaf1353de00d78a38c0b86f4799a0104db1be1bce234b54f5c4"
-
-
-def test_the_stdlib_backend_is_preferred_when_present(monkeypatch):
-    """Order matters for reproducibility, not correctness: whichever backend is
-    first has to be the same one on every machine that has a choice."""
-    assert dcx._BACKENDS[0][0] == "compression.zstd"
-
-
-def test_every_installed_backend_agrees_byte_for_byte():
-    """Co-op partners must end up with the same regulation.bin, and it is built
-    on each machine rather than distributed. Two backends disagreeing here would
-    mean two players generating different files from identical inputs."""
-    backends = _available_backends()
-    if len(backends) < 2:
-        pytest.skip(f"only one zstd backend installed: {[n for n, _ in backends]}")
-    frames = {}
-    for name, (_decompress, compress, _err) in backends:
-        frames[name] = compress(_PINNED_PAYLOAD, dcx.ZSTD_LEVEL, dcx.ZSTD_WINDOW_LOG)
-    assert len(set(frames.values())) == 1, {n: len(f) for n, f in frames.items()}
-
-
-def test_every_installed_backend_reads_what_the_others_write():
-    for name, (decompress, compress, _err) in _available_backends():
-        frame = compress(_PINNED_PAYLOAD, dcx.ZSTD_LEVEL, dcx.ZSTD_WINDOW_LOG)
-        for other, (other_decompress, _c, _e) in _available_backends():
-            assert other_decompress(frame, len(_PINNED_PAYLOAD)) == _PINNED_PAYLOAD, (
-                f"{other} could not read {name}'s frame")
 
 
 def test_the_compressed_frame_matches_the_pinned_digest():
@@ -410,10 +351,9 @@ def bundled_libs():
 
 @pytest.fixture
 def launcher_env(monkeypatch):
-    """Set the variables the packaged launcher exports; MO2_LIBS_DIR is left
-    unset when `libs` is None."""
+    """Point MO2_LIBS_DIR, which the packaged launcher exports, at `libs`;
+    it is left unset when `libs` is None."""
     def set_env(libs):
-        monkeypatch.setenv("MO2_BASE_DIR", "/opt/fluorine")
         if libs is None:
             monkeypatch.delenv("MO2_LIBS_DIR", raising=False)
         else:
@@ -422,9 +362,8 @@ def launcher_env(monkeypatch):
 
 
 def test_the_bundled_libzstd_is_the_one_loaded(bundled_libs, launcher_env):
-    """Not vacuous: ctest sets no MO2_BASE_DIR, so this case enters bundle mode
-    itself, then checks which file the dynamic loader actually mapped. The
-    CDLL object only remembers the string it was given."""
+    """Checks which file the dynamic loader actually mapped. The CDLL object
+    only remembers the string it was given."""
     launcher_env(bundled_libs)
     dcx._zstd()
     expected = os.path.realpath(os.path.join(bundled_libs, dcx.BUNDLED_LIBZSTD))
@@ -440,10 +379,10 @@ def test_the_bundled_libzstd_writes_the_pinned_frame(bundled_libs, launcher_env)
     assert dcx.read(dcx.write_zstd(_PINNED_PAYLOAD)) == _PINNED_PAYLOAD
 
 
-def test_the_bundle_never_falls_back_to_another_libzstd(tmp_path, launcher_env):
+def test_a_lib_dir_without_libzstd_stops_the_merge(tmp_path, launcher_env):
     """A lib/ without libzstd.so.1 must stop the merge. Quietly using the
-    host's copy, the stdlib module or a pip package would build a regulation
-    that may differ from the one the other players build."""
+    host's copy or a Python package would build a regulation that may differ
+    from the one the other players build."""
     launcher_env(tmp_path)
     with pytest.raises(dcx.DcxError, match="libzstd.so.1"):
         dcx.write_zstd(b"payload" * 100)
@@ -451,18 +390,10 @@ def test_the_bundle_never_falls_back_to_another_libzstd(tmp_path, launcher_env):
     assert dcx.read(blob) == b"payload"  # the other codecs do not need it
 
 
-def test_the_bundle_needs_to_know_where_its_libraries_are(launcher_env):
+def test_the_launcher_must_say_where_its_libraries_are(launcher_env):
     launcher_env(None)
     with pytest.raises(dcx.DcxError, match="MO2_LIBS_DIR"):
         dcx.write_zstd(b"payload" * 100)
-
-
-def test_an_empty_launcher_variable_is_not_a_bundle(monkeypatch):
-    """The dev-box backend order (stdlib module first) applies unless the
-    launcher really exported MO2_BASE_DIR."""
-    monkeypatch.setenv("MO2_BASE_DIR", "")
-    monkeypatch.delenv("MO2_LIBS_DIR", raising=False)
-    assert dcx._backends() is dcx._BACKENDS
 
 
 def test_zstd_round_trips_an_empty_payload():
@@ -484,12 +415,8 @@ def test_read_does_not_inflate_a_dflt_body_past_the_claimed_size():
     assert peak < 1024 * 1024, peak
 
 
-def test_the_bundle_uses_only_the_bundled_libzstd(tmp_path, launcher_env):
-    launcher_env(tmp_path)
-    assert dcx._backends() == ((None, dcx._ctypes_libzstd),)
-
-
-def test_zstd_version_is_the_number_of_the_libzstd_in_use(monkeypatch):
+def test_zstd_version_is_the_number_of_the_libzstd_in_use():
+    # Range check only; the autouse conftest fixture points dcx at the bundled copy.
     version = dcx.zstd_version()
     assert isinstance(version, int)
     assert 10400 <= version < 20000
@@ -502,14 +429,6 @@ def test_the_bundled_libzstd_reports_its_own_version(bundled_libs, launcher_env)
     assert dcx.zstd_version() == lib.ZSTD_versionNumber()
 
 
-def test_a_bundle_without_its_libzstd_has_no_version_to_report(tmp_path, launcher_env):
+def test_a_lib_dir_without_libzstd_has_no_version_to_report(tmp_path, launcher_env):
     launcher_env(tmp_path)
     assert dcx.zstd_version() is None
-
-
-def test_a_backend_that_names_its_libzstd_version_as_a_tuple_is_converted(monkeypatch):
-    fake = type("Fake", (), {"zstd_version_info": (1, 5, 7)})
-    monkeypatch.delenv("MO2_BASE_DIR", raising=False)
-    monkeypatch.setattr(dcx, "_BACKENDS", (("fakezstd", None),))
-    monkeypatch.setattr(dcx, "importlib", type("Importer", (), {"import_module": staticmethod(lambda name: fake)}))
-    assert dcx.zstd_version() == 10507

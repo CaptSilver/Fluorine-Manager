@@ -10,10 +10,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple, Protocol
 
+from . import atomic
 from .ermlib import me3pkg
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
@@ -270,13 +270,6 @@ def deploy_config_candidates(mod_dir, native_dll) -> list[str]:
 
 # -- re-rooting an installed folder -------------------------------------------
 
-def _remove(path: Path) -> None:
-    if os.path.islink(path) or os.path.isfile(path):
-        path.unlink()
-    else:
-        shutil.rmtree(path)
-
-
 def _move_children(source: Path, destination: Path) -> None:
     """Move what `source` holds into `destination`, then remove `source`.
 
@@ -287,10 +280,10 @@ def _move_children(source: Path, destination: Path) -> None:
     for child in sorted(source.iterdir()):
         target = destination / child.name
         if child.name == META_INI:
-            _remove(child)
+            atomic.remove(child)
             continue
         if os.path.lexists(target):
-            _remove(target)
+            atomic.remove(target)
         os.replace(child, target)
     source.rmdir()
 
@@ -317,11 +310,11 @@ def reroot(mod_dir, subdir) -> bool:
         return False
     temp = mod_dir / REROOT_TEMP
     if os.path.lexists(temp):
-        _remove(temp)
+        atomic.remove(temp)
     os.rename(source, temp)
     for entry in sorted(mod_dir.iterdir()):
         if entry.name not in (META_INI, REROOT_TEMP):
-            _remove(entry)
+            atomic.remove(entry)
     _move_children(temp, mod_dir)
     return True
 
@@ -352,7 +345,7 @@ def strip_wrapper(mod_dir, keep=(), force=False) -> bool:
         return False
     temp = mod_dir / UNWRAP_TEMP
     if os.path.lexists(temp):
-        _remove(temp)
+        atomic.remove(temp)
     os.rename(wrapper, temp)
     _move_children(temp, mod_dir)
     return True
@@ -455,7 +448,7 @@ def record_on_install(mod) -> bool:
     """Record what the classifier makes of a freshly installed mod; first one wins.
 
     onModInstalled fires late (after installMod has returned, during the next
-    archive's extraction or after an import loop), so an importer that already
+    archive's extraction or after an import loop), so an import that already
     wrote a kind must not be overwritten.
     """
     if recorded_kind(mod) is not None:
@@ -476,7 +469,7 @@ def _refuse_generated(mod) -> None:
 
 
 def set_kind(mod, kind: str, native_dll: str | None = None, deploy_config=None) -> None:
-    """Record a kind chosen by a person or an importer, checking what it implies.
+    """Record a kind chosen by a person or a list import, checking what it implies.
 
     A native needs a DLL that passes native_dll_ok and, if it lists config
     files, a list that passes deploy_config_ok. Nothing is written when a check
@@ -509,7 +502,7 @@ def set_kind(mod, kind: str, native_dll: str | None = None, deploy_config=None) 
 
 # -- installing without a dialog ----------------------------------------------
 #
-# An importer runs installMod synchronously and must never stop on a dialog.
+# The list import runs installMod synchronously and must never stop on a dialog.
 # The bundled Python cannot open a .7z or .rar, so it lets Fluorine extract the
 # whole archive through the Quick installer and judges the result on disk.
 
@@ -549,7 +542,7 @@ def install_context(organizer):
     """Around one installMod call: Quick installer silent, FOMOD off, import mode.
 
     The scope is one install, never a whole run, so a user who starts an install
-    by hand between two of the importer's gets the normal installers. The prior
+    by hand between two of the list import's gets the normal installers. The prior
     state is saved under a persistent key first, because all of it is written to
     ModOrganizer.ini; EldenRingGame.init puts it back after a crash.
 
@@ -573,7 +566,7 @@ def install_context(organizer):
 
 
 def restore_interrupted(organizer) -> bool:
-    """Put the installer settings back after an import that died mid-install."""
+    """Put the installer settings back after a list import that died mid-install."""
     raw = organizer.persistent(PLUGIN, SAVED_KEY)
     if not raw:
         return False

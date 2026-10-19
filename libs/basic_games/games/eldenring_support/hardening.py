@@ -15,16 +15,16 @@ from __future__ import annotations
 import fcntl
 import logging
 import os
+import shutil
 import struct
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from . import fsprobe, procs, quarantine, session
 from . import state as instance_state
-from .ermlib import github
-from .ermlib import harden as ermharden
-from .ermlib.errors import ErmError
+from .ermlib.errors import ErmError, PathError
 
 log = logging.getLogger(__name__)
 
@@ -72,8 +72,85 @@ def is_immutable(path) -> bool:
         os.close(fd)
 
 
-def _sha(path: Path, cache: dict | None) -> str:
-    return github.sha256_file(path) if cache is None else instance_state.cached_sha256(cache, path)
+def harden_swap(game_dir):
+    """Back up the real launcher once and swap in a copy of eldenring.exe. Returns the launcher's path.
+
+    No privilege needed; the lock is set_immutable's job. Safe to repeat.
+    """
+    game_dir = Path(game_dir)
+    launcher = game_dir / LAUNCHER
+    exe = game_dir / GAME_EXE
+    backup = game_dir / BACKUP
+    if not exe.exists():
+        raise PathError(f"eldenring.exe not found in {game_dir} — can't harden")
+    # Only back up when there is no backup yet. With one, the launcher is
+    # already the eldenring.exe copy, and backing that up would overwrite the
+    # real launcher, the only copy of it. This is the bug that made community
+    # exe-swap scripts unsafe.
+    try:
+        if not backup.exists():
+            if not launcher.exists():
+                raise PathError(f"start_protected_game.exe not found in {game_dir} — nothing to swap")
+            shutil.copy2(launcher, backup)
+        if launcher.exists():
+            launcher.unlink()
+        shutil.copy2(exe, launcher)
+    except OSError as exc:
+        raise PathError(f"failed to swap start_protected_game.exe: {exc}") from exc
+    return launcher
+
+
+def unharden_restore(game_dir):
+    """Put the real launcher back from the backup, removing the swap and the backup. No privilege needed."""
+    game_dir = Path(game_dir)
+    launcher = game_dir / LAUNCHER
+    backup = game_dir / BACKUP
+    if not backup.exists():
+        raise PathError(f"not hardened (no backup at {backup}) — nothing to restore")
+    try:
+        if launcher.exists():
+            launcher.unlink()
+        shutil.move(str(backup), str(launcher))
+    except OSError as exc:
+        raise PathError(f"failed to restore start_protected_game.exe: {exc}") from exc
+
+
+def set_immutable(path, on):
+    """Set or clear the immutable flag with pkexec chattr. Raises ErmError on failure.
+
+    The password prompt comes from the polkit agent, so nothing is piped to
+    pkexec. Tests replace this; none may reach a real pkexec.
+
+    chattr is resolved to an absolute path first: pkexec exits 127 both when
+    it cannot find the program and when authorization fails, so a missing
+    chattr would otherwise be reported as an authorization problem.
+    """
+    flag = "+i" if on else "-i"
+    chattr = shutil.which("chattr")
+    if chattr is None:
+        raise ErmError(
+            "chattr not found — it is the filesystem attribute tool, "
+            "packaged as e2fsprogs"
+        )
+    try:
+        result = subprocess.run(["pkexec", chattr, flag, str(path)])
+    except FileNotFoundError as exc:
+        raise ErmError(f"pkexec not available (is polkit installed?): {exc}") from exc
+    if result.returncode == 126:
+        raise ErmError(
+            "pkexec authentication dialog was dismissed (rc 126) — "
+            "approve the prompt to change the immutable attribute"
+        )
+    if result.returncode == 127:
+        raise ErmError(
+            "pkexec not authorized (rc 127) — no polkit agent reachable, "
+            "authorization was refused, or the program could not be run"
+        )
+    if result.returncode != 0:
+        raise ErmError(
+            f"chattr {flag} failed (rc {result.returncode}) — the filesystem may "
+            "not support the immutable attribute"
+        )
 
 
 def state(game_dir, cache: dict | None = None) -> str:
@@ -100,10 +177,10 @@ def state(game_dir, cache: dict | None = None) -> str:
     if launcher_kind != fsprobe.FILE or backup_kind != fsprobe.FILE:
         return STALE
     try:
-        current = _sha(launcher, cache)
-        if fsprobe.kind(exe) == fsprobe.FILE and current == _sha(exe, cache):
+        current = instance_state.file_sha256(launcher, cache)
+        if fsprobe.kind(exe) == fsprobe.FILE and current == instance_state.file_sha256(exe, cache):
             return HARDENED if is_immutable(launcher) else SWAPPED_UNLOCKED
-        if current == _sha(backup, cache):
+        if current == instance_state.file_sha256(backup, cache):
             return RESTORED
     except OSError as exc:
         # Unreadable files cannot be shown to be hardened, so they read as stale
@@ -272,9 +349,8 @@ _NOT_LOCKED = (
 
 def _refuse_while_running(running: Callable[[], list] | None) -> None:
     # Looked up at call time, so a test (or a caller) that patches procs.game_running is heard.
-    up = (running or procs.game_running)()
-    if up:
-        names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+    names = procs.running_names(running)
+    if names is not None:
         raise HardenError(
             f"{names} is running. The launcher is not swapped under a running game; quit it and try again."
         )
@@ -283,7 +359,7 @@ def _refuse_while_running(running: Callable[[], list] | None) -> None:
 def _lock(game_dir: Path, lines: list[str]) -> None:
     """Set the flag. A refused prompt is reported and leaves the swap in place."""
     try:
-        ermharden.set_immutable(game_dir / LAUNCHER, True)
+        set_immutable(game_dir / LAUNCHER, True)
     except ErmError as exc:
         lines += [f"The launcher is swapped but not locked: {exc}", _NOT_LOCKED]
     else:
@@ -293,7 +369,7 @@ def _lock(game_dir: Path, lines: list[str]) -> None:
 def _unlock(game_dir: Path, lines: list[str]) -> None:
     """Clear the flag when it is set. A failure raises with nothing changed yet."""
     if is_immutable(game_dir / LAUNCHER):
-        ermharden.set_immutable(game_dir / LAUNCHER, False)
+        set_immutable(game_dir / LAUNCHER, False)
         lines.append("Unlocked start_protected_game.exe.")
 
 
@@ -338,7 +414,7 @@ def harden(game_dir, paths, *, running: Callable[[], list] | None = None, cache:
             f"The launcher is already swapped ({current}): this tool's Re-harden puts it right "
             "without touching the backup of the real launcher."
         )
-    ermharden.harden_swap(game_dir)
+    harden_swap(game_dir)
     lines = [
         "Backed up start_protected_game.exe as start_protected_game.exe.erm-backup and "
         "replaced it with a copy of eldenring.exe."
@@ -370,7 +446,7 @@ def reharden(
     _unlock(game_dir, lines)
     if current == STALE:
         _keep_launcher(game_dir, paths, stamp, lines)
-    ermharden.harden_swap(game_dir)
+    harden_swap(game_dir)
     lines.append("Copied eldenring.exe over start_protected_game.exe. The backup was not touched.")
     _lock(game_dir, lines)
     return Outcome(state(game_dir, cache), lines)
@@ -398,6 +474,6 @@ def unharden(
     _unlock(game_dir, lines)
     if current == STALE:
         _keep_launcher(game_dir, paths, stamp, lines)
-    ermharden.unharden_restore(game_dir)
+    unharden_restore(game_dir)
     lines.append("Restored the real start_protected_game.exe from the backup.")
     return Outcome(state(game_dir, cache), lines)

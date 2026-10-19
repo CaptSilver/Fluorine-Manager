@@ -2,7 +2,7 @@ import hashlib
 import io
 
 import pytest
-from ermlib.github import pick_asset, download_verified, sha256_file, release_by_tag
+from ermlib.github import pick_asset, sha256_file, release_by_tag
 from ermlib.errors import IntegrityError
 
 
@@ -71,22 +71,32 @@ def test_pick_asset_hint_missing_falls_back():
     assert a["name"] == "Seamless.zip"
 
 
-def test_download_verified_fails_closed(tmp_path, monkeypatch):
+def test_download_with_wrong_hash_fails_closed(tmp_path, monkeypatch):
     import ermlib.github as gh
     monkeypatch.setattr(gh, "_urlopen", _streaming(b"payload"))
     dest = tmp_path / "mod.zip"
     with pytest.raises(IntegrityError):
-        download_verified("http://x/mod.zip", dest, sha256="deadbeef")
+        gh.download_stream("http://x/mod.zip", dest, sha256="deadbeef")
     assert not dest.exists()          # partial file removed
 
 
-def test_download_verified_ok(tmp_path, monkeypatch):
+def test_download_with_an_empty_pin_is_a_mismatch_not_a_skipped_check(tmp_path, monkeypatch):
+    import ermlib.github as gh
+    monkeypatch.setattr(gh, "_urlopen", _streaming(b"payload"))
+    dest = tmp_path / "mod.zip"
+    with pytest.raises(IntegrityError):
+        gh.download_stream("http://x/mod.zip", dest, sha256="")
+    assert not dest.exists()
+    assert not (tmp_path / "mod.zip.part").exists()
+
+
+def test_download_with_matching_hash_lands(tmp_path, monkeypatch):
     import ermlib.github as gh
     payload = b"payload"
     good = hashlib.sha256(payload).hexdigest()
     monkeypatch.setattr(gh, "_urlopen", _streaming(payload))
     dest = tmp_path / "mod.zip"
-    download_verified("http://x/mod.zip", dest, sha256=good)
+    gh.download_stream("http://x/mod.zip", dest, sha256=good)
     assert dest.read_bytes() == payload
     assert sha256_file(dest) == good
 
@@ -134,24 +144,13 @@ def test_download_streams_instead_of_buffering_the_whole_archive(tmp_path, monke
     assert seen[0].biggest_read <= 1 << 20
 
 
-def test_download_verified_also_streams(tmp_path, monkeypatch):
-    import ermlib.github as gh
-    payload = b"payload"
-    monkeypatch.setattr(gh, "_urlopen", _streaming(payload))
-    dest = tmp_path / "mod.zip"
-
-    download_verified("http://x/mod.zip", dest, sha256=hashlib.sha256(payload).hexdigest())
-
-    assert dest.read_bytes() == payload
-
-
 def test_a_failed_download_leaves_no_partial_file(tmp_path, monkeypatch):
     import ermlib.github as gh
     monkeypatch.setattr(gh, "_urlopen", _streaming(b"payload"))
     dest = tmp_path / "mod.tar.gz"
 
     with pytest.raises(IntegrityError):
-        download_verified("http://x/mod.tar.gz", dest, sha256="deadbeef")
+        gh.download_stream("http://x/mod.tar.gz", dest, sha256="deadbeef")
 
     # Nothing half-written anywhere: not at dest, and not under whatever
     # temporary name the streaming write used.

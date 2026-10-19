@@ -6,6 +6,7 @@ import contextlib
 import errno
 import hashlib
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -55,6 +56,25 @@ def fsync_dir(folder: Path | str) -> None:
 
 class MoveError(OSError):
     """A move across filesystems whose copy did not read back as the source."""
+
+
+def free_name(target: Path | str) -> Path:
+    """`target`, or `target.1`, `target.2`, ... beside it: the first name nothing is at, links included."""
+    target, number = Path(target), 0
+    taken = target
+    while os.path.lexists(taken):
+        number += 1
+        taken = target.with_name(f"{target.name}.{number}")
+    return taken
+
+
+def remove(path: Path | str) -> None:
+    """Delete a file, a link or a folder tree; nothing there is fine."""
+    path = Path(path)
+    if os.path.islink(path) or os.path.isfile(path):
+        path.unlink()
+    elif os.path.lexists(path):
+        shutil.rmtree(path)
 
 
 def move_durably(source: Path | str, destination: Path | str) -> None:

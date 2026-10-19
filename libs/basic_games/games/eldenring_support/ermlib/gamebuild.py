@@ -120,9 +120,7 @@ def read_regulation_version(blob):
 
 
 # Decrypting the ~1.9 MB regulation in pure Python costs about five seconds,
-# and `erm status` and `erm doctor` both want its build stamp on every run.
-# Lives under tools/, already gitignored runtime state.
-CACHE_PATH = Path("tools/build-stamps.json")
+# so the build stamp is memoised in a file the caller names.
 
 
 def _read_stamp_cache(path):
@@ -145,7 +143,7 @@ def _write_stamp_cache(path, cache):
         pass
 
 
-def cached_regulation_version(blob, cache_path=None):
+def cached_regulation_version(blob, cache_path):
     """read_regulation_version, memoised on the sha256 of the encrypted bytes.
 
     Hashing costs about a millisecond and changes the moment any byte of the
@@ -154,7 +152,7 @@ def cached_regulation_version(blob, cache_path=None):
     A cache that can't be read or written makes a run slow, never wrong.
     """
     key = hashlib.sha256(blob).hexdigest()
-    path = Path(cache_path) if cache_path is not None else CACHE_PATH
+    path = Path(cache_path)
     cache = _read_stamp_cache(path)
     hit = cache.get(key)
     if isinstance(hit, str):
@@ -178,12 +176,6 @@ class BuildId(NamedTuple):
     regulation_sha: str
 
 
-class Change(NamedTuple):
-    field: str
-    was: str
-    now: str
-
-
 # What the difference between two BuildIds means.
 UNCHANGED = "unchanged"     # nothing moved
 PATCHED = "patched"         # a real game patch: exe/buildid AND regulation
@@ -194,13 +186,12 @@ _INSTALL_FIELDS = ("exe", "steam_buildid")
 _DATA_FIELDS = ("regulation", "regulation_sha")
 
 
-def identify(game_dir, library_root, cache_path=None):
+def identify(game_dir, library_root, cache_path):
     """The build currently installed at `game_dir`.
 
     `library_root` is the Steam library holding the game (the folder with
     `steamapps/` in it); its app manifest supplies the Steam build id.
-    `cache_path` is where the regulation build stamp is memoised; None uses
-    CACHE_PATH.
+    `cache_path` is where the regulation build stamp is memoised.
     """
     game_dir = Path(game_dir)
     reg_path = game_dir / "regulation.bin"
@@ -230,19 +221,6 @@ def identify(game_dir, library_root, cache_path=None):
         steam_buildid=buildid,
         regulation_sha=hashlib.sha256(blob).hexdigest(),
     )
-
-
-def drift(stamped, live):
-    """Which identity fields moved between `stamped` and `live`.
-
-    An unstamped stack yields no drift: "unknown" is not "changed", and
-    reporting five phantom changes on a first run would be noise.
-    """
-    if stamped is None:
-        return ()
-    return tuple(Change(f, getattr(stamped, f), getattr(live, f))
-                 for f in BuildId._fields
-                 if getattr(stamped, f) != getattr(live, f))
 
 
 def classify(stamped, live):

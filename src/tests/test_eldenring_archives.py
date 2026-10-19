@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import configparser
 import hashlib
 import shutil
 import tempfile
@@ -85,55 +84,13 @@ class SidecarTests(ArchivesCase):
         archive = self.write("[General]\nmodID=1\nversion=100%\n")
         self.assertEqual(archives.meta_sidecar(archive)["version"], "100%")
 
-    def test_a_written_sidecar_reads_back_and_carries_the_keys_downloads_use(self) -> None:
-        archive = self.downloads / "w.zip"
-        archive.write_bytes(b"zip")
-        archives.write_sidecar(
-            archive, game_name="eldenring", mod_id=428, file_id=None, version="v0.11.4",
-            mod_name="item-enemy-randomizer", repository="Nexus",
-        )
-        self.assertEqual(archives.meta_sidecar(archive), {"mod_id": 428, "file_id": None, "version": "v0.11.4"})
-        parser = configparser.RawConfigParser()
-        parser.optionxform = str
-        parser.read(str(archive) + ".meta")
-        general = dict(parser["General"])
-        self.assertEqual(general["installed"], "false")
-        self.assertEqual(general["gameName"], "eldenring")
-        self.assertEqual(general["repository"], "Nexus")
-        self.assertNotIn("fileID", general)
-        self.assertNotIn("category", general)
-
-    def test_values_QSettings_would_split_or_unescape_are_written_quoted(self) -> None:
-        archive = self.downloads / "q.zip"
-        archive.write_bytes(b"zip")
-        archives.write_sidecar(
-            archive, game_name="eldenring", mod_id=1, file_id=None, version='1.2, b;"x"\\y',
-            mod_name='Item, Enemy; "Rand" \\ x\nkey=1', repository="Nexus",
-        )
-        lines = Path(str(archive) + ".meta").read_text(encoding="utf-8").split("\n")
-        self.assertIn('modName="Item, Enemy; \\"Rand\\" \\\\ x\\nkey=1"', lines)
-        self.assertIn('version="1.2, b;\\"x\\"\\\\y"', lines)
-        self.assertIn('newestVersion="1.2, b;\\"x\\"\\\\y"', lines)
-        self.assertIn("repository=Nexus", lines)
+    def test_a_quoted_version_is_unescaped(self) -> None:
+        archive = self.write('[General]\nmodID=1\nversion="1.2, b;\\"x\\"\\\\y"\n')
         self.assertEqual(archives.meta_sidecar(archive)["version"], '1.2, b;"x"\\y')
 
-    def test_a_leading_at_sign_is_doubled_so_it_is_not_read_as_a_variant(self) -> None:
-        archive = self.downloads / "a.zip"
-        archive.write_bytes(b"zip")
-        archives.write_sidecar(
-            archive, game_name="eldenring", mod_id=1, file_id=None, version="@1.0", mod_name="@Mod", repository="Nexus"
-        )
-        lines = Path(str(archive) + ".meta").read_text(encoding="utf-8").split("\n")
-        self.assertIn("modName=@@Mod", lines)
+    def test_a_doubled_leading_at_sign_is_read_as_one(self) -> None:
+        archive = self.write("[General]\nmodID=1\nversion=@@1.0\n")
         self.assertEqual(archives.meta_sidecar(archive)["version"], "@1.0")
-
-    def test_a_written_sidecar_carries_a_file_id_when_there_is_one(self) -> None:
-        archive = self.downloads / "w.zip"
-        archive.write_bytes(b"zip")
-        archives.write_sidecar(
-            archive, game_name="eldenring", mod_id=1928, file_id=34558, version="26.2", mod_name="m", repository="Nexus"
-        )
-        self.assertEqual(archives.meta_sidecar(archive)["file_id"], 34558)
 
 
 class ClearCategoryTests(ArchivesCase):

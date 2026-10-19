@@ -38,11 +38,11 @@ class HardeningCase(unittest.TestCase):
         # flag, and anything that slips past it fails loudly.
         for patcher in (
             mock.patch.object(hardening, "is_immutable", side_effect=lambda path: self.locked),
-            mock.patch.object(hardening.ermharden, "set_immutable", side_effect=self.fake_lock),
-            mock.patch.object(hardening.ermharden.subprocess, "run", side_effect=AssertionError("real pkexec")),
-            mock.patch.object(hardening.ermharden, "harden_swap", side_effect=self.spy(hardening.ermharden.harden_swap, "swap")),
+            mock.patch.object(hardening, "set_immutable", side_effect=self.fake_lock),
+            mock.patch.object(hardening.subprocess, "run", side_effect=AssertionError("real pkexec")),
+            mock.patch.object(hardening, "harden_swap", side_effect=self.spy(hardening.harden_swap, "swap")),
             mock.patch.object(
-                hardening.ermharden, "unharden_restore", side_effect=self.spy(hardening.ermharden.unharden_restore, "restore")
+                hardening, "unharden_restore", side_effect=self.spy(hardening.unharden_restore, "restore")
             ),
         ):
             patcher.start()
@@ -131,7 +131,7 @@ class StateTests(HardeningCase):
 
     def test_an_unreadable_executable_is_stale_not_an_exception(self) -> None:
         self.harden_by_hand()
-        with mock.patch.object(hardening.github, "sha256_file", side_effect=PermissionError("denied")):
+        with mock.patch.object(hardening.instance_state.github, "sha256_file", side_effect=PermissionError("denied")):
             with self.assertLogs(level="WARNING") as logged:
                 self.assertEqual(hardening.state(self.game), hardening.STALE)
         text = "\n".join(logged.output)
@@ -141,7 +141,7 @@ class StateTests(HardeningCase):
     def test_the_hashes_come_from_the_cache_and_are_not_taken_again(self) -> None:
         self.harden_by_hand()
         cache: dict = {}
-        with mock.patch.object(hardening.github, "sha256_file", wraps=hardening.github.sha256_file) as spy:
+        with mock.patch.object(hardening.instance_state.github, "sha256_file", wraps=hardening.instance_state.github.sha256_file) as spy:
             self.assertEqual(hardening.state(self.game, cache), hardening.HARDENED)
             first = spy.call_count
             self.assertEqual(hardening.state(self.game, cache), hardening.HARDENED)
@@ -149,7 +149,7 @@ class StateTests(HardeningCase):
         self.assertEqual(spy.call_count, first)
 
     def test_a_vanilla_launcher_is_not_hashed_at_all(self) -> None:
-        with mock.patch.object(hardening.github, "sha256_file", side_effect=AssertionError("hashed")):
+        with mock.patch.object(hardening.instance_state.github, "sha256_file", side_effect=AssertionError("hashed")):
             self.assertEqual(hardening.state(self.game), hardening.VANILLA)
 
 
@@ -483,6 +483,125 @@ class RunningGameTests(HardeningCase):
         with mock.patch.object(hardening.procs, "game_running", return_value=[(7, "me3")]):
             with self.assertRaises(hardening.HardenError):
                 hardening.harden(self.game, self.paths)
+
+
+class SwapTests(unittest.TestCase):
+    """The file swap itself, without the lock or the state checks around it."""
+
+    def setUp(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.game = tmp / "Game"
+        self.game.mkdir()
+        (self.game / "start_protected_game.exe").write_bytes(EAC)
+        (self.game / "eldenring.exe").write_bytes(GAME)
+        self.launcher = self.game / "start_protected_game.exe"
+        self.backup = self.game / "start_protected_game.exe.erm-backup"
+
+    def test_the_backup_name_is_the_one_erm_wrote(self) -> None:
+        self.assertEqual(hardening.BACKUP, "start_protected_game.exe.erm-backup")
+
+    def test_the_launcher_becomes_a_copy_of_the_game_and_the_real_one_is_backed_up(self) -> None:
+        hardening.harden_swap(self.game)
+        self.assertEqual(self.launcher.read_bytes(), GAME)
+        self.assertEqual(self.backup.read_bytes(), EAC)
+
+    def test_a_second_swap_does_not_overwrite_the_backup_of_the_real_launcher(self) -> None:
+        hardening.harden_swap(self.game)
+        hardening.harden_swap(self.game)
+        self.assertEqual(self.backup.read_bytes(), EAC)
+
+    def test_a_missing_game_exe_is_a_path_error(self) -> None:
+        (self.game / "eldenring.exe").unlink()
+        with self.assertRaises(errors.PathError):
+            hardening.harden_swap(self.game)
+
+    def test_a_missing_launcher_without_a_backup_is_a_path_error(self) -> None:
+        self.launcher.unlink()
+        with self.assertRaises(errors.PathError):
+            hardening.harden_swap(self.game)
+
+    def test_a_failed_copy_is_a_path_error(self) -> None:
+        with mock.patch.object(hardening.shutil, "copy2", side_effect=OSError("disk full")):
+            with self.assertRaises(errors.PathError):
+                hardening.harden_swap(self.game)
+
+    def test_restoring_puts_the_real_launcher_back_and_removes_the_backup(self) -> None:
+        hardening.harden_swap(self.game)
+        hardening.unharden_restore(self.game)
+        self.assertEqual(self.launcher.read_bytes(), EAC)
+        self.assertFalse(self.backup.exists())
+
+    def test_restoring_without_a_backup_is_a_path_error(self) -> None:
+        with self.assertRaises(errors.PathError):
+            hardening.unharden_restore(self.game)
+
+    def test_a_failed_move_while_restoring_is_a_path_error(self) -> None:
+        hardening.harden_swap(self.game)
+        with mock.patch.object(hardening.shutil, "move", side_effect=OSError("permission denied")):
+            with self.assertRaises(errors.PathError):
+                hardening.unharden_restore(self.game)
+
+
+class SetImmutableTests(unittest.TestCase):
+    CHATTR = "/usr/bin/chattr"
+
+    def setUp(self) -> None:
+        self.target = Path("/game/start_protected_game.exe")
+        self.ran: list = []
+        which = mock.patch.object(
+            hardening.shutil, "which", side_effect=lambda name, *a, **k: self.CHATTR if name == "chattr" else None
+        )
+        which.start()
+        self.addCleanup(which.stop)
+
+    def run_with(self, result=None, error=None, on=True):
+        def fake(argv, *a, **k):
+            self.ran.append(argv)
+            if error is not None:
+                raise error
+            return types.SimpleNamespace(returncode=result)
+
+        with mock.patch.object(hardening.subprocess, "run", side_effect=fake):
+            hardening.set_immutable(self.target, on)
+
+    def error_for(self, code) -> str:
+        with self.assertRaises(errors.ErmError) as caught:
+            self.run_with(result=code)
+        return str(caught.exception)
+
+    def test_it_runs_the_absolute_chattr_through_pkexec(self) -> None:
+        self.run_with(result=0, on=True)
+        self.run_with(result=0, on=False)
+        self.assertEqual(
+            self.ran,
+            [["pkexec", self.CHATTR, "+i", str(self.target)], ["pkexec", self.CHATTR, "-i", str(self.target)]],
+        )
+
+    def test_a_missing_chattr_is_reported_without_running_pkexec(self) -> None:
+        with mock.patch.object(hardening.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(errors.ErmError, "chattr not found.*e2fsprogs"):
+                self.run_with(result=0)
+        self.assertEqual(self.ran, [])
+
+    def test_a_missing_pkexec_names_polkit(self) -> None:
+        with self.assertRaisesRegex(errors.ErmError, "pkexec not available.*polkit"):
+            self.run_with(error=FileNotFoundError("pkexec"))
+
+    def test_exit_126_means_the_dialog_was_dismissed(self) -> None:
+        message = self.error_for(126)
+        self.assertIn("dismissed", message)
+        self.assertNotIn("not authorized", message)
+
+    def test_exit_127_means_not_authorized(self) -> None:
+        message = self.error_for(127)
+        self.assertIn("not authorized", message)
+        self.assertNotIn("dismissed", message)
+
+    def test_any_other_failure_blames_the_filesystem(self) -> None:
+        message = self.error_for(1)
+        self.assertIn("chattr +i failed (rc 1)", message)
+        self.assertIn("filesystem", message)
 
 
 if __name__ == "__main__":

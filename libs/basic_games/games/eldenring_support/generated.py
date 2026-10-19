@@ -12,7 +12,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,13 +118,6 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _remove(path: Path) -> None:
-    if os.path.islink(path) or os.path.isfile(path):
-        path.unlink()
-    elif os.path.lexists(path):
-        shutil.rmtree(path)
-
-
 def _read_meta(mod_dir: Path, old: Path) -> bytes | None:
     for folder in (mod_dir, old):
         meta = folder / treewalk.META_INI
@@ -153,8 +145,8 @@ def build(mod_dir, state_file, files: list[tuple[str, "bytes | Path"]], fp: str,
     # A crash between the two renames leaves the live mod in <mod>.old, so its
     # meta.ini is read from there when mod_dir is gone, before old is cleared.
     meta_bytes = _read_meta(mod_dir, old)
-    _remove(temp)
-    _remove(old)
+    atomic.remove(temp)
+    atomic.remove(old)
     outputs = {}
     temp.mkdir(parents=True)
     for rel, data in files:
@@ -167,7 +159,7 @@ def build(mod_dir, state_file, files: list[tuple[str, "bytes | Path"]], fp: str,
     if os.path.lexists(mod_dir):
         os.rename(mod_dir, old)
     os.rename(temp, mod_dir)
-    _remove(old)
+    atomic.remove(old)
     state.write_json(
         state_file,
         {

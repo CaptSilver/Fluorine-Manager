@@ -68,31 +68,11 @@ def meta_sidecar(archive) -> dict | None:
     }
 
 
-_NEEDS_QUOTES = re.compile(r'[,;"\\\x00-\x1f\x7f]|^\s|\s$')
-_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
 _UNESCAPES = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t"}
 
 
-def _ini_value(text: str) -> str:
-    """`text` spelled so QSettings reads it back unchanged.
-
-    Fluorine reads the sidecar through QSettings, which splits unquoted commas
-    into a list, cuts at a semicolon and eats backslashes and quotes. A value
-    with any of those, a control character, edge whitespace or a leading `@`
-    is double-quoted with backslash escapes, as QSettings itself writes it.
-    """
-    if text.startswith("@"):
-        text = "@" + text  # a lone leading @ marks a QVariant; @@ is a literal one
-    if not _NEEDS_QUOTES.search(text):
-        return text
-    # Other control characters have no business in a name; \x escapes would
-    # swallow a following hex digit, so they are dropped.
-    body = "".join(_ESCAPES.get(ch) or ("" if ord(ch) < 0x20 or ord(ch) == 0x7F else ch) for ch in text)
-    return f'"{body}"'
-
-
 def _read_ini_value(text: str) -> str:
-    """Inverse of `_ini_value` for a value this module wrote."""
+    """A sidecar value as QSettings wrote it: quoted with backslash escapes, a literal leading @ doubled."""
     if len(text) < 2 or not (text.startswith('"') and text.endswith('"')):
         return text[1:] if text.startswith("@@") else text
     out, chars = [], iter(text[1:-1])
@@ -100,34 +80,6 @@ def _read_ini_value(text: str) -> str:
         out.append(_UNESCAPES.get(next(chars, ""), "") if ch == "\\" else ch)
     joined = "".join(out)
     return joined[1:] if joined.startswith("@@") else joined
-
-
-def write_sidecar(
-    archive, *, game_name: str, mod_id: int | None, file_id: int | None, version: str,
-    mod_name: str, repository: str,
-) -> None:
-    """Write the sidecar a download would have, for an archive that arrived by hand.
-
-    The keys are the ones DownloadManager writes and reads back, so the archive
-    shows up as an ordinary, not yet installed download. `fileID` is left out
-    when unknown: Fluorine reads a missing one as 0, and an exporter reads that
-    as None, never as a file to request.
-    """
-    lines = ["[General]", f"gameName={game_name}", f"modID={mod_id or 0}"]
-    if file_id:
-        lines.append(f"fileID={file_id}")
-    lines += [
-        f"modName={_ini_value(mod_name)}",
-        f"version={_ini_value(version)}",
-        f"newestVersion={_ini_value(version)}",
-        f"repository={repository}",
-        "installed=false",
-        "uninstalled=false",
-        "paused=false",
-        "removed=false",
-        "",
-    ]
-    atomic.write_bytes_atomic(_sidecar(archive), "\n".join(lines).encode("utf-8"))
 
 
 _CATEGORY = re.compile(rb"(?m)^(category\s*=\s*)([1-9][0-9]*)([ \t]*)$")

@@ -4,7 +4,8 @@ Cases that need real game data skip, naming the variable, unless it is set. None
 of that data is kept in the repo.
 
   FLUORINE_OOZ_LIB            the built libooz.so (ctest sets it)
-  FLUORINE_ER_TESTLIBS        a directory with lib/libzstd.so.1 (ctest sets it)
+  FLUORINE_ER_TESTLIBS        a directory with lib/libzstd.so.1 (ctest sets it); the
+                              ZSTD cases fail without it, there is no other zstd backend
   FLUORINE_ER_GAME_DIR        a Game/ directory: Data0.bhd, regulation.bin
   FLUORINE_ER_KRAKEN_SAMPLES  a directory holding chr/c0000.behbnd.dcx and
                               msg/engus/{item,menu}_dlc02.msgbnd.dcx
@@ -24,8 +25,6 @@ REPO = HERE.parents[2]
 for path in (HERE, REPO / "libs" / "basic_games" / "games" / "eldenring_support"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
-
-from ermlib import gamebuild  # noqa: E402  (needs the sys.path entries above)
 
 
 @pytest.fixture(scope="session")
@@ -51,6 +50,12 @@ def tmp_game(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_build_cache(tmp_path, monkeypatch):
-    """Keep the build-stamp cache out of the working directory while tests run."""
-    monkeypatch.setattr(gamebuild, "CACHE_PATH", tmp_path / "build-stamps.json")
+def _bundled_libs_dir(monkeypatch):
+    """Point MO2_LIBS_DIR where the launcher would, so the ZSTD cases load the
+    bundled libzstd. Without FLUORINE_ER_TESTLIBS they fail loudly instead."""
+    testlibs = os.environ.get("FLUORINE_ER_TESTLIBS")
+    if testlibs:
+        monkeypatch.setenv("MO2_LIBS_DIR", os.path.join(testlibs, "lib"))
+    else:
+        monkeypatch.delenv("MO2_LIBS_DIR", raising=False)
+
