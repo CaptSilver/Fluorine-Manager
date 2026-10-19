@@ -20,6 +20,7 @@ from .. import (
 )
 from ..ermlib.errors import ErmError
 from ..qtui import Busy
+from ..report import Report
 
 GAME_NAME = "Elden Ring"
 AUTHOR = "Fluorine Elden Ring contributors"
@@ -597,7 +598,7 @@ class SaveToolsTool(EldenRingTool):
         """The import's own review of ER0000.sl2 (audit, question, action), run from here. The report to show."""
         self._refuse_pending(pending)
         folder, _ = saves.save_files(self._organizer)
-        report = importer.Report()
+        report = Report()
         importsave.review(
             self._organizer, paths, folder, session.now_stamp(), report,
             ask_answer=self._ask_answer, ask_action=self._ask_action,
@@ -972,7 +973,7 @@ class ImportFromErmTool(EldenRingTool):
         library = saves.library_root(game.gameDirectory().absolutePath())
         save_dir = saves.save_dir(library)
         stamp = session.now_stamp()
-        report = importer.Report()
+        report = Report()
         stopped = None
         busy = Busy(title, self._parent)
         try:
@@ -1017,7 +1018,7 @@ class ImportFromErmTool(EldenRingTool):
             chosen[name] = importer.PROFILE_CHOICES[picked]
         return chosen
 
-    def _show_stopped(self, title: str, exc: importer.ImportStopped, report: importer.Report) -> None:
+    def _show_stopped(self, title: str, exc: importer.ImportStopped, report: Report) -> None:
         done = exc.report if exc.report is not None else report
         if done.lines:
             qtui.show_text(
@@ -1252,7 +1253,7 @@ class ImportListTool(EldenRingTool):
             busy.update("Checking the installed mods against the list")
             with archives.hash_cache(paths) as cache:
                 findings = listimport.findings_for_install(self._organizer, doc, cache)
-        reports: list[importer.Report] = []
+        reports: list[Report] = []
         dialog = qtui.FetchDialog(title, self._parent, fetcher.summary)
         run = listimport.ImportRun(
             self._organizer, doc, findings, fetcher=fetcher, version_info=mobase.VersionInfo,

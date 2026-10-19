@@ -23,7 +23,7 @@ import os
 import re
 import shutil
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -32,6 +32,7 @@ from .ermlib import gamebuild, manifest, me3pkg
 from .ermlib import paths as ermpaths
 from .ermlib import saves as ermsaves
 from .ermlib.errors import ErmError
+from .report import Report
 
 # The install modes of an erm [[mods]] entry that become Fluorine mods.
 INSTALLABLE = ("game", "mods", "me3-package", "me3-native")
@@ -54,33 +55,6 @@ class ImportStopped(ErmError):
     def __init__(self, message: str, report: "Report | None" = None) -> None:
         super().__init__(message)
         self.report = report
-
-
-@dataclass
-class Report:
-    lines: list[tuple[str, str]] = field(default_factory=list)
-
-    def add(self, level: str, text: str) -> None:
-        self.lines.append((level, text))
-
-    def ok(self, text: str) -> None:
-        self.add("ok", text)
-
-    def info(self, text: str) -> None:
-        self.add("info", text)
-
-    def warn(self, text: str) -> None:
-        self.add("warn", text)
-
-    def fail(self, text: str) -> None:
-        self.add("fail", text)
-
-    def count(self, level: str) -> int:
-        return sum(1 for kind, _ in self.lines if kind == level)
-
-    def text(self) -> str:
-        marks = {"ok": "ok  ", "info": "    ", "warn": "WARN", "fail": "FAIL"}
-        return "\n".join(f"{marks[level]} {text}" for level, text in self.lines)
 
 
 # -- reading the erm checkout -------------------------------------------------

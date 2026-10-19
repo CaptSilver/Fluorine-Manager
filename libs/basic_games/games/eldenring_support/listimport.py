@@ -26,7 +26,7 @@ from typing import Callable
 
 from . import archives, fetch, generated, kinds, listfile, mods, procs, state
 from .ermlib.errors import ErmError
-from .importer import Report
+from .report import Report
 
 log = logging.getLogger(__name__)
 
