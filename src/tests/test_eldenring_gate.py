@@ -16,6 +16,7 @@ from eldenring_testsupport import synthetic_pe
 
 PACKAGE = support.load_support("_eldenring_gate_tests")
 deploy = support.module(PACKAGE, "deploy")
+diagnosis = support.module(PACKAGE, "diagnosis")
 environment = support.module(PACKAGE, "environment")
 gate = support.module(PACKAGE, "gate")
 hardening = support.module(PACKAGE, "hardening")
@@ -2253,7 +2254,10 @@ class BuildChangeTests(DeployGateCase):
         self.set_buildid("25999999")
         self.deployed().write_text("changed by the update\n")
         self.assertFalse(self.launch())
-        self.assert_vetoed(deploy.DEPLOY_DRIFT, "mods/Thing/config.ini: its bytes changed", "Sync deployed files")
+        self.assert_vetoed(
+            deploy.DEPLOY_DRIFT, "mods/Thing/config.ini: its bytes changed", "Problems list",
+            diagnosis.TITLES["DEPLOY_DRIFT"],
+        )
         self.assertEqual(self.deployed().read_text(), "changed by the update\n")
         self.assertFalse(self.paths.quarantine_game.exists())
 

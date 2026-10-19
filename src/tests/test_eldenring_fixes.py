@@ -15,9 +15,12 @@ PACKAGE = support.load_support("_eldenring_fixes_tests")
 deploy = support.module(PACKAGE, "deploy")
 fixes = support.module(PACKAGE, "fixes")
 generated = support.module(PACKAGE, "generated")
+hardening = support.module(PACKAGE, "hardening")
 inventory = support.module(PACKAGE, "inventory")
+kinds = support.module(PACKAGE, "kinds")
 problems = support.module(PACKAGE, "problems")
 state = support.module(PACKAGE, "state")
+Veto = support.module(PACKAGE, "veto").Veto
 errors = support.module(PACKAGE, "ermlib.errors")
 gamebuild = support.module(PACKAGE, "ermlib.gamebuild")
 
@@ -89,6 +92,7 @@ class FixCase(unittest.TestCase):
         self.identify.start()
         self.addCleanup(self.identify.stop)
         self.shown: list[tuple[str, str]] = []
+        self.criticals: list[tuple[str, str]] = []
         self.reviews: list[tuple[str, str, str]] = []
         self.choices: list[tuple[str, str, list[str], list[str]]] = []
         self.progress: list[str] = []
@@ -102,7 +106,10 @@ class FixCase(unittest.TestCase):
         self.addCleanup(problems.subscribe(self.listen))
         self.fixes = fixes.Fixes(
             self.organizer, self.game,
-            fixes.Ui(review=self.review, choose=self.choose, inform=self.inform, busy=lambda title: Busy(self.progress)),
+            fixes.Ui(
+                review=self.review, choose=self.choose, inform=self.inform, busy=lambda title: Busy(self.progress),
+                critical=self.critical,
+            ),
             running=lambda: list(self.running), stamp=lambda: STAMP,
         )
         self.put("eldenring.exe", b"MZ game")
@@ -125,6 +132,9 @@ class FixCase(unittest.TestCase):
 
     def inform(self, title: str, text: str) -> None:
         self.shown.append((title, text))
+
+    def critical(self, title: str, text: str) -> None:
+        self.criticals.append((title, text))
 
     def listen(self) -> None:
         self.heard += 1
@@ -224,7 +234,10 @@ class AdoptTests(FixCase):
     def test_a_game_outside_a_steam_library_is_shown(self) -> None:
         self.fixes = fixes.Fixes(
             self.organizer, FakeGame(self.tmp / "elsewhere/ELDEN RING"),
-            fixes.Ui(review=self.review, choose=self.choose, inform=self.inform, busy=lambda title: Busy(self.progress)),
+            fixes.Ui(
+                review=self.review, choose=self.choose, inform=self.inform, busy=lambda title: Busy(self.progress),
+                critical=self.critical,
+            ),
             running=lambda: [],
         )
         (self.tmp / "elsewhere/ELDEN RING/Game").mkdir(parents=True)
@@ -487,6 +500,94 @@ class EnsureGeneratedTests(FixCase):
             self.fixes.run("ensure-generated")
         ensure.call_args.kwargs["then"](error=errors.ErmError("no such mod"))
         self.assertIn("no such mod", self.last_text())
+
+
+class SyncDeployedTests(FixCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.wanted = object()
+        self.sync_calls: list[tuple] = []
+        self.result = deploy.Applied()
+        self.veto: Veto | None = None
+
+        def sync(wanted, paths, game_dir, **kwargs):
+            self.sync_calls.append((wanted, paths, game_dir, kwargs))
+            if self.veto is not None:
+                raise self.veto
+            return self.result
+
+        for target, replacement in (
+            (fixes.deploy, ("desired", lambda organizer: self.wanted)),
+            (fixes.deploy, ("sync", sync)),
+            (fixes.hardening, ("state", lambda game_dir, cache: "hardened")),
+        ):
+            patcher = mock.patch.object(target, *replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_it_syncs_the_wanted_files_into_game_with_a_launcher_probe_and_lists_what_it_did(self) -> None:
+        self.result = deploy.Applied(copied=["mods/Thing/config.ini"])
+        before = self.heard
+        self.fixes.run("sync-deployed")
+        ((wanted, paths, game_dir, kwargs),) = self.sync_calls
+        self.assertIs(wanted, self.wanted)
+        self.assertEqual(game_dir, self.game_dir)
+        self.assertFalse(kwargs.get("verify_first", False))
+        self.assertEqual(kwargs["launcher"](), "hardened")
+        self.assertEqual(self.shown, [(fixes.TITLE, "Copied mods/Thing/config.ini")])
+        self.assertEqual(self.heard, before + 1)
+
+    def test_it_stamps_quarantined_files_with_the_stamp_the_fixes_were_given(self) -> None:
+        self.fixes.run("sync-deployed")
+        self.assertEqual(self.sync_calls[0][3]["stamp"], STAMP)
+
+    def test_with_nothing_to_do_it_says_so(self) -> None:
+        self.fixes.run("sync-deployed")
+        self.assertIn("already holds exactly", self.last_text())
+
+    def test_a_running_game_is_refused_and_nothing_is_synced(self) -> None:
+        self.running = [(4242, "eldenring.exe")]
+        self.fixes.run("sync-deployed")
+        self.assertIn("eldenring.exe (pid 4242)", self.last_text())
+        self.assertEqual(self.sync_calls, [])
+
+    def test_a_veto_is_shown_as_an_error_with_its_fix(self) -> None:
+        self.veto = Veto("Deployed config files", "No hardened launcher.", "Harden it.", "HARDEN_REQUIRED")
+        self.fixes.run("sync-deployed")
+        ((title, text),) = self.criticals
+        self.assertEqual(title, fixes.TITLE)
+        self.assertIn("No hardened launcher.", text)
+        self.assertIn("Harden it.", text)
+        self.assertEqual(self.shown, [])
+
+
+class SyncDeployedDriftTests(FixCase):
+    """The drift fix over the real deploy.sync and a real Game/, with only the launcher probe faked."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        probe = mock.patch.object(fixes.hardening, "state", return_value=hardening.HARDENED)
+        probe.start()
+        self.addCleanup(probe.stop)
+        self.mod = self.organizer.modList().add(
+            "Thing mod", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n"}
+        )
+        kinds.set_kind(self.mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=["mods/Thing/config.ini"])
+        self.deployed = self.game_dir / "mods/Thing/config.ini"
+
+    def test_a_file_the_dll_rewrote_is_kept_and_copied_again_and_the_info_box_says_so(self) -> None:
+        self.fixes.run("sync-deployed")
+        self.assertEqual(self.deployed.read_text(), "a=1\n")
+        self.deployed.write_text("written by the DLL\n")
+        self.shown.clear()
+        self.fixes.run("sync-deployed")
+        self.assertEqual(self.deployed.read_text(), "a=1\n")
+        ((title, text),) = self.shown
+        self.assertEqual(title, fixes.TITLE)
+        self.assertIn("Kept mods/Thing/config.ini", text)
+        kept = list(self.paths.quarantine_game.rglob("config.ini"))
+        self.assertEqual([path.read_text() for path in kept], ["written by the DLL\n"])
+        self.assertEqual(self.criticals, [])
 
 
 class RunTests(FixCase):

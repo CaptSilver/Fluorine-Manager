@@ -10,21 +10,21 @@ from .. import diagnosis
 from .diagnose import EldenRingDiagnose
 from .tools import (
     ExportListTool, HardenTool, ImportListTool, InstallMe3Tool, RebuildTool, SaveToolsTool, SetModKindTool,
-    SyncDeployedTool, VerifyListTool,
+    VerifyListTool,
 )
 
 
 def createPlugins() -> list[mobase.IPlugin]:
-    install, saves, rebuild, set_kind, harden, sync, export, verify, import_list = (
-        InstallMe3Tool(), SaveToolsTool(), RebuildTool(), SetModKindTool(), HardenTool(), SyncDeployedTool(),
+    install, saves, rebuild, set_kind, harden, export, verify, import_list = (
+        InstallMe3Tool(), SaveToolsTool(), RebuildTool(), SetModKindTool(), HardenTool(),
         ExportListTool(), VerifyListTool(), ImportListTool(),
     )
     # The diagnose plugin opens these very instances, the ones the core initialises,
     # so each has its organizer and parent widget by the time a fix needs it.
     opened = {
         diagnosis.TOOL_ME3: install, diagnosis.TOOL_SAVES: saves, diagnosis.TOOL_REBUILD: rebuild,
-        diagnosis.TOOL_KIND: set_kind, diagnosis.TOOL_HARDEN: harden, diagnosis.TOOL_SYNC: sync,
+        diagnosis.TOOL_KIND: set_kind, diagnosis.TOOL_HARDEN: harden,
     }
     return [
-        install, saves, rebuild, set_kind, harden, sync, export, verify, import_list, EldenRingDiagnose(opened),
+        install, saves, rebuild, set_kind, harden, export, verify, import_list, EldenRingDiagnose(opened),
     ]

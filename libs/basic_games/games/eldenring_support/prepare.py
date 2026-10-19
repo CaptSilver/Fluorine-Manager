@@ -23,7 +23,7 @@ from . import (
 )
 from .ermlib import gamebuild, heal, merge
 from .ermlib.errors import ErmError
-from .veto import Veto
+from .veto import PROBLEMS_LIST, Veto
 
 # Problem keys. The diagnose plugin gives each a stable integer.
 GAME_BUILD = "GAME_BUILD"
@@ -126,7 +126,7 @@ def _identity(
             f"is not the one recorded when Game/ was adopted as vanilla (installed {live.regulation_sha[:12]}, "
             f"recorded {vanilla.regulation_sha[:12]}). A merge would adopt it as the baseline for its version, "
             "for good, and a modified regulation.bin is the most common way Elden Ring gets banned.",
-            f"Verify the game files in Steam. If the installed file is the one to hold as vanilla, open {_PROBLEMS} "
+            f"Verify the game files in Steam. If the installed file is the one to hold as vanilla, open {PROBLEMS_LIST} "
             "and use the fix that re-pins regulation.bin.",
             REGULATION_UNPINNED,
         )
@@ -146,9 +146,6 @@ def _identity(
     return live, vanilla
 
 
-_PROBLEMS = "the Problems list (the warning icon in the toolbar)"
-
-
 def _recorded_vanilla(paths: state.InstancePaths) -> inventory.Inventory:
     """The vanilla inventory. None and damaged are both vetoes: nothing to hold Game/ to."""
     try:
@@ -157,7 +154,7 @@ def _recorded_vanilla(paths: state.InstancePaths) -> inventory.Inventory:
         raise Veto(
             "Game folder",
             f"{exc}. The record of what a vanilla Game/ holds cannot be trusted.",
-            f"Verify the game files in Steam, then open {_PROBLEMS} and use the fix that records Game/ as "
+            f"Verify the game files in Steam, then open {PROBLEMS_LIST} and use the fix that records Game/ as "
             "vanilla again. It shows what it will record and asks first.",
             VANILLA_UNKNOWN,
         ) from exc
@@ -166,7 +163,7 @@ def _recorded_vanilla(paths: state.InstancePaths) -> inventory.Inventory:
             "Game folder",
             "Nothing records what a vanilla Game/ holds, so there is nothing to hold it to. A replaced "
             "DLL or a modified regulation.bin in Game/ is how Elden Ring accounts get banned.",
-            f"Verify the game files in Steam, then open {_PROBLEMS} and use the fix that records Game/ as "
+            f"Verify the game files in Steam, then open {PROBLEMS_LIST} and use the fix that records Game/ as "
             "vanilla. It shows what it will record and asks first.",
             VANILLA_UNKNOWN,
         )
@@ -192,7 +189,7 @@ def stray_veto(
         "Game folder",
         "These are in Game/ and are not part of the vanilla install that was recorded. Whatever sits there "
         "is also what a Steam Play starts under Easy Anti-Cheat:\n" + "\n".join(lines),
-        f"Open {_PROBLEMS} and use the fix that moves them to this instance's eldenring/quarantine-game "
+        f"Open {PROBLEMS_LIST} and use the fix that moves them to this instance's eldenring/quarantine-game "
         "folder (nothing is deleted), or move them out yourself. Names that load code come first.",
         GAME_DIR_STRAYS,
     )
@@ -206,7 +203,7 @@ def changed_veto(found) -> Veto | None:
         "Game folder",
         "These differ from what was recorded as vanilla, or are gone. A replaced DLL is as much a ban "
         "vector as a replaced regulation.bin:\n" + "\n".join(lines),
-        f"Verify the game files in Steam. If the change is yours and Game/ should be held to it, open {_PROBLEMS} "
+        f"Verify the game files in Steam. If the change is yours and Game/ should be held to it, open {PROBLEMS_LIST} "
         "and use the fix that records the listed paths.",
         VANILLA_CHANGED,
     )
@@ -267,7 +264,7 @@ def update_veto(found) -> Veto:
         "Steam updated the game, and these could carry code. A stray dropped into Game/ before the update "
         "cannot be told from new game content, so none of them is taken as vanilla without you:\n"
         + "\n".join(lines),
-        f"Verify the game files in Steam. Then open {_PROBLEMS} and use the fix that lists them and asks.",
+        f"Verify the game files in Steam. Then open {PROBLEMS_LIST} and use the fix that lists them and asks.",
         VANILLA_ADDED if found.appeared_suspect else VANILLA_CHANGED,
     )
 

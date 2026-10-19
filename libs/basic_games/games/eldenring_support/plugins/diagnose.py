@@ -38,6 +38,7 @@ def _dialogs() -> fixes.Ui:
         choose=lambda title, text, items, checked: qtui.pick_files(_parent(), title, text, items, checked),
         inform=lambda title, text: qtui.inform(_parent(), title, text),
         busy=lambda title: qtui.Busy(title, _parent()),
+        critical=lambda title, text: qtui.critical(_parent(), title, text),
     )
 
 
@@ -62,11 +63,16 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
     checks walk the mod folders; the 60 s timer asks `diagnosis.Watch` whether
     something moved under the plugin's feet and invalidates when it did.
     `tools` maps the "tool:..." fix names to the Tools-menu entries they open.
+    `actions` maps any other fix name to a callable that gets the parent widget
+    for its dialogs and runs the fix; names in neither map go to `fixes.Fixes`.
     """
 
-    def __init__(self, tools: dict, timer_factory: Callable = _qt_timer) -> None:
+    def __init__(
+        self, tools: dict, actions: dict[str, Callable] | None = None, timer_factory: Callable = _qt_timer
+    ) -> None:
         mobase.IPluginDiagnose.__init__(self)
         self._tools = tools
+        self._actions = actions or {}
         self._timer_factory = timer_factory
         self._organizer = None
         self._diagnosis: diagnosis.Diagnosis | None = None
@@ -130,6 +136,8 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
         try:
             if problem.fix.startswith("tool:"):
                 self._tools[problem.fix].display()
+            elif problem.fix in self._actions:
+                self._actions[problem.fix](_parent())
             else:
                 fixes.Fixes(self._organizer, self._organizer.managedGame(), _dialogs()).run(problem.fix)
         except Exception as exc:

@@ -697,52 +697,6 @@ class HardenTool(EldenRingTool):
         return outcome
 
 
-class SyncDeployedTool(EldenRingTool):
-    def name(self) -> str:
-        return "Elden Ring Sync deployed files"
-
-    def description(self) -> str:
-        return "Make Game/mods/ hold exactly the config files the enabled native mods ask for."
-
-    def displayName(self) -> str:
-        return "Elden Ring/Sync deployed files…"
-
-    def tooltip(self) -> str:
-        return "Copy, update and remove the config files natives read from Game/mods/<Name>/."
-
-    def run(self) -> None:
-        title = self.dialogTitle()
-        busy = None
-        try:
-            # Inside the try so a refused run tells the listeners too.
-            names = procs.running_names()
-            if names is not None:
-                raise ErmError(f"{names} is running. Game/ is not edited under a running game; quit it and try again.")
-            game_dir = Path(self._organizer.managedGame().dataDirectory().absolutePath())
-            paths = state.InstancePaths(self._organizer)
-            busy = Busy(title, self._parent)
-            with archives.hash_cache(paths) as cache:
-                applied = deploy.sync(
-                    deploy.desired(self._organizer), paths, game_dir,
-                    launcher=lambda: hardening.state(game_dir, cache),
-                )
-        except gate.Veto as veto:
-            if busy is not None:
-                busy.close()
-            QMessageBox.critical(self._parent, title, veto.text())
-            return
-        finally:
-            if busy is not None:
-                busy.close()
-            problems.invalidate()
-        QMessageBox.information(
-            self._parent,
-            title,
-            "\n".join(applied.lines())
-            or "Game/mods/ already holds exactly the config files the enabled mods ask for. Nothing was changed.",
-        )
-
-
 def describe_rebuild(prepared) -> str:
     lines = [
         f"The {generated.NAME} mod was rebuilt."

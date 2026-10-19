@@ -143,9 +143,9 @@ TITLES: dict[str, str] = {
 # maps each name to the code that runs it; a name that starts with "tool:" opens
 # the Tools-menu entry of that name.
 ADOPT, QUARANTINE, READOPT, ACCEPT_UPDATE, REPIN = "adopt", "quarantine", "re-adopt", "accept-update", "re-pin"
-ENSURE_GENERATED = "ensure-generated"
-TOOL_HARDEN, TOOL_SYNC, TOOL_SAVES, TOOL_KIND, TOOL_REBUILD, TOOL_ME3 = (
-    "tool:harden", "tool:sync", "tool:saves", "tool:kind", "tool:rebuild", "tool:me3",
+ENSURE_GENERATED, SYNC_DEPLOYED = "ensure-generated", "sync-deployed"
+TOOL_HARDEN, TOOL_SAVES, TOOL_KIND, TOOL_REBUILD, TOOL_ME3 = (
+    "tool:harden", "tool:saves", "tool:kind", "tool:rebuild", "tool:me3",
 )
 
 
@@ -413,8 +413,11 @@ class Diagnosis:
             rows.append(
                 Problem(
                     "DEPLOY_DRIFT",
-                    "The config files in Game/mods/ are not what the enabled mods ask for:\n" + "\n".join(lines),
-                    TOOL_SYNC,
+                    "The config files in Game/mods/ are not what the enabled mods ask for. "
+                    "The fix makes Game/mods/ match the mod list now. A launch does the same, except "
+                    "right after a Steam update, when it stops and asks for this fix.\n"
+                    + "\n".join(lines),
+                    SYNC_DEPLOYED,
                 )
             )
         launcher = hardening.state(context.game_dir, context.cache)

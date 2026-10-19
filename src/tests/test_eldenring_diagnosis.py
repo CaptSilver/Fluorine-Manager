@@ -346,11 +346,15 @@ class DeployRowTests(DiagnosisCase):
         self.put("start_protected_game.exe", b"MZ eac")
         self.assertEqual(self.problems(), [])
 
-    def test_a_wanted_file_that_is_not_there_is_drift_with_the_sync_tool_and_the_launcher_must_be_hardened(self) -> None:
+    def test_a_wanted_file_that_is_not_there_is_drift_with_the_sync_fix_and_the_launcher_must_be_hardened(self) -> None:
         self.put("start_protected_game.exe", b"MZ eac")
         self.native()
         drift = self.one("DEPLOY_DRIFT")
-        self.assertEqual(drift.fix, "tool:sync")
+        self.assertEqual(drift.fix, "sync-deployed")
+        self.assertIn("The fix makes Game/mods/ match the mod list now.", drift.text)
+        self.assertIn("A launch does the same, except right after a Steam update", drift.text)
+        self.assertNotIn("right now", drift.text)
+        self.assertNotIn("The next launch through Fluorine puts", drift.text)
         self.assertIn("mods/Thing/config.ini: to be copied", drift.text)
         required = self.one("HARDEN_REQUIRED")
         self.assertEqual((required.fix, required.informational), ("tool:harden", False))
