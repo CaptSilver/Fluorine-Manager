@@ -905,7 +905,7 @@ class SteamLaunchOptionRowTests(DiagnosisCase):
     def user(self, name: str, value: str) -> Path:
         path = self.home / ".local/share/Steam/userdata" / name / "config/localconfig.vdf"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('"UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "1245620" { "LaunchOptions" "%s" } } } } } }' % value)
+        path.write_text('"UserLocalConfigStore"\n{\n"Software"\n{\n"Valve"\n{\n"Steam"\n{\n"apps"\n{\n"1245620"\n{\n"LaunchOptions" "%s"\n}\n}\n}\n}\n}\n}\n' % value)
         (self.home / ".local/share/Steam/steamapps").mkdir(parents=True, exist_ok=True)
         return path
 
@@ -980,7 +980,7 @@ class WatchTests(DiagnosisCase):
         config = self.home / ".local/share/Steam/userdata/1001/config/localconfig.vdf"
         config.parent.mkdir(parents=True)
         (self.home / ".local/share/Steam/steamapps").mkdir(parents=True, exist_ok=True)
-        config.write_text('"UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "1245620" { "LaunchOptions" "-x" } } } } } }')
+        config.write_text('"UserLocalConfigStore"\n{\n"Software"\n{\n"Valve"\n{\n"Steam"\n{\n"apps"\n{\n"1245620"\n{\n"LaunchOptions" "-x"\n}\n}\n}\n}\n}\n}\n')
         self.assertTrue(self.watch.changed())
         self.assertFalse(self.watch.changed())
 

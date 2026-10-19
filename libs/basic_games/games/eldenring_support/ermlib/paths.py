@@ -1,5 +1,7 @@
 from pathlib import Path, PurePosixPath
 
+import vdf  # pyright: ignore[reportMissingTypeStubs]
+
 from .errors import PathError
 
 APPID = "1245620"
@@ -47,17 +49,22 @@ def find_steam_root():
 def _library_dirs(steam_root):
     """Every steamapps dir Steam knows about, from libraryfolders.vdf."""
     dirs = [steam_root / "steamapps"]
-    vdf = steam_root / "steamapps" / "libraryfolders.vdf"
-    if vdf.exists():
-        import re
+    path = steam_root / "steamapps" / "libraryfolders.vdf"
+    if path.exists():
         try:
-            text = vdf.read_text(errors="ignore")
-        except OSError:
-            # Unreadable libraryfolders.vdf (perms, TOCTOU race) — fall back to
-            # the primary library rather than leaking OSError to the CLI.
+            text = path.read_text(errors="ignore")
+            top = vdf.loads(text)
+            # Steam's key case varies between client versions.
+            folders = next((v for k, v in top.items() if k.lower() == "libraryfolders"), None)
+        except (OSError, SyntaxError, ValueError):
+            # Unreadable (perms, TOCTOU race) or malformed libraryfolders.vdf:
+            # fall back to the primary library rather than leaking to the CLI.
             return dirs
-        for m in re.finditer(r'"path"\s*"([^"]+)"', text):
-            dirs.append(Path(m.group(1)) / "steamapps")
+        if isinstance(folders, dict):
+            for entry in folders.values():
+                library = entry.get("path") if isinstance(entry, dict) else None
+                if isinstance(library, str) and library:
+                    dirs.append(Path(library) / "steamapps")
     return dirs
 
 

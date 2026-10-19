@@ -8,12 +8,13 @@ or where the save goes without touching a token. Nothing here writes anything.
 from __future__ import annotations
 
 import os
-import re
 import stat
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+import vdf  # pyright: ignore[reportMissingTypeStubs]
 
 from .ermlib import paths as ermpaths
 from .ermlib import steam
@@ -131,40 +132,6 @@ def scan_me3_config(files: Iterable[Path]) -> list[ConfigFinding]:
 
 # -- Steam's launch option ----------------------------------------------------
 
-_VDF_TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|([{}])')
-_VDF_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\", '"': '"'}
-
-
-def _unescape(text: str) -> str:
-    return re.sub(r"\\(.)", lambda m: _VDF_ESCAPES.get(m.group(1), m.group(0)), text)
-
-
-def parse_vdf(text: str) -> dict:
-    """Valve's key-value text as nested dictionaries. Lenient: a stray brace closes nothing."""
-    root: dict = {}
-    stack = [root]
-    key: str | None = None
-    for token in _VDF_TOKEN.finditer(text):
-        if token.group(2) == "{":
-            child: dict = {}
-            if key is not None:
-                stack[-1][key] = child
-            stack.append(child)
-            key = None
-        elif token.group(2) == "}":
-            if len(stack) > 1:
-                stack.pop()
-            key = None
-        else:
-            word = _unescape(token.group(1))
-            if key is None:
-                key = word
-            else:
-                stack[-1][key] = word
-                key = None
-    return root
-
-
 def _child(table: object, name: str):
     """A value from a VDF table by key, ignoring case as Steam does."""
     if not isinstance(table, dict):
@@ -178,7 +145,7 @@ def _child(table: object, name: str):
 def steam_launch_options(steam_root: Path | None) -> list[tuple[Path, str]]:
     """(localconfig.vdf, LaunchOptions) for every Steam user that set one for Elden Ring.
 
-    An empty option is not a setting. A file that cannot be read is skipped:
+    An empty option is not a setting. A file that cannot be read or parsed is skipped:
     the poll calls this every minute, and a half-written file reads fine next time.
     """
     if steam_root is None:
@@ -195,7 +162,11 @@ def steam_launch_options(steam_root: Path | None) -> list[tuple[Path, str]]:
             text = config.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        node = parse_vdf(text)
+        try:
+            node = vdf.loads(text)
+        except (SyntaxError, ValueError):
+            # Half-written or hand-mangled; treat as no setting like an unreadable file.
+            continue
         for name in ("UserLocalConfigStore", "Software", "Valve", "Steam", "apps", ermpaths.APPID):
             node = _child(node, name)
         value = _child(node, "LaunchOptions")

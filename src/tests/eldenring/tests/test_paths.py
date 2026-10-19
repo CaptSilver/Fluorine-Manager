@@ -108,6 +108,18 @@ def test_find_save_dir_raises_without_save(tmp_path):
         find_save_dir(tmp_path)
 
 
+def test_libraryfolders_key_is_matched_ignoring_case(tmp_path):
+    steam = tmp_path / "steam"
+    (steam / "steamapps").mkdir(parents=True)
+    lib2 = tmp_path / "lib2"
+    pfx = lib2 / "steamapps" / "compatdata" / APPID / "pfx"
+    pfx.mkdir(parents=True)
+    (steam / "steamapps" / "libraryfolders.vdf").write_text(
+        '"LibraryFolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' % lib2
+    )
+    assert find_prefix(steam).samefile(pfx)
+
+
 def test_find_prefix_finds_a_prefix_in_a_secondary_library(tmp_path):
     # find_prefix, find_save_dir and saves.save_dir all go
     # through _library_dirs, so this is the one test of its libraryfolders.vdf
@@ -120,6 +132,14 @@ def test_find_prefix_finds_a_prefix_in_a_secondary_library(tmp_path):
     (steam / "steamapps" / "libraryfolders.vdf").write_text(
         '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' % lib2
     )
+    assert find_prefix(steam).samefile(pfx)
+
+
+def test_find_prefix_survives_a_malformed_libraryfolders(tmp_path):
+    steam = tmp_path / "steam"
+    pfx = steam / "steamapps" / "compatdata" / APPID / "pfx"
+    pfx.mkdir(parents=True)
+    (steam / "steamapps" / "libraryfolders.vdf").write_text('"libraryfolders" { "0" } } }')
     assert find_prefix(steam).samefile(pfx)
 
 

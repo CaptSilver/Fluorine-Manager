@@ -162,20 +162,6 @@ LOCALCONFIG = """"UserLocalConfigStore"
 """
 
 
-class VdfTests(unittest.TestCase):
-    def test_nested_tables_and_quoted_values_parse(self) -> None:
-        parsed = environment.parse_vdf('"a"\n{\n\t"b"\t\t"c d"\n\t"e"\n\t{\n\t\t"f"\t"g"\n\t}\n}\n')
-        self.assertEqual(parsed, {"a": {"b": "c d", "e": {"f": "g"}}})
-
-    def test_escapes_in_a_value_are_undone(self) -> None:
-        parsed = environment.parse_vdf('"k"\t"WINEDLLOVERRIDES=\\"dxgi=n,b\\" %command%\\\\"')
-        self.assertEqual(parsed["k"], 'WINEDLLOVERRIDES="dxgi=n,b" %command%\\')
-
-    def test_unbalanced_braces_do_not_raise(self) -> None:
-        self.assertEqual(environment.parse_vdf('"a" { "b" "c" } } } "d" "e"'), {"a": {"b": "c"}, "d": "e"})
-        self.assertEqual(environment.parse_vdf(""), {})
-
-
 class SteamLaunchOptionTests(EnvironmentCase):
     def config(self, user: str, value: str | None) -> Path:
         text = LOCALCONFIG % value if value is not None else '"UserLocalConfigStore"\n{\n}\n'
@@ -199,11 +185,20 @@ class SteamLaunchOptionTests(EnvironmentCase):
         self.assertEqual(self.options(), [(second, 'WINEDLLOVERRIDES="dxgi=n,b" %command%')])
         self.assertTrue(first.exists())
 
+    def test_escaped_quotes_and_backslashes_in_the_value_are_undone(self) -> None:
+        path = self.config("1001", 'WINEDLLOVERRIDES=\\"dxgi=n,b\\" %command%\\\\')
+        self.assertEqual(self.options(), [(path, 'WINEDLLOVERRIDES="dxgi=n,b" %command%\\')])
+
+    def test_a_malformed_file_is_skipped_and_the_next_user_still_read(self) -> None:
+        self.write(self.tmp / "Steam/userdata/1001/config/localconfig.vdf", '"a" { "b" "c" } } } "d" "e"')
+        good = self.config("1002", "-x")
+        self.assertEqual(self.options(), [(good, "-x")])
+
     def test_keys_are_matched_without_regard_to_case(self) -> None:
         path = self.write(
             self.tmp / "Steam/userdata/1001/config/localconfig.vdf",
-            '"userlocalconfigstore" { "software" { "valve" { "steam" { "Apps" { "1245620" '
-            '{ "launchoptions" "-x" } } } } } }',
+            '"userlocalconfigstore"\n{\n"software"\n{\n"valve"\n{\n"steam"\n{\n"Apps"\n{\n"1245620"\n'
+            '{\n"launchoptions" "-x"\n}\n}\n}\n}\n}\n}\n',
         )
         self.assertEqual(self.options(), [(path, "-x")])
 
