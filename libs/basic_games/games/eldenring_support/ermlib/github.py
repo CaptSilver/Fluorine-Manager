@@ -35,11 +35,6 @@ def _release_from_json(data):
     return {"tag": data.get("tag_name"), "assets": assets}
 
 
-def latest_release(repo_id):
-    data = _fetch_json(f"https://api.github.com/repositories/{repo_id}/releases/latest")
-    return _release_from_json(data)
-
-
 def release_by_tag(repo_id, tag):
     data = _fetch_json(f"https://api.github.com/repositories/{repo_id}/releases/tags/{tag}")
     return _release_from_json(data)
@@ -80,7 +75,9 @@ def download_stream(url, dest, sha256=None):
     Nothing lands on `dest` until the bytes are all there and the hash (when
     one is expected) matches, so a failed download can't leave a truncated
     archive that a later run would adopt as the real thing. Pass sha256=None
-    for trust-on-first-use, where the digest we compute here IS the pin.
+    for trust-on-first-use, where the digest we compute here IS the pin. An
+    empty string is a pin that nothing matches, so it fails like any other
+    mismatch; only None skips the check.
     """
     dest = Path(dest)
     # with_name, not with_suffix: with_suffix replaces everything after the
@@ -104,8 +101,3 @@ def download_stream(url, dest, sha256=None):
         raise
     os.replace(part, dest)
     return got
-
-
-def download_verified(url, dest, sha256):
-    """Fail-closed: an empty expected hash is a mismatch, not a skipped check."""
-    return download_stream(url, dest, sha256=sha256)
