@@ -1,4 +1,4 @@
-from ermlib.me3pkg import find_native_dll, find_package_root, list_option_dirs
+from ermlib.me3pkg import find_package_root, list_option_dirs
 
 
 def _tree(base, *rels):
@@ -61,30 +61,3 @@ def test_list_option_dirs_empty_for_a_normal_single_root_tree(tmp_path):
     # of options — list_option_dirs must not misreport it as one.
     _tree(tmp_path, "parts/x.dcx")
     assert list_option_dirs(tmp_path) == []
-
-
-def test_find_native_dll_picks_the_only_dll(tmp_path):
-    (tmp_path / "QuestPath").mkdir()
-    dll = tmp_path / "QuestPath" / "QuestPath.dll"
-    dll.write_bytes(b"MZ")
-    (tmp_path / "QuestPath" / "QuestPath.ini").write_text("")
-    assert find_native_dll(tmp_path, "questpath") == dll
-
-
-def test_find_native_dll_prefers_the_name_matching_the_mod_id(tmp_path):
-    # Some archives ship a dependency DLL beside the mod's own. Matching on the
-    # id keeps us from chainloading the dependency and leaving the mod dormant.
-    (tmp_path / "QuestPath.dll").write_bytes(b"MZ")
-    (tmp_path / "vcruntime140.dll").write_bytes(b"MZ")
-    assert find_native_dll(tmp_path, "questpath") == tmp_path / "QuestPath.dll"
-
-
-def test_find_native_dll_returns_none_when_ambiguous(tmp_path):
-    (tmp_path / "alpha.dll").write_bytes(b"MZ")
-    (tmp_path / "beta.dll").write_bytes(b"MZ")
-    assert find_native_dll(tmp_path, "questpath") is None
-
-
-def test_find_native_dll_returns_none_when_absent(tmp_path):
-    (tmp_path / "readme.txt").write_text("")
-    assert find_native_dll(tmp_path, "questpath") is None

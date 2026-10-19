@@ -43,28 +43,3 @@ def list_option_dirs(base):
         if find_package_root(d) is not None:
             out.append(d.name)
     return out
-
-
-def _normalized(name):
-    return "".join(c for c in name.lower() if c.isalnum())
-
-
-def find_native_dll(base, mod_id):
-    """The mod's own DLL under `base`, or None if it can't be picked confidently.
-
-    Elden Mod Loader only scans mods/*.dll, so a mod shipping its DLL inside a
-    folder has to be chainloaded by me3 instead — which means naming the exact
-    file. Prefer a DLL whose name matches the mod id, since archives that carry
-    a redistributable beside the real one would otherwise load the dependency
-    and leave the mod dormant. Returning None (rather than guessing) makes the
-    caller ask for an explicit choice.
-    """
-    dlls = sorted(Path(base).rglob("*.dll"))
-    if not dlls:
-        return None
-    named = [d for d in dlls if _normalized(d.stem) == _normalized(mod_id)]
-    if len(named) == 1:
-        return named[0]
-    if len(dlls) == 1:
-        return dlls[0]
-    return None

@@ -59,25 +59,14 @@ def pick_item(parent, title: str, label: str, items: list[str]) -> str | None:
     return chosen if accepted else None
 
 
-def choose_folder(parent, title: str, start: str) -> str | None:
-    from PyQt6.QtWidgets import QFileDialog
-
-    chosen = QFileDialog.getExistingDirectory(parent, title, start)
-    return chosen or None
-
-
-def _checklist(
-    parent, title: str, text: str, items: list[str], checked: list[str], reorder: bool = False
-) -> list[str] | None:
+def _checklist(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:
     """A dialog of tickable rows. Returns the ticked texts in list order, None when cancelled.
 
-    `checked` says which rows start ticked; `reorder` lets the user drag rows.
+    `checked` says which rows start ticked.
     An empty list is a real answer (tick nothing), which is why cancelling is None.
     """
     from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QAbstractItemView, QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout,
-    )
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
 
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
@@ -86,8 +75,6 @@ def _checklist(
     label.setWordWrap(True)
     layout.addWidget(label)
     listing = QListWidget()
-    if reorder:
-        listing.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
     for name in items:
         item = QListWidgetItem(name)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -102,14 +89,6 @@ def _checklist(
         return None
     rows = [listing.item(index) for index in range(listing.count())]
     return [row.text() for row in rows if row.checkState() == Qt.CheckState.Checked]
-
-
-def pick_profiles(parent, title: str, names: list[str]) -> list[str] | None:
-    """The ticked names in the order the list shows them, or None when cancelled.
-
-    The rows can be dragged to reorder them; every row starts ticked.
-    """
-    return _checklist(parent, title, "Profiles to import, in this order (drag to reorder):", names, names, reorder=True)
 
 
 def pick_files(parent, title: str, text: str, items: list[str], checked: list[str]) -> list[str] | None:

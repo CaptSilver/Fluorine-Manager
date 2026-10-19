@@ -291,9 +291,8 @@ class CreatePluginsTests(unittest.TestCase):
         self.assertEqual(
             [type(plugin).__name__ for plugin in plugins],
             [
-                "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "ImportFromErmTool",
-                "HardenTool", "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool",
-                "EldenRingDiagnose",
+                "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "HardenTool",
+                "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool", "EldenRingDiagnose",
             ],
         )
         opened = plugins[-1]._tools

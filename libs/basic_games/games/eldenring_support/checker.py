@@ -1,7 +1,7 @@
 """The game feature that decides which archives the Quick installer takes.
 
 Kept apart from kinds.py because it imports mobase; the classifier and the
-importers' helpers stay importable without it.
+list import's helpers stay importable without it.
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ class EldenRingModDataChecker(mobase.ModDataChecker):
     folder around a recognisable layout, INVALID otherwise.
 
     During an import (kinds.importing) the archive root is VALID whatever it
-    holds and every subtree is INVALID. The importers cannot look inside a
-    .7z or .rar before the install, so they let the Quick installer extract
+    holds and every subtree is INVALID. The list import cannot look inside a
+    .7z or .rar before the install, so it lets the Quick installer extract
     the archive whole and judge the folder afterwards; the subtree rule only
     keeps an installer that walks subtrees from picking a different base.
     """

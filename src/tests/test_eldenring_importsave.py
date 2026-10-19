@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tempfile
@@ -12,10 +11,9 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_importsave_tests")
 errors = support.module(PACKAGE, "ermlib.errors")
-importer = support.module(PACKAGE, "importer")
-importoverrides = support.module(PACKAGE, "importoverrides")
 importsave = support.module(PACKAGE, "importsave")
 kinds = support.module(PACKAGE, "kinds")
+report = support.module(PACKAGE, "report")
 saves = support.module(PACKAGE, "saves")
 state = support.module(PACKAGE, "state")
 
@@ -36,7 +34,7 @@ class SaveCase(unittest.TestCase):
         (self.save_dir / "ER0000.co2").write_bytes(CO2)
         self.steam = self.tmp / "steam"
         (self.steam / "userdata").mkdir(parents=True)
-        self.report = importer.Report()
+        self.report = report.Report()
         self.answer, self.action = importsave.NO, importsave.KEEP
         self.audited = saves.Audited(True, "ER0000.sl2\n\nThe audit found nothing.")
         self.texts: list[str] = []
@@ -46,7 +44,10 @@ class SaveCase(unittest.TestCase):
         audit = mock.patch.object(importsave.saves, "audit_file", side_effect=lambda path: self.audited)
         audit.start()
         self.addCleanup(audit.stop)
-        importsave.flag(self.organizer, self.save_dir, STAMP)
+        self.raise_flag()
+
+    def raise_flag(self) -> None:
+        self.organizer.setPersistent(kinds.PLUGIN, importsave.KEY_UNREVIEWED, STAMP)
 
     def ask_answer(self, text: str):
         self.texts.append(text)
@@ -94,42 +95,17 @@ class UnreadableFolderCase(SaveCase):
 
 
 class FlagTests(SaveCase):
-    def test_a_vanilla_save_raises_the_flag_with_the_stamp(self) -> None:
+    def test_a_raised_flag_holds_the_stamp(self) -> None:
         self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
 
-    def test_no_vanilla_save_raises_nothing(self) -> None:
-        other = support.FakeOrganizer(self.tmp / "other")
-        (self.save_dir / "ER0000.sl2").unlink()
-        self.assertFalse(importsave.flag(other, self.save_dir, STAMP))
-        self.assertEqual(importsave.unreviewed(other), "")
-
-    def test_a_raised_flag_keeps_its_first_stamp(self) -> None:
-        self.assertFalse(importsave.flag(self.organizer, self.save_dir, "20261014T130000000001Z"))
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-
-    def test_a_settled_question_is_not_raised_again(self) -> None:
+    def test_settling_records_the_answer_and_drops_the_flag(self) -> None:
         importsave.settle(self.organizer, "keep:no:clean")
         self.assertEqual(importsave.unreviewed(self.organizer), "")
         self.assertEqual(importsave.decision(self.organizer), "keep:no:clean")
-        self.assertFalse(importsave.flag(self.organizer, self.save_dir, "20261014T130000000001Z"))
-        self.assertEqual(importsave.unreviewed(self.organizer), "")
 
     def test_a_value_that_is_not_text_reads_as_nothing(self) -> None:
         self.organizer.persist[(kinds.PLUGIN, importsave.KEY_UNREVIEWED)] = 7
         self.assertEqual(importsave.unreviewed(self.organizer), "")
-
-
-class UnreadableFlagTests(UnreadableFolderCase):
-    def test_a_folder_that_cannot_be_read_raises_the_flag(self) -> None:
-        other = support.FakeOrganizer(self.tmp / "other")
-        self.lock_folder()
-        self.assertTrue(importsave.flag(other, self.save_dir, STAMP))
-        self.assertEqual(importsave.unreviewed(other), STAMP)
-
-    def test_a_missing_folder_raises_nothing(self) -> None:
-        other = support.FakeOrganizer(self.tmp / "other")
-        self.assertFalse(importsave.flag(other, self.tmp / "no-such-folder", STAMP))
-        self.assertEqual(importsave.unreviewed(other), "")
 
 
 class UnreadableReviewTests(UnreadableFolderCase):
@@ -176,7 +152,7 @@ class AnswerTests(SaveCase):
         ):
             with self.subTest(clean=audited.clean, answer=answer):
                 self.organizer.persist.clear()
-                importsave.flag(self.organizer, self.save_dir, STAMP)
+                self.raise_flag()
                 self.audited, self.answer, self.action = audited, answer, importsave.KEEP
                 self.preselected.clear()
                 self.review()
@@ -201,7 +177,7 @@ class AnswerTests(SaveCase):
         self.assertFalse(self.review())
         self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
         self.assertEqual(self.files(), ["ER0000.co2", "ER0000.sl2"])
-        self.assertIn("not marked done", self.report.text())
+        self.assertIn("stays open", self.report.text())
 
 
 class KeepTests(SaveCase):
@@ -259,7 +235,7 @@ class QuarantineTests(SaveCase):
         self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
         self.assertEqual(importsave.decision(self.organizer), "")
         self.assertIn("Steam", self.report.text())
-        self.assertIn("not marked done", self.report.text())
+        self.assertIn("stays open", self.report.text())
         self.steam_up = False
         self.assertTrue(self.review())
         self.assertFalse((self.save_dir / "ER0000.sl2").exists())
@@ -295,156 +271,6 @@ class ModdedTests(SaveCase):
         self.assertFalse(self.review())
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
         self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-
-
-class AcceptTests(SaveCase):
-    """The route dialog: answer the questions, or accept ER0000.sl2 as it is after one confirmation."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.route = importsave.ROUTE_ACCEPT
-        self.confirm = True
-        self.routes: list[str] = []
-        self.confirmations: list[str] = []
-        self.backup = importer.backup_copy(self.paths, "ER0000.sl2", STAMP)
-        self.backup.parent.mkdir(parents=True)
-        self.backup.write_bytes(SL2)
-        self.log = importoverrides.OverrideLog.open(self.paths, self.report, STAMP)
-
-    def ask_route(self, text: str):
-        self.routes.append(text)
-        return self.route
-
-    def confirm_accept(self, text: str) -> bool:
-        self.confirmations.append(text)
-        return self.confirm
-
-    def review_with_route(self) -> bool:
-        return importsave.review(
-            self.organizer, self.paths, self.save_dir, STAMP, self.report,
-            ask_answer=self.ask_answer, ask_action=self.ask_action, running=lambda: list(self.running),
-            steam_running=lambda: self.steam_up, install_root=lambda: self.steam,
-            ask_route=self.ask_route, confirm_accept=self.confirm_accept, backup=self.backup, overrides=self.log,
-        )
-
-    def test_accepting_settles_the_question_without_asking_anything_else_or_touching_the_file(self) -> None:
-        self.assertTrue(self.review_with_route())
-        self.assertEqual(importsave.unreviewed(self.organizer), "")
-        self.assertEqual(importsave.decision(self.organizer), "accepted:clean")
-        self.assertEqual((self.texts, self.preselected), ([], []))
-        self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2)
-        self.assertEqual(self.files(), ["ER0000.co2", "ER0000.sl2"])
-
-    def test_the_one_confirmation_names_the_backup_taken_before_the_import(self) -> None:
-        self.review_with_route()
-        [text] = self.confirmations
-        self.assertIn(str(self.backup), text)
-        self.assertIn(f"ER0000.sl2.{STAMP}-pre-erm-import", text)
-
-    def test_the_route_dialog_shows_the_audit(self) -> None:
-        self.review_with_route()
-        self.assertIn("The audit found nothing.", self.routes[0])
-
-    def test_it_is_recorded_and_listed_in_the_report_with_the_audit_and_the_backup(self) -> None:
-        self.review_with_route()
-        [entry] = json.loads(self.paths.import_overrides.read_text())["imports"][0]["overrides"]
-        self.assertEqual((entry["kind"], entry["subject"], entry["choice"]), ("save", "ER0000.sl2", "accepted as my vanilla save"))
-        self.assertIn(str(self.backup), entry["detail"])
-        self.assertTrue(any(text.startswith("Override: ER0000.sl2: accepted as my vanilla save.") for _, text in self.report.lines))
-
-    def test_findings_in_the_audit_do_not_stop_the_user_accepting_and_are_recorded(self) -> None:
-        self.audited = saves.Audited(False, "ER0000.sl2\n\nFound a modded item.")
-        self.assertTrue(self.review_with_route())
-        self.assertEqual(importsave.decision(self.organizer), "accepted:findings")
-        self.assertIn("had findings", self.report.text())
-        self.assertIn("The audit had findings", self.confirmations[0])
-
-    def test_declining_the_confirmation_leaves_the_flag_up_and_records_nothing(self) -> None:
-        self.confirm = False
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertFalse(self.paths.import_overrides.exists())
-        self.assertIn("not confirmed", self.report.text())
-
-    def test_closing_the_route_dialog_leaves_the_flag_up(self) -> None:
-        self.route = None
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertEqual(self.confirmations, [])
-        self.assertIn("was not looked at", self.report.text())
-
-    def test_the_questions_route_runs_the_existing_flow(self) -> None:
-        self.route = importsave.ROUTE_QUESTIONS
-        self.assertTrue(self.review_with_route())
-        self.assertEqual(importsave.decision(self.organizer), "keep:no:clean")
-        self.assertEqual(self.confirmations, [])
-        self.assertFalse(self.paths.import_overrides.exists())
-
-    def test_a_missing_backup_refuses_before_asking(self) -> None:
-        self.backup.unlink()
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(self.confirmations, [])
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertIn("is not there", self.report.text())
-
-    def test_no_backup_path_at_all_refuses_before_asking(self) -> None:
-        self.backup = None
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(self.confirmations, [])
-
-    def test_a_save_that_changed_since_the_backup_refuses_before_asking(self) -> None:
-        (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b" synced from the cloud")
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(self.confirmations, [])
-        self.assertIn("has changed since the copy", self.report.text())
-        self.assertIn("takes a new copy first", self.report.text())
-
-    def test_a_backup_that_is_a_link_to_the_save_refuses_before_asking(self) -> None:
-        self.backup.unlink()
-        self.backup.symlink_to(self.save_dir / "ER0000.sl2")
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(self.confirmations, [])
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertFalse(self.paths.import_overrides.exists())
-        self.assertIn("not a regular file", self.report.text())
-
-    def test_a_backup_swapped_for_a_link_while_the_confirmation_is_open_is_refused(self) -> None:
-        def confirm(text: str) -> bool:
-            self.backup.unlink()
-            self.backup.symlink_to(self.save_dir / "ER0000.sl2")
-            return True
-
-        self.confirm_accept = confirm
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertFalse(self.paths.import_overrides.exists())
-
-    def test_a_save_that_changes_while_the_confirmation_is_open_is_refused(self) -> None:
-        def confirm(text: str) -> bool:
-            (self.save_dir / "ER0000.sl2").write_bytes(SL2 + b" changed meanwhile")
-            return True
-
-        self.confirm_accept = confirm
-        self.assertFalse(self.review_with_route())
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertFalse(self.paths.import_overrides.exists())
-
-    def test_a_record_that_cannot_be_written_stops_the_acceptance(self) -> None:
-        with mock.patch.object(importoverrides.state, "write_json", side_effect=OSError("disk full")):
-            with self.assertRaises(OSError):
-                self.review_with_route()
-        self.assertEqual(importsave.unreviewed(self.organizer), STAMP)
-        self.assertEqual(importsave.decision(self.organizer), "")
-
-    def test_a_save_that_is_gone_is_settled_as_gone_without_a_route_dialog(self) -> None:
-        (self.save_dir / "ER0000.sl2").unlink()
-        self.assertTrue(self.review_with_route())
-        self.assertEqual(importsave.decision(self.organizer), importsave.GONE)
-        self.assertEqual(self.routes, [])
-
-    def test_without_the_route_callables_the_questions_are_asked_as_before(self) -> None:
-        self.assertTrue(self.review())
-        self.assertEqual(len(self.texts), 1)
 
 
 if __name__ == "__main__":

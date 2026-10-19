@@ -455,7 +455,7 @@ def record_on_install(mod) -> bool:
     """Record what the classifier makes of a freshly installed mod; first one wins.
 
     onModInstalled fires late (after installMod has returned, during the next
-    archive's extraction or after an import loop), so an importer that already
+    archive's extraction or after an import loop), so an import that already
     wrote a kind must not be overwritten.
     """
     if recorded_kind(mod) is not None:
@@ -476,7 +476,7 @@ def _refuse_generated(mod) -> None:
 
 
 def set_kind(mod, kind: str, native_dll: str | None = None, deploy_config=None) -> None:
-    """Record a kind chosen by a person or an importer, checking what it implies.
+    """Record a kind chosen by a person or a list import, checking what it implies.
 
     A native needs a DLL that passes native_dll_ok and, if it lists config
     files, a list that passes deploy_config_ok. Nothing is written when a check
@@ -509,7 +509,7 @@ def set_kind(mod, kind: str, native_dll: str | None = None, deploy_config=None) 
 
 # -- installing without a dialog ----------------------------------------------
 #
-# An importer runs installMod synchronously and must never stop on a dialog.
+# The list import runs installMod synchronously and must never stop on a dialog.
 # The bundled Python cannot open a .7z or .rar, so it lets Fluorine extract the
 # whole archive through the Quick installer and judges the result on disk.
 
@@ -549,7 +549,7 @@ def install_context(organizer):
     """Around one installMod call: Quick installer silent, FOMOD off, import mode.
 
     The scope is one install, never a whole run, so a user who starts an install
-    by hand between two of the importer's gets the normal installers. The prior
+    by hand between two of the list import's gets the normal installers. The prior
     state is saved under a persistent key first, because all of it is written to
     ModOrganizer.ini; EldenRingGame.init puts it back after a crash.
 
@@ -573,7 +573,7 @@ def install_context(organizer):
 
 
 def restore_interrupted(organizer) -> bool:
-    """Put the installer settings back after an import that died mid-install."""
+    """Put the installer settings back after a list import that died mid-install."""
     raw = organizer.persistent(PLUGIN, SAVED_KEY)
     if not raw:
         return False

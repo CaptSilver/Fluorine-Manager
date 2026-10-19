@@ -200,7 +200,7 @@ def parse_backup(path) -> Backup | None:
     """What a file in save-backups/ is, or None when it is not a copy of a save.
 
     Two shapes: <base>.<stamp>[-<label>], which is what every backup,
-    quarantine and importer copy is called, and <stamp>/<base>, the folder a
+    quarantine and import copy is called, and <stamp>/<base>, the folder a
     kept pre-session snapshot is moved into. The base is read from the name,
     never guessed from a part of it: a ".co2" in the name decides nothing.
     """

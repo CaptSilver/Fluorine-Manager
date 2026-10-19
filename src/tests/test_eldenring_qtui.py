@@ -21,7 +21,7 @@ def run_dialog(show, outcome, tick=None):
     """Call `show()` with QDialog.exec replaced by `outcome`.
 
     `tick` maps a row's text to the state the user leaves it in. Returns
-    the dialog's list widget, label text and drag mode as the user saw them.
+    the dialog's list widget and label text as the user saw them.
     """
     seen = {}
 
@@ -31,7 +31,6 @@ def run_dialog(show, outcome, tick=None):
             listing.item(i).text(): listing.item(i).checkState() == Qt.CheckState.Checked
             for i in range(listing.count())
         }
-        seen["drag"] = listing.dragDropMode()
         seen["labels"] = [label.text() for label in dialog.findChildren(QLabel)]
         for i in range(listing.count()):
             row = listing.item(i)
@@ -55,21 +54,10 @@ class ChecklistTests(unittest.TestCase):
         self.assertEqual(result, ["a", "b"])
         self.assertEqual(seen["states"], {"a": True, "b": False, "c": True})
         self.assertEqual(seen["labels"], ["pick"])
-        self.assertEqual(seen["drag"], qtui_drag_none())
 
     def test_cancel_is_none(self) -> None:
         result, _ = run_dialog(lambda: qtui._checklist(None, "t", "pick", ["a"], ["a"]), REJECT)
         self.assertIsNone(result)
-
-    def test_reorder_enables_internal_move(self) -> None:
-        _, seen = run_dialog(lambda: qtui._checklist(None, "t", "pick", ["a"], ["a"], reorder=True), ACCEPT)
-        from PyQt6.QtWidgets import QAbstractItemView
-
-        self.assertEqual(seen["drag"], QAbstractItemView.DragDropMode.InternalMove)
-
-
-def qtui_drag_none():
-    return QListWidget().dragDropMode()
 
 
 class PickFilesTests(unittest.TestCase):
@@ -84,20 +72,6 @@ class PickFilesTests(unittest.TestCase):
 
     def test_cancel_is_none(self) -> None:
         result, _ = run_dialog(lambda: qtui.pick_files(None, "t", "which", ["a"], ["a"]), REJECT)
-        self.assertIsNone(result)
-
-
-class PickProfilesTests(unittest.TestCase):
-    def test_every_row_starts_ticked_and_can_be_dragged(self) -> None:
-        from PyQt6.QtWidgets import QAbstractItemView
-
-        result, seen = run_dialog(lambda: qtui.pick_profiles(None, "t", ["x", "y"]), ACCEPT, {"x": False})
-        self.assertEqual(seen["states"], {"x": True, "y": True})
-        self.assertEqual(seen["drag"], QAbstractItemView.DragDropMode.InternalMove)
-        self.assertEqual(result, ["y"])
-
-    def test_cancel_is_none(self) -> None:
-        result, _ = run_dialog(lambda: qtui.pick_profiles(None, "t", ["x"]), REJECT)
         self.assertIsNone(result)
 
 

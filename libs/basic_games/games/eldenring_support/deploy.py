@@ -196,8 +196,8 @@ def reserved_reason(native_dll: str, config_path: object) -> str | None:
     """Why `config_path` may never be deployed for `native_dll`, or None.
 
     A syntactic check on the recorded text, made before anything is read from
-    disk: whatever wrote the value (the Set mod kind tool, an importer, a list
-    from a partner) it ends up as a path the plugin writes under Game/.
+    disk: whatever wrote the value (the Set mod kind tool, a list from a
+    partner) it ends up as a path the plugin writes under Game/.
     """
     if not isinstance(config_path, str) or not config_path:
         return "it is empty"

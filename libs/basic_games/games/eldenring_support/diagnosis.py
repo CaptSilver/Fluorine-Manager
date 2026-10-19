@@ -454,8 +454,7 @@ class Diagnosis:
                     "and once erm's Steam launch option is gone a Steam Play loads it under Easy Anti-Cheat. In "
                     'Tools > Tool Plugins > Elden Ring > Save tools…, "Quarantine ER0000.sl2…" or "Move a save to the modded '
                     'name…" takes it out of Steam\'s reach, and "Mark the session\'s save as reviewed" audits it and asks '
-                    "whether it ever ran under a profile without Seamless Co-op, as the import does. Until then the "
-                    "import is not marked done.",
+                    "whether it ever ran under a profile without Seamless Co-op.",
                     TOOL_SAVES,
                     informational=True,
                 )

@@ -37,8 +37,6 @@ class InstancePaths:
         self.stale_downloads = root / "stale-downloads"
         self.archive_hashes = root / "archive-hashes.json"
         self.last_launch = root / "last-launch.json"
-        self.import_overrides = root / "import-overrides.json"
-        self.profile_backups = root / "profile-backups"
 
     def view_dir(self, mod: str) -> Path:
         return self.views / mod
@@ -123,7 +121,7 @@ def read_json_object(path) -> dict | None:
 
 
 def read_build_stamp(paths: InstancePaths) -> "gamebuild.BuildId | None":
-    """The build the last successful launch (or the erm import) ran against, or None.
+    """The build the last successful launch ran against, or None.
 
     Not a cache: classify() answers "unchanged" for a missing stamp, so a stamp
     that exists but cannot be read must stop the launch, not read as missing.

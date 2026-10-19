@@ -48,10 +48,7 @@ class Ui:
 
 
 def adoption_refusal(game_dir: Path, manifest: deploy.Manifest, found: inventory.Candidates) -> str | None:
-    """Why nothing can be recorded as vanilla now, None when it can.
-
-    The adopt fix and the erm import ask the same question of the same Game/.
-    """
+    """Why nothing can be recorded as vanilla now, None when it can."""
     hits = [Path(hit).relative_to(game_dir).as_posix() for hit in doctor.scan_game_dir(game_dir)]
     if hits:
         return (
