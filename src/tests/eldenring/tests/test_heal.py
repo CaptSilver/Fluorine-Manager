@@ -22,6 +22,11 @@ def _game_with_regulation(tmp_path, blob=b"the 1.17 regulation"):
     return game, build_id(regulation_sha=_sha(blob))
 
 
+def _where(tmp_path):
+    """The baseline folder and stamp cache a rebase is told to use."""
+    return tmp_path / "baselines", tmp_path / "stamps.json"
+
+
 def test_baseline_path_is_named_for_the_build(tmp_path):
     assert heal.baseline_path("11701000", tmp_path).name == "regulation-11701000.bin"
 
@@ -308,18 +313,18 @@ def test_prepare_rebase_is_empty_when_the_ancestor_is_the_installed_build(tmp_pa
     # The mods branched from the build that is running, so there is nothing to
     # forward-port them onto.
     assert heal.prepare_rebase(
-        tmp_path, build_id(), _regulation_blob("11701000"), [("clevers", b"mod")]) == {}
+        tmp_path, build_id(), _regulation_blob("11701000"), [("clevers", b"mod")], *_where(tmp_path)) == {}
 
 
 def test_prepare_rebase_is_empty_when_no_merge_declares_an_ancestor(tmp_path):
-    assert heal.prepare_rebase(tmp_path, build_id(), None, [("clevers", b"mod")]) == {}
+    assert heal.prepare_rebase(tmp_path, build_id(), None, [("clevers", b"mod")], *_where(tmp_path)) == {}
 
 
 def test_prepare_rebase_is_empty_when_no_mod_ships_a_regulation(tmp_path):
     # An overlay profile whose packages carry no regulation.bin has nothing to
     # gate and nothing to fold, however far the game has moved.
     assert heal.prepare_rebase(
-        tmp_path, build_id(), _regulation_blob("11611000"), []) == {}
+        tmp_path, build_id(), _regulation_blob("11611000"), [], *_where(tmp_path)) == {}
 
 
 def test_prepare_rebase_offers_the_adopted_baseline_for_an_older_ancestor(
@@ -327,7 +332,7 @@ def test_prepare_rebase_offers_the_adopted_baseline_for_an_older_ancestor(
     game, live = _game_with_regulation(tmp_path)
     monkeypatch.setattr(heal, "layout_gate", lambda base, mods: ())
     out = heal.prepare_rebase(game, live, _regulation_blob("11611000"),
-                              [("clevers", b"mod")], base=tmp_path / "baselines")
+                              [("clevers", b"mod")], *_where(tmp_path))
     assert out == {"regulation.bin": b"the 1.17 regulation"}
 
 
@@ -343,7 +348,7 @@ def test_prepare_rebase_answers_the_same_on_a_stack_stamped_to_the_game(
         b"the 1.17 regulation")
     monkeypatch.setattr(heal, "layout_gate", lambda base, mods: ())
     out = heal.prepare_rebase(game, live, _regulation_blob("11611000"),
-                              [("clevers", b"mod")], base=tmp_path / "baselines")
+                              [("clevers", b"mod")], *_where(tmp_path))
     assert out == {"regulation.bin": b"the 1.17 regulation"}
 
 
@@ -352,7 +357,7 @@ def test_prepare_rebase_refuses_an_ancestor_it_cannot_read(tmp_path):
     # 1.17 game, which is the state this whole path exists to prevent.
     with pytest.raises(GameBuildError):
         heal.prepare_rebase(tmp_path, build_id(), b"not a regulation",
-                            [("clevers", b"mod")])
+                            [("clevers", b"mod")], *_where(tmp_path))
 
 
 def test_prepare_rebase_stops_the_apply_when_a_layout_moved(tmp_path, monkeypatch):
@@ -363,7 +368,7 @@ def test_prepare_rebase_stops_the_apply_when_a_layout_moved(tmp_path, monkeypatc
                         lambda base, mods: ("clevers: X.param row stride 8 != baseline 16",))
     with pytest.raises(HealError, match="stride"):
         heal.prepare_rebase(game, live, _regulation_blob("11611000"),
-                            [("clevers", b"mod")], base=tmp_path / "baselines")
+                            [("clevers", b"mod")], *_where(tmp_path))
 
 
 # --- how often a regulation gets decrypted ---
@@ -395,18 +400,17 @@ def test_prepare_rebase_takes_the_ancestors_build_from_the_stamp_cache(
     every apply -- the same trade status and doctor already make, and five
     seconds of AES off the front of every apply."""
     ancestor = _regulation_blob("11701000")
-    gamebuild.cached_regulation_version(ancestor)
+    gamebuild.cached_regulation_version(ancestor, _where(tmp_path)[1])
     _refuse_to_decrypt(monkeypatch)
     assert heal.prepare_rebase(
-        tmp_path, build_id(), ancestor, [("clevers", b"mod")]) == {}
+        tmp_path, build_id(), ancestor, [("clevers", b"mod")], *_where(tmp_path)) == {}
 
 
 def test_prepare_rebase_keeps_the_stamp_cache_where_it_is_told(tmp_path):
     chosen = tmp_path / "instance" / "stamps.json"
     heal.prepare_rebase(tmp_path, build_id(), _regulation_blob("11701000"),
-                        [("clevers", b"mod")], cache_path=chosen)
+                        [("clevers", b"mod")], tmp_path / "baselines", chosen)
     assert chosen.exists()
-    assert not gamebuild.CACHE_PATH.exists()
 
 
 def test_verify_decrypts_the_merged_regulation_only_once(monkeypatch):

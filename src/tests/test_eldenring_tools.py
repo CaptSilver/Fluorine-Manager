@@ -1421,8 +1421,8 @@ class HardenToolCase(ModToolCase):
         self.addCleanup(problems.subscribe(lambda: self.heard.append(1)))
         for patcher in (
             mock.patch.object(hardening, "is_immutable", side_effect=lambda path: self.locked),
-            mock.patch.object(hardening.ermharden, "set_immutable", side_effect=self.fake_lock),
-            mock.patch.object(hardening.ermharden.subprocess, "run", side_effect=AssertionError("real pkexec")),
+            mock.patch.object(hardening, "set_immutable", side_effect=self.fake_lock),
+            mock.patch.object(hardening.subprocess, "run", side_effect=AssertionError("real pkexec")),
             mock.patch.object(hardening.procs, "game_running", side_effect=lambda: list(self.up)),
         ):
             patcher.start()

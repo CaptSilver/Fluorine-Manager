@@ -173,9 +173,9 @@ def test_identify_reads_the_stamp_through_the_cache(tmp_path, monkeypatch):
                         lambda blob: calls.append(blob) or _payload())
     monkeypatch.setattr(gamebuild.steam, "read_appmanifest",
                         lambda root: {"buildid": "23850278"})
-    monkeypatch.setattr(gamebuild, "CACHE_PATH", tmp_path / "stamps.json")
-    assert gamebuild.identify(game, tmp_path).regulation == "11701000"
-    assert gamebuild.identify(game, tmp_path).regulation == "11701000"
+    cache = tmp_path / "stamps.json"
+    assert gamebuild.identify(game, tmp_path, cache).regulation == "11701000"
+    assert gamebuild.identify(game, tmp_path, cache).regulation == "11701000"
     assert len(calls) == 1
 
 
@@ -192,12 +192,9 @@ def test_identify_keeps_the_stamp_cache_where_it_is_told(tmp_path, monkeypatch):
     monkeypatch.setattr(gamebuild.regulation, "unpack", lambda blob: _payload())
     monkeypatch.setattr(gamebuild.steam, "read_appmanifest",
                         lambda root: {"buildid": "23850278"})
-    default = tmp_path / "default-stamps.json"
-    monkeypatch.setattr(gamebuild, "CACHE_PATH", default)
     chosen = tmp_path / "instance" / "stamps.json"
     gamebuild.identify(game, tmp_path, cache_path=chosen)
     assert chosen.exists()
-    assert not default.exists()
 
 
 def test_identify_reports_a_steam_library_it_cannot_read_as_a_build_error(
@@ -214,7 +211,7 @@ def test_identify_reports_a_steam_library_it_cannot_read_as_a_build_error(
 
     monkeypatch.setattr(gamebuild.steam, "read_appmanifest", unreadable)
     with pytest.raises(GameBuildError, match="Steam"):
-        gamebuild.identify(game, tmp_path)
+        gamebuild.identify(game, tmp_path, tmp_path / "stamps.json")
 
 
 def test_identify_reports_a_garbled_app_manifest_as_a_build_error(tmp_path, monkeypatch):
@@ -226,7 +223,7 @@ def test_identify_reports_a_garbled_app_manifest_as_a_build_error(tmp_path, monk
     manifest.parent.mkdir()
     manifest.write_text('"AppState"\n{\n\t"SizeOnDisk"\t\t"12x4"\n\t"buildid"\t\t"1"\n}\n')
     with pytest.raises(GameBuildError, match="Steam"):
-        gamebuild.identify(game, tmp_path)
+        gamebuild.identify(game, tmp_path, tmp_path / "stamps.json")
 
 
 def test_identify_assembles_from_all_three_sources(tmp_path, monkeypatch):
@@ -239,7 +236,7 @@ def test_identify_assembles_from_all_three_sources(tmp_path, monkeypatch):
     monkeypatch.setattr(gamebuild.regulation, "unpack", lambda blob: bytes(payload))
     monkeypatch.setattr(gamebuild.steam, "read_appmanifest",
                         lambda root: {"buildid": "23850278"})
-    got = gamebuild.identify(game, tmp_path)
+    got = gamebuild.identify(game, tmp_path, tmp_path / "stamps.json")
     assert got.exe == "2.7.0.0"
     assert got.app == "1.17.0"
     assert got.regulation == "11701000"
@@ -262,7 +259,7 @@ def test_identify_refuses_when_steam_has_no_buildid(tmp_path, monkeypatch):
     monkeypatch.setattr(gamebuild.regulation, "unpack", lambda blob: bytes(payload))
     monkeypatch.setattr(gamebuild.steam, "read_appmanifest", lambda root: {})
     with pytest.raises(gamebuild.GameBuildError, match="build id"):
-        gamebuild.identify(game, tmp_path)
+        gamebuild.identify(game, tmp_path, tmp_path / "stamps.json")
 
 
 def test_build_id_requires_every_identity_field():
@@ -321,5 +318,5 @@ def test_the_sha_identify_computes_is_the_one_adopt_baseline_checks(tmp_path, mo
     monkeypatch.setattr(gamebuild.steam, "read_appmanifest",
                         lambda root: {"buildid": "23850278"})
 
-    live = gamebuild.identify(game, tmp_path)
+    live = gamebuild.identify(game, tmp_path, tmp_path / "stamps.json")
     assert heal.adopt_baseline(game, live, tmp_path / "baselines").exists()
