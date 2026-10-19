@@ -25,6 +25,11 @@ void ModListProxy::connectSignals()
       callSignalIfPluginActive(m_OrganizerProxy, m_ModRemoved)));
   m_Connections.push_back(m_Proxied->onModStateChanged(
       callSignalIfPluginActive(m_OrganizerProxy, m_ModStateChanged)));
+
+  m_SignalsConnected = true;
+  for (const auto& action : m_ContextActions) {
+    forwardContextAction(action);
+  }
 }
 
 void ModListProxy::disconnectSignals()
@@ -33,6 +38,25 @@ void ModListProxy::disconnectSignals()
     conn.disconnect();
   }
   m_Connections.clear();
+
+  // Dropping the handles removes the entries from the menu.
+  m_SignalsConnected = false;
+  m_ContextActionHandles.clear();
+}
+
+void ModListProxy::forwardContextAction(const ModContextActions::Action& action)
+{
+  // Same gate the signals get from callSignalIfPluginActive, plus a catch that can
+  // name the plugin, which the shared registry cannot.
+  const auto guarded = ModContextActions::guarded(
+      action,
+      [p = m_OrganizerProxy] {
+        return p->isPluginEnabled(p->plugin());
+      },
+      m_OrganizerProxy->plugin()->name());
+
+  m_ContextActionHandles.push_back(m_Proxied->addContextMenuAction(
+      guarded.label, guarded.triggered, guarded.visible));
 }
 
 QString ModListProxy::displayName(const QString& internalName) const
@@ -89,6 +113,19 @@ int ModListProxy::priority(const QString& name) const
 bool ModListProxy::setPriority(const QString& name, int newPriority)
 {
   return m_Proxied->setPriority(name, newPriority);
+}
+
+bool ModListProxy::addContextMenuAction(
+    const QString& label,
+    const std::function<void(IModInterface*, QWidget*)>& triggered,
+    const std::function<bool(IModInterface*)>& visible)
+{
+  const ModContextActions::Action action{label, triggered, visible};
+  m_ContextActions.push_back(action);
+  if (m_SignalsConnected) {
+    forwardContextAction(action);
+  }
+  return true;
 }
 
 bool ModListProxy::onModInstalled(const std::function<void(IModInterface*)>& func)

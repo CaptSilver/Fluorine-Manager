@@ -104,6 +104,10 @@ private:
   void addBackupActions(ModInfo::Ptr mod);
   void addRegularActions(ModInfo::Ptr mod);
 
+  // adds the entries plugins registered through IModList::addContextMenuAction()
+  //
+  void addPluginActions(ModInfo::Ptr mod);
+
   OrganizerCore& m_core;
   CategoryFactory* m_categories;
   QModelIndex m_index;

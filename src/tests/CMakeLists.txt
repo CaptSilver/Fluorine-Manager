@@ -1388,6 +1388,17 @@ target_link_libraries(test_modlistmetadata PRIVATE Qt6::Core GTest::gtest)
 add_test(NAME test_modlistmetadata COMMAND test_modlistmetadata)
 add_dependencies(fluorine-tests test_modlistmetadata)
 
+add_executable(test_modcontextactions EXCLUDE_FROM_ALL
+    test_modcontextactions.cpp ${CMAKE_SOURCE_DIR}/src/src/modcontextactions.cpp)
+set_target_properties(test_modcontextactions PROPERTIES AUTOMOC OFF CXX_STANDARD 23)
+target_include_directories(test_modcontextactions PRIVATE ${CMAKE_SOURCE_DIR}/src/src)
+target_compile_options(test_modcontextactions PRIVATE
+    "-idirafter" "${CMAKE_SOURCE_DIR}/libs/uibase/include/uibase")
+target_link_libraries(test_modcontextactions PRIVATE
+    Qt6::Core Qt6::Widgets mo2::uibase GTest::gtest)
+add_test(NAME test_modcontextactions COMMAND test_modcontextactions)
+add_dependencies(fluorine-tests test_modcontextactions)
+
 target_sources(test_clf3_collections PRIVATE ${CMAKE_SOURCE_DIR}/src/src/modlistmetadata.cpp)
 
 add_library(installer_smoke_probe SHARED EXCLUDE_FROM_ALL installer_smoke_probe.cpp)

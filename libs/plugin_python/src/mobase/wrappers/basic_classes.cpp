@@ -554,7 +554,25 @@ namespace mo2::python {
             .def("onModRemoved", &MOBase::IModList::onModRemoved, "callback"_a)
             .def("onModStateChanged", &MOBase::IModList::onModStateChanged,
                  "callback"_a)
-            .def("onModMoved", &MOBase::IModList::onModMoved, "callback"_a);
+            .def("onModMoved", &MOBase::IModList::onModMoved, "callback"_a)
+            .def(
+                "addContextMenuAction",
+                [](IModList* modList, const QString& label,
+                   const std::function<void(IModInterface*, QWidget*)>& triggered,
+                   const std::function<bool(IModInterface*)>& visible) {
+                    // None converts to an empty function; left alone it would only
+                    // fail later, as std::bad_function_call on the first click.
+                    if (!triggered) {
+                        throw py::type_error("triggered must be callable");
+                    }
+                    return modList->addContextMenuAction(label, triggered, visible);
+                },
+                "label"_a, "triggered"_a,
+                "visible"_a = std::function<bool(MOBase::IModInterface*)>{},
+                "Add an entry to the context menu of regular mods. triggered(mod, "
+                "parent_widget) runs for the clicked mod only. visible(mod) -> bool "
+                "decides per mod; it must return a bool, because a missing return "
+                "(None) counts as False and hides the entry.");
     }
 
     void add_iorganizer_classes(py::module_ m)

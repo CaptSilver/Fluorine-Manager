@@ -30,6 +30,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "imodinterface.h"
 #include "iprofile.h"
 
+class QWidget;
+
 namespace MOBase
 {
 
@@ -220,6 +222,30 @@ public:
    */
   virtual bool
   onModMoved(const std::function<void(const QString&, int, int)>& func) = 0;
+
+  /**
+   * @brief Add an entry to the context menu of regular mods in the mod list.
+   *
+   * The entry is shown for a mod when visible is empty or returns true for it, and
+   * triggered runs when the user picks it. Entries from all plugins appear together
+   * after the built-in entries. Separators, the overwrite entry, backups and
+   * unmanaged (foreign) entries never get plugin entries. The entry is hidden while
+   * the plugin is disabled (including when its requirements are not met, e.g. a game
+   * dependency) and removed when it is unloaded.
+   *
+   * @param label Text of the menu entry, already translated.
+   * @param triggered Called with the clicked mod and a widget to parent dialogs on.
+   *   It gets the clicked mod only, even when several mods are selected.
+   * @param visible Called with the clicked mod each time the menu opens; empty means
+   *   always visible. Keep it cheap: it runs on every right-click.
+   *
+   * @return true if the entry was added (there is as of now no known reason this
+   *   should fail).
+   */
+  virtual bool addContextMenuAction(
+      const QString& label,
+      const std::function<void(IModInterface*, QWidget*)>& triggered,
+      const std::function<bool(IModInterface*)>& visible = {}) = 0;
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(IModList::ModStates)

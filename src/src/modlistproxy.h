@@ -31,6 +31,10 @@ public:
   bool onModStateChanged(
       const std::function<void(const std::map<QString, ModStates>&)>& func) override;
   bool onModMoved(const std::function<void(const QString&, int, int)>& func) override;
+  bool addContextMenuAction(
+      const QString& label,
+      const std::function<void(MOBase::IModInterface*, QWidget*)>& triggered,
+      const std::function<bool(MOBase::IModInterface*)>& visible = {}) override;
 
 private:
   friend class OrganizerProxy;
@@ -48,6 +52,16 @@ private:
   ModList::SignalModStateChanged m_ModStateChanged;
 
   std::vector<boost::signals2::connection> m_Connections;
+
+  // Hands one stored action to the real mod list. The action stays in the menu
+  // while its handle is kept.
+  void forwardContextAction(const ModContextActions::Action& action);
+
+  // As the plugin registered them, kept so they can be forwarded when the signals
+  // connect.
+  std::vector<ModContextActions::Action> m_ContextActions;
+  std::vector<ModContextActions::Handle> m_ContextActionHandles;
+  bool m_SignalsConnected = false;
 };
 
 #endif  // ORGANIZERPROXY_H

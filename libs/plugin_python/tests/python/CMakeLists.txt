@@ -20,6 +20,7 @@ target_sources(python-tests
 		test_filetree.py
 		test_functional.py
 		test_guessed_string.py
+		test_modlist.py
 		test_organizer.py
 		test_path_wrappers.py
 		test_qt_widgets.py
