@@ -29,8 +29,25 @@ UNKNOWN = "unknown"
 # answers it.
 GENERATED = "generated"
 KINDS = (PACKAGE, NATIVE, ERSC, UNKNOWN, GENERATED)
-# What the Set mod kind tool offers.
+# What the Set mod kind dialog offers.
 SETTABLE = (PACKAGE, NATIVE, ERSC, UNKNOWN)
+
+# The dialog is an entry in the mod's right-click menu where the core has one
+# and a Tools-menu entry where it does not; messages that send a person there
+# say both.
+SET_KIND_LABEL = "Set Elden Ring kind..."
+SET_KIND_WHERE = (
+    f'Right-click the mod and choose "{SET_KIND_LABEL}". A Fluorine without that menu entry has '
+    "Tools > Tool Plugins > Elden Ring > Set mod kind… instead."
+)
+
+
+def mod_menu_takes_actions() -> bool:
+    """Whether this Fluorine lets a plugin add entries to a mod's right-click menu."""
+    import mobase  # the rest of this module runs without it; only the running plugin asks
+
+    return hasattr(getattr(mobase, "IModList", None), "addContextMenuAction")
+
 
 # Files that load code or replace the launcher. A bare one is never called a
 # native on its own: whether me3 can chainload a proxy DLL is the user's call.

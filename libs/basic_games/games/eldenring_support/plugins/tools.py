@@ -125,18 +125,23 @@ class EldenRingTool(mobase.IPluginTool, mobase.IPlugin):
         problems.invalidate()
         action(prepared)
 
-    def _shielded(self, action) -> None:
-        """Run `action`, turning any failure into a dialog; a tool must not take the UI down."""
+    def _shielded(self, action, parent=None) -> None:
+        """Run `action`, turning any failure into a dialog; a tool must not take the UI down.
+
+        `parent` is the window for that dialog when the caller was not started
+        from the Tools menu and so never had setParentWidget called.
+        """
+        parent = self._parent if parent is None else parent
         try:
             action()
         except ErmError as exc:
-            QMessageBox.critical(self._parent, self.dialogTitle(), str(exc))
+            QMessageBox.critical(parent, self.dialogTitle(), str(exc))
         except Exception as exc:
             qWarning(
                 f"{self.dialogTitle()}: unexpected failure: {exc!r}\n{traceback.format_exc()}"
             )
             QMessageBox.critical(
-                self._parent, self.dialogTitle(), f"Unexpected failure: {exc}"
+                parent, self.dialogTitle(), f"Unexpected failure: {exc}"
             )
 
 
@@ -784,55 +789,80 @@ class SetModKindTool(EldenRingTool):
         return "Set or re-detect what kind of mod this is."
 
     def run(self) -> None:
+        self.pick_and_set(self._parent)
+
+    def pick_and_set(self, parent) -> None:
+        """Ask which mod, then open the kind dialog for it."""
         modlist = self._organizer.modList()
-        names = []
-        for name in modlist.allModsByProfilePriority():
-            mod = modlist.getMod(name)
-            if mod is not None and not mod.isSeparator() and name != generated.NAME:
-                names.append(name)
+        names = [name for name in modlist.allModsByProfilePriority() if self._offered(modlist.getMod(name))]
         title = self.dialogTitle()
         if not names:
-            QMessageBox.information(self._parent, title, "There are no mods to set.")
+            QMessageBox.information(parent, title, "There are no mods to set.")
             return
-        picked = qtui.pick_item(self._parent, title, "Mod:", names)
+        picked = qtui.pick_item(parent, title, "Mod:", names)
         if picked is None:
             return
         mod = modlist.getMod(picked)
         if mod is None:
-            QMessageBox.critical(self._parent, title, f"{picked} is no longer in the mod list.")
+            QMessageBox.critical(parent, title, f"{picked} is no longer in the mod list.")
             return
+        self._set_kind(mod, parent)
+
+    @staticmethod
+    def _offered(mod) -> bool:
+        """Whether the kind of `mod` is the plugin's to set: not a separator, not the generated mod."""
+        return mod is not None and not mod.isSeparator() and mod.name() != generated.NAME
+
+    def register_context_action(self, organizer) -> None:
+        """Offer the kind dialog in the right-click menu of a mod, for Elden Ring instances only."""
+        self._organizer = organizer
+        organizer.modList().addContextMenuAction(
+            kinds.SET_KIND_LABEL,
+            lambda mod, parent: self._shielded(lambda: self._set_kind(mod, parent), parent),
+            self._shown_for,
+        )
+
+    def _shown_for(self, mod) -> bool:
+        # The menu asks on every right-click and the plugin is loaded for every game.
+        game = self._organizer.managedGame()
+        return game is not None and game.name() == kinds.PLUGIN and self._offered(mod)
+
+    def _set_kind(self, mod, parent) -> None:
+        title = self.dialogTitle()
         classified = kinds.classify(kinds.PathListing(mod.absolutePath()), mod.name())
-        choice = _choose(self._parent, title, describe_kind(mod, classified), SET_KIND_CHOICES)
+        choice = _choose(parent, title, describe_kind(mod, classified), SET_KIND_CHOICES)
         if choice is None:
             return
         kind = SET_KIND_CHOICES[choice]
         if kind == "reclassify":
             answer = kinds.reclassify(mod)
-            QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {answer.kind}.")
+            problems.invalidate()
+            QMessageBox.information(parent, title, f"{mod.name()} is recorded as {answer.kind}.")
             return
         native_dll = None
         deploy_config = None
         if kind == kinds.NATIVE:
             dlls = [f for f in kinds.install_files(mod.absolutePath()) if f.lower().endswith(".dll")]
             if not dlls:
-                QMessageBox.critical(self._parent, title, f"{mod.name()} holds no DLL to load.")
+                QMessageBox.critical(parent, title, f"{mod.name()} holds no DLL to load.")
                 return
-            native_dll = qtui.pick_item(self._parent, title, "DLL to load:", dlls)
+            native_dll = qtui.pick_item(parent, title, "DLL to load:", dlls)
             if native_dll is None:
                 return
-            deploy_config = self._choose_config_files(mod, native_dll)
+            deploy_config = self._choose_config_files(mod, native_dll, parent)
             if deploy_config is None:
                 return
         kinds.set_kind(mod, kind, native_dll=native_dll, deploy_config=deploy_config)
+        problems.invalidate()
         note = (
             "\n\nIts config files are copied into Game/mods/ at every launch, which needs the launcher "
             'hardened: Tools > Tool Plugins > Elden Ring > Harden or unharden launcher….'
             if deploy_config
             else ""
         )
-        QMessageBox.information(self._parent, title, f"{mod.name()} is recorded as {kind}.{note}")
+        QMessageBox.information(parent, title, f"{mod.name()} is recorded as {kind}.{note}")
 
-    def _choose_config_files(self, mod, native_dll: str) -> list[str] | None:
+    def _choose_config_files(self, mod, native_dll: str, parent) -> list[str] | None:
         """The config files to deploy for this DLL, [] for none, None when cancelled.
 
         A DLL written the LukeYui way reads config.ini from Game/mods/<Name>/
@@ -849,7 +879,7 @@ class SetModKindTool(EldenRingTool):
         else:
             ticked = kinds.propose_deploy_config(kinds.PathListing(mod.absolutePath()), native_dll)
         return qtui.pick_files(
-            self._parent,
+            parent,
             self.dialogTitle(),
             f"Config files to copy into Game/mods/{Path(native_dll).stem}/ at every launch. Tick them for a "
             "mod that reads its config.ini from there (AdjustTheFov and the other LukeYui mods do). Leave "

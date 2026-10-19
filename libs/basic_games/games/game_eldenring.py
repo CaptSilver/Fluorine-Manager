@@ -73,6 +73,7 @@ class EldenRingGame(BasicGame):
         # Written only by this plugin's list import, so no isActive guard.
         kinds.restore_interrupted(organizer)
         self._register_feature(checker.EldenRingModDataChecker())
+        self._register_set_kind_menu(organizer)
         self._gate = gate.LaunchGate(
             organizer,
             self,
@@ -97,6 +98,20 @@ class EldenRingGame(BasicGame):
             qWarning("Elden Ring: could not register the launch gate callbacks")
             return False
         return True
+
+    def _register_set_kind_menu(self, organizer) -> None:
+        # Registered here and not from the Problems plugin: this one is initialised
+        # for every instance, and the user can disable that one. The entry hides
+        # itself for any other game. Without the core's API Set mod kind stays a
+        # Tools entry, which the tool plugins provide.
+        if not kinds.mod_menu_takes_actions():
+            return
+        try:
+            from .eldenring_support.plugins import tools
+
+            tools.SetModKindTool().register_context_action(organizer)
+        except Exception as exc:
+            qWarning(f"Elden Ring: could not add Set mod kind to the mod menu: {exc!r}")
 
     def settings(self) -> list[mobase.PluginSetting]:
         return super().settings() + [

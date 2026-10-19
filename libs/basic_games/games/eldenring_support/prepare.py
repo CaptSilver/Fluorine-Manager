@@ -286,7 +286,7 @@ def _check_mods(organizer, refs: list[mods.ModRef]) -> list[str]:
             raise Veto(
                 "Mod list",
                 f"{ref.name} is a native mod without a usable DLL (recorded: {ref.native_dll!r}).",
-                'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and choose the DLL.',
+                f'{kinds.SET_KIND_WHERE} Choose the DLL there.',
                 NATIVE_DLL_MISSING,
             )
         if ref.kind == kinds.NATIVE:
@@ -296,7 +296,7 @@ def _check_mods(organizer, refs: list[mods.ModRef]) -> list[str]:
                     "Mod list",
                     f"{ref.name} lists config files that cannot be deployed to Game/mods/ "
                     f"(recorded: {listed!r}).",
-                    'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and correct them.',
+                    f'{kinds.SET_KIND_WHERE} Correct them there.',
                     deploy.DEPLOY_CONFIG_INVALID,
                 )
         if ref.kind == kinds.UNKNOWN:

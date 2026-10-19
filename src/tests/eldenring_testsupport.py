@@ -190,6 +190,7 @@ class FakeModList:
         self.moved_callbacks: list = []
         self.queued_installs: list[FakeMod] = []
         self.refuse_changes = False
+        self.context_actions: dict[str, tuple] = {}
 
     def add(self, name, *, enabled=True, files=None, kind=None, **mod_args) -> FakeMod:
         path = self.organizer.modsPath_ / name
@@ -210,6 +211,17 @@ class FakeModList:
         self.order.append(mod.name())
         if enabled:
             self.active.add(mod.name())
+
+    def addContextMenuAction(self, label, triggered, visible=None) -> bool:  # noqa: N802 - mobase spelling
+        self.context_actions[label] = (triggered, visible)
+        return True
+
+    def action_visible(self, label, mod) -> bool:
+        visible = self.context_actions[label][1]
+        return True if visible is None else visible(mod)
+
+    def fire(self, label, mod, parent) -> None:
+        self.context_actions[label][0](mod, parent)
 
     def allModsByProfilePriority(self, profile=None) -> list[str]:  # noqa: N802
         return list(self.order)
