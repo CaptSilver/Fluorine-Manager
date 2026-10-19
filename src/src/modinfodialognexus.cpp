@@ -8,6 +8,12 @@
 #include <QLocale>
 #include <utility.h>
 #include <versioninfo.h>
+#ifdef MO2_WEBENGINE
+#include "nexuslinkpolicy.h"
+#include <QLayout>
+#include <QWebEngineSettings>
+#include <QWebEngineView>
+#endif
 
 using namespace MOBase;
 
@@ -16,9 +22,80 @@ bool isValidModID(int id)
   return (id > 0);
 }
 
+#ifdef MO2_WEBENGINE
+NexusDescriptionPage::NexusDescriptionPage(QObject* parent, bool popup)
+    : QWebEnginePage(parent), m_popup(popup)
+{
+}
+
+bool NexusDescriptionPage::acceptNavigationRequest(const QUrl& url, NavigationType type,
+                                                   bool isMainFrame)
+{
+  using NexusLinkPolicy::Kind;
+
+  Kind kind = Kind::Other;
+  if (type == NavigationTypeLinkClicked) {
+    kind = Kind::LinkClicked;
+  } else if (type == NavigationTypeFormSubmitted) {
+    kind = Kind::FormSubmitted;
+  }
+
+  const auto action = NexusLinkPolicy::decide(url, kind, isMainFrame, m_popup);
+
+  switch (action) {
+  case NexusLinkPolicy::Action::Allow:
+    return true;
+  case NexusLinkPolicy::Action::OpenExternally:
+    MOBase::shell::Open(url);
+    [[fallthrough]];
+  case NexusLinkPolicy::Action::Block:
+    break;
+  }
+
+  if (m_popup) {
+    deleteLater();
+  }
+  return false;
+}
+
+QWebEnginePage* NexusDescriptionPage::createWindow(WebWindowType)
+{
+  return new NexusDescriptionPage(this, true);
+}
+#endif
+
 NexusTab::NexusTab(ModInfoDialogTabContext cx)
     : ModInfoDialogTab(std::move(cx))
 {
+#ifdef MO2_WEBENGINE
+  // The .ui keeps a QTextBrowser so the build without WebEngine is unchanged;
+  // with it, the view takes the browser's place in the layout.
+  {
+    QWidget* const old = ui->browser;
+    m_webView          = new QWebEngineView(old->parentWidget());
+
+    // The page is parented to the view so both go away with the tab; a page
+    // outliving its profile makes Qt warn on shutdown.
+    auto* const page = new NexusDescriptionPage(m_webView);
+    page->setBackgroundColor(QColor("#404040"));
+    page->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, false);
+    m_webView->setPage(page);
+
+    for (const auto action :
+         {QWebEnginePage::Back, QWebEnginePage::Forward, QWebEnginePage::Reload,
+          QWebEnginePage::ViewSource, QWebEnginePage::SavePage,
+          QWebEnginePage::DownloadImageToDisk, QWebEnginePage::DownloadLinkToDisk,
+          QWebEnginePage::DownloadMediaToDisk}) {
+      m_webView->pageAction(action)->setVisible(false);
+    }
+
+    m_webView->setSizePolicy(old->sizePolicy());
+    m_webView->setMinimumSize(old->minimumSize());
+    old->parentWidget()->layout()->replaceWidget(old, m_webView);
+    old->hide();
+  }
+#endif
+
   ui->modID->setValidator(new QIntValidator(ui->modID));
   ui->endorse->setVisible(core().settings().nexus().endorsementIntegration());
   ui->track->setVisible(core().settings().nexus().trackedIntegration());
@@ -81,7 +158,7 @@ void NexusTab::clear()
   ui->sourceGame->clear();
   ui->version->clear();
   ui->category->clear();
-  ui->browser->setHtml("");
+  setDescription("");
   ui->hasCustomURL->setChecked(false);
   ui->customURL->clear();
   setHasData(false);
@@ -117,12 +194,21 @@ void NexusTab::update()
 
   ui->category->setText(QString("%1").arg(mod().getNexusCategory()));
 
-  ui->browser->setOpenExternalLinks(true);
-
   ui->endorse->setEnabled((mod().endorsedState() == EndorsedState::ENDORSED_FALSE) ||
                           (mod().endorsedState() == EndorsedState::ENDORSED_NEVER));
 
   setHasData(mod().nexusId() >= 0);
+}
+
+void NexusTab::setDescription(const QString& html)
+{
+#ifdef MO2_WEBENGINE
+  // The base URL lets protocol-relative and relative image URLs resolve.
+  m_webView->setHtml(html, NexusLinkPolicy::baseUrl());
+#else
+  ui->browser->setOpenExternalLinks(true);
+  ui->browser->setHtml(html);
+#endif
 }
 
 void NexusTab::updateMetadata()
@@ -218,7 +304,7 @@ bool NexusTab::tryRefreshData(int modID)
 {
   if (isValidModID(modID) && !m_requestStarted) {
     if (mod().updateNXMInfo()) {
-      ui->browser->setHtml("");
+      setDescription("");
       return true;
     }
   }
@@ -324,7 +410,7 @@ void NexusTab::onModChanged()
     descriptionAsHTML = descriptionAsHTML.arg(BBCode::convertToHTML(nexusDescription));
   }
 
-  ui->browser->setHtml(descriptionAsHTML);
+  setDescription(descriptionAsHTML);
   updateVersionColor();
   updateTracking();
 }
@@ -342,7 +428,7 @@ void NexusTab::onModIDChanged()
     mod().setNexusID(newID);
     mod().setLastNexusQuery(QDateTime::fromSecsSinceEpoch(0));
 
-    ui->browser->setHtml("");
+    setDescription("");
 
     if (isValidModID(newID)) {
       refreshData(newID);

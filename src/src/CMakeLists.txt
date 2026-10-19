@@ -136,7 +136,8 @@ list(APPEND ORGANIZER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/faudioruntime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/protonlauncher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogproton.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wineprefix.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/wineprefix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/nexuslinkpolicy.cpp)
 list(APPEND ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/libraryview.h
     ${CMAKE_CURRENT_SOURCE_DIR}/installprogressview.h
@@ -183,7 +184,8 @@ list(APPEND ORGANIZER_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/faudioruntime.h
     ${CMAKE_CURRENT_SOURCE_DIR}/protonlauncher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/settingsdialogproton.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/wineprefix.h)
+    ${CMAKE_CURRENT_SOURCE_DIR}/wineprefix.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/nexuslinkpolicy.h)
 
 
 # Remove WebEngine-dependent sources when not available

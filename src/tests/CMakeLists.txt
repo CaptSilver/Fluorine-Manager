@@ -975,6 +975,28 @@ target_link_libraries(test_stylesheetpath PRIVATE
 add_test(NAME test_stylesheetpath COMMAND test_stylesheetpath)
 
 # ---------------------------------------------------------------------------
+# Nexus description page navigation policy
+# ---------------------------------------------------------------------------
+add_executable(test_nexuslinkpolicy EXCLUDE_FROM_ALL
+    test_nexuslinkpolicy.cpp
+    ${CMAKE_SOURCE_DIR}/src/src/nexuslinkpolicy.cpp
+)
+set_target_properties(test_nexuslinkpolicy PROPERTIES
+    AUTOMOC OFF
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+target_include_directories(test_nexuslinkpolicy PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/src
+)
+target_link_libraries(test_nexuslinkpolicy PRIVATE
+    Qt6::Core
+    GTest::gtest
+    GTest::gtest_main
+)
+add_test(NAME test_nexuslinkpolicy COMMAND test_nexuslinkpolicy)
+
+# ---------------------------------------------------------------------------
 # Atomic application appearance transitions
 # ---------------------------------------------------------------------------
 add_executable(test_applicationappearance EXCLUDE_FROM_ALL
@@ -1181,7 +1203,7 @@ add_test(NAME test_steam_launch_option COMMAND test_steam_launch_option)
 set_tests_properties(test_steam_launch_option PROPERTIES TIMEOUT 30)
 
 add_custom_target(fluorine-tests
-    DEPENDS test_stylesheetpath test_applicationappearance test_plugindatapath
+    DEPENDS test_stylesheetpath test_nexuslinkpolicy test_applicationappearance test_plugindatapath
             test_instancegeneralsettings test_desktopshortcutpolicy test_desktopshortcut
             test_downloadmetadatapolicy test_downloadwritelifecycle test_downloadresponse
             test_logredaction test_nexuscachedirectory test_problemcheckrunner test_recenterrorlog
