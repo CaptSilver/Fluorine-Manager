@@ -15,6 +15,7 @@ import eldenring_testsupport as support
 
 PACKAGE = support.load_support("_eldenring_deploy_tests")
 deploy = support.module(PACKAGE, "deploy")
+diagnosis = support.module(PACKAGE, "diagnosis")
 hardening = support.module(PACKAGE, "hardening")
 kinds = support.module(PACKAGE, "kinds")
 veto = support.module(PACKAGE, "veto")
@@ -1063,7 +1064,11 @@ class SyncTests(ModListCase):
         refusal = self.refused(verify_first=True)
         self.assertEqual(refusal.key, deploy.DEPLOY_DRIFT)
         self.assertIn("mods/Thing/config.ini: its bytes changed", refusal.text())
-        self.assertIn("Sync deployed files", refusal.text())
+        self.assertIn("Problems list", refusal.text())
+        self.assertIn(diagnosis.TITLES["DEPLOY_DRIFT"], refusal.text())
+        self.assertEqual(deploy._DRIFT_ROW, diagnosis.TITLES["DEPLOY_DRIFT"])
+        self.assertIs(deploy.PROBLEMS_LIST, veto.PROBLEMS_LIST)
+        self.assertNotIn("Harden or unharden", refusal.text())
         self.assertEqual(self.deployed_game_file().read_text(), "written by the DLL\n")
         self.assertFalse(self.paths.quarantine_game.exists())
 

@@ -25,7 +25,7 @@ from . import atomic, fsprobe, hardening, kinds, mods, procs, quarantine, sessio
 from .ermlib import github
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
-from .veto import Veto
+from .veto import PROBLEMS_LIST, Veto
 
 DEPLOY_DRIFT = "DEPLOY_DRIFT"
 DEPLOY_COLLISION = "DEPLOY_COLLISION"
@@ -709,7 +709,7 @@ def sync_removes(
 
     A removal never needs the hardened launcher, so a native that was disabled
     or deleted leaves Game/ as soon as the list says so. Copies, the drift
-    check and the findings stay with the launch and the Sync tool: a mod whose
+    check and the findings stay with the launch and the sync fix: a mod whose
     list became invalid wants nothing, so its files leave here exactly as they
     do in deploy.sync, and the refusal is shown where the user is looking.
     Nothing is edited under a running game, so while one is up the result says
@@ -727,9 +727,9 @@ def sync_removes(
 # -- the whole deploy ---------------------------------------------------------
 
 STEP = "Deployed config files"
-_SYNC_TOOL = 'Tools > Tool Plugins > Elden Ring > Sync deployed files…'
 _HARDEN_TOOL = 'Tools > Tool Plugins > Elden Ring > Harden or unharden launcher…'
-_SET_KIND_FIX = 'Open Tools > Tool Plugins > Elden Ring > Set mod kind… and correct the config files of that mod.'
+_DRIFT_ROW = "Deployed config files differ from the mod list"
+_SET_KIND_FIX = f'{kinds.SET_KIND_WHERE} Correct the config files of that mod there.'
 _FIXES = {
     DEPLOY_COLLISION: "Disable one of those mods.",
     DEPLOY_RESERVED: _SET_KIND_FIX,
@@ -748,14 +748,15 @@ def sync(
 ) -> Applied:
     """Make Game/mods/ hold exactly the wanted config files. Raises Veto.
 
-    The launch and the Sync tool both run this, so they cannot disagree. The
-    order is the point: with `verify_first` a deployed file that no longer
-    matches the record is a veto before anything else (after a Steam update
-    that is a question for the user, not something to copy over); then the
-    removals, because undeploying needs no lock and a veto would only leave
-    files in Game/ longer; then the findings, strays and harden vetoes; then
-    the copies. A mod with a finding wants nothing, so its files go in the
-    removals (desired() leaves none of a colliding mod's files in `wanted`).
+    The launch and the Problems-list fix (fixes.Fixes.sync_deployed) both run
+    this, so they cannot disagree. The order is the point: with `verify_first`
+    a deployed file that no longer matches the record is a veto before
+    anything else (after a Steam update that is a question for the user, not
+    something to copy over); then the removals, because undeploying needs no
+    lock and a veto would only leave files in Game/ longer; then the findings,
+    strays and harden vetoes; then the copies. A mod with a finding wants
+    nothing, so its files go in the removals (desired() leaves none of a
+    colliding mod's files in `wanted`).
     Nothing is copied unless the launcher is hardened, and `launcher()` is
     asked only when a file is, or is about to be, deployed (a folder owned for
     a DLL's log places no file and does not ask): the hardened launcher has to
@@ -771,7 +772,8 @@ def sync(
             raise Veto(
                 STEP,
                 f"Files the plugin deployed are not what it recorded:\n{listed}",
-                f"Open {_SYNC_TOOL}: it keeps what is there in quarantine-game and copies the mod's file again.",
+                f"Open {PROBLEMS_LIST} and use the fix on \"{_DRIFT_ROW}\": it keeps what is there in "
+                "quarantine-game and copies the mod's file again.",
                 DEPLOY_DRIFT,
             )
     result = plan(wanted, manifest, game_dir)
@@ -779,7 +781,7 @@ def sync(
     try:
         done.extend(apply_removes(result, manifest, paths, game_dir, stamp))
     except DeployError as exc:
-        raise Veto(STEP, str(exc), f"Fix that folder, then run {_SYNC_TOOL}.", DEPLOY_DRIFT) from exc
+        raise Veto(STEP, str(exc), "Fix that folder and launch again.", DEPLOY_DRIFT) from exc
     if wanted.findings:
         first = wanted.findings[0]
         raise Veto(STEP, "\n".join(finding.text for finding in wanted.findings), _FIXES[first.key], first.key)
@@ -805,5 +807,5 @@ def sync(
     try:
         done.extend(apply_copies(result, manifest, paths, game_dir, stamp))
     except DeployError as exc:
-        raise Veto(STEP, str(exc), f"Fix that folder, then run {_SYNC_TOOL}.", DEPLOY_DRIFT) from exc
+        raise Veto(STEP, str(exc), "Fix that folder and launch again.", DEPLOY_DRIFT) from exc
     return done

@@ -38,6 +38,7 @@ def _dialogs() -> fixes.Ui:
         choose=lambda title, text, items, checked: qtui.pick_files(_parent(), title, text, items, checked),
         inform=lambda title, text: qtui.inform(_parent(), title, text),
         busy=lambda title: qtui.Busy(title, _parent()),
+        critical=lambda title, text: qtui.critical(_parent(), title, text),
     )
 
 
@@ -62,11 +63,25 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
     checks walk the mod folders; the 60 s timer asks `diagnosis.Watch` whether
     something moved under the plugin's feet and invalidates when it did.
     `tools` maps the "tool:..." fix names to the Tools-menu entries they open.
+    `actions` maps a fix name to a callable that gets the parent widget for its
+    dialogs and runs the fix; it is checked first, so a "tool:..." name can be
+    taken over by a callable when its tool is not in the Tools menu. Names in
+    neither map go to `fixes.Fixes`. `on_init` is called with the organizer
+    when the plugin is initialised, for objects that need one and are not
+    plugins themselves. If it raises, that is logged and the plugin starts anyway.
     """
 
-    def __init__(self, tools: dict, timer_factory: Callable = _qt_timer) -> None:
+    def __init__(
+        self,
+        tools: dict,
+        actions: dict[str, Callable] | None = None,
+        timer_factory: Callable = _qt_timer,
+        on_init: Callable | None = None,
+    ) -> None:
         mobase.IPluginDiagnose.__init__(self)
         self._tools = tools
+        self._actions = actions or {}
+        self._on_init = on_init
         self._timer_factory = timer_factory
         self._organizer = None
         self._diagnosis: diagnosis.Diagnosis | None = None
@@ -79,6 +94,12 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
 
     def init(self, organizer) -> bool:
         self._organizer = organizer
+        if self._on_init is not None:
+            try:
+                self._on_init(organizer)
+            except Exception as exc:
+                # The problems list matters more than whatever this was for.
+                qWarning(f"Elden Ring: the Problems plugin's start-up hook failed: {exc!r}")
         self._unsubscribe = problems.subscribe(self._problems_may_have_changed)
         self._timer = self._timer_factory(POLL_MILLISECONDS, self._poll)
         return True
@@ -128,7 +149,9 @@ class EldenRingDiagnose(mobase.IPluginDiagnose):
         if problem is None or problem.fix is None:
             return
         try:
-            if problem.fix.startswith("tool:"):
+            if problem.fix in self._actions:
+                self._actions[problem.fix](_parent())
+            elif problem.fix.startswith("tool:"):
                 self._tools[problem.fix].display()
             else:
                 fixes.Fixes(self._organizer, self._organizer.managedGame(), _dialogs()).run(problem.fix)

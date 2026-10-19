@@ -1,9 +1,10 @@
 """The guided fixes of the problems list that act on Game/ and the vanilla inventory.
 
 The only code path that records anything as vanilla, or moves something out of
-Game/, outside a launch. Every fix shows the user the paths it will act on and
-asks first, and refuses while Elden Ring or me3 is running. No Qt in here: the
-diagnose plugin hands in the dialogs.
+Game/, outside a launch. Every fix that records or moves something shows the
+user the paths it will act on and asks first; the sync fix only does what a
+launch would. All of them refuse while Elden Ring or me3 is running. No Qt in
+here: the diagnose plugin hands in the dialogs.
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import (
-    archives, deploy, doctor, environment, generated, inventory, prepare, problems, procs, quarantine, saves, session,
-    state,
+    archives, deploy, doctor, environment, generated, hardening, inventory, prepare, problems, procs, quarantine,
+    saves, session, state,
 )
 from .ermlib import gamebuild
 from .ermlib.errors import ErmError
@@ -38,13 +39,14 @@ class Ui:
     pressed the accept button; `choose(title, text, items, checked)` is a list of
     tickable rows and returns the ticked ones, None when cancelled;
     `inform(title, text)` shows a message; `busy(title)` returns a context
-    manager with `update(message)`.
+    manager with `update(message)`; `critical(title, text)` shows a refusal.
     """
 
     review: Callable[[str, str, str], bool]
     choose: Callable[[str, str, list[str], list[str]], list[str] | None]
     inform: Callable[[str, str], None]
     busy: Callable[[str], object]
+    critical: Callable[[str, str], None]
 
 
 def adoption_refusal(game_dir: Path, manifest: deploy.Manifest, found: inventory.Candidates) -> str | None:
@@ -91,6 +93,7 @@ class Fixes:
             "accept-update": self.accept_update,
             "re-pin": self.repin,
             "ensure-generated": self.ensure_generated,
+            "sync-deployed": self.sync_deployed,
         }
         try:
             actions[name]()
@@ -330,3 +333,28 @@ class Fixes:
             problems.invalidate()
 
         generated.ensure_mod(self._organizer, then=placed)
+
+    def sync_deployed(self) -> None:
+        """Make Game/mods/ hold what the enabled mods ask for (DEPLOY_DRIFT).
+
+        The launch runs the same deploy.sync, but verifies first after a Steam
+        build change and stops there; this one does not, so a file that no longer
+        matches the record is kept in quarantine-game and copied again.
+        """
+        if self._refuse_while_running():
+            return
+        paths, game_dir, _ = self._where()
+        try:
+            with self._ui.busy(TITLE), archives.hash_cache(paths) as cache:
+                applied = deploy.sync(
+                    deploy.desired(self._organizer), paths, game_dir,
+                    launcher=lambda: hardening.state(game_dir, cache), stamp=self._stamp(),
+                )
+        except Veto as veto:
+            self._ui.critical(TITLE, veto.text())
+            return
+        self._ui.inform(
+            TITLE,
+            "\n".join(applied.lines())
+            or "Game/mods/ already holds exactly the config files the enabled mods ask for. Nothing was changed.",
+        )

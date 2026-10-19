@@ -232,6 +232,29 @@ class FixTests(PluginCase):
         self.assertEqual(fixes.call_args.args[:2], (self.organizer, self.game))
         fixes.return_value.run.assert_called_once_with("adopt")
 
+    def test_a_fix_that_is_a_plain_action_is_called_with_the_parent_widget(self) -> None:
+        calls = []
+        self.canned = [diagnosis.Problem("HARDEN_STALE", "stale", "do-it")]
+        self.plugin = plugin_module.EldenRingDiagnose({}, {"do-it": calls.append}, timer_factory=lambda *a: None)
+        self.assertTrue(self.plugin.init(self.organizer))
+        self.addCleanup(self.plugin._unsubscribe)
+        self.plugin.activeProblems()
+        self.plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
+        self.assertEqual(calls, [None])  # the stubbed QApplication has no active window
+        self.plugin.activeProblems()
+        self.assertEqual(self.passes, 2)
+
+    def test_a_plain_action_that_raises_is_shown_and_never_escapes(self) -> None:
+        self.canned = [diagnosis.Problem("HARDEN_STALE", "stale", "do-it")]
+        self.plugin = plugin_module.EldenRingDiagnose(
+            {}, {"do-it": mock.Mock(side_effect=RuntimeError("nope"))}, timer_factory=lambda *a: None
+        )
+        self.assertTrue(self.plugin.init(self.organizer))
+        self.addCleanup(self.plugin._unsubscribe)
+        self.plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
+        self.assertEqual(SHOWN[-1][0], "critical")
+        self.assertIn("nope", SHOWN[-1][2])
+
     def test_a_fix_that_raises_is_shown_and_never_escapes(self) -> None:
         self.tool.display = mock.Mock(side_effect=RuntimeError("nope"))
         self.plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
@@ -285,6 +308,42 @@ class PollTests(PluginCase):
         self.assertTrue(any("boom" in warning for warning in WARNINGS))
 
 
+class ActionTests(PluginCase):
+    def plugin_with(self, **kwargs):
+        plugin = plugin_module.EldenRingDiagnose({"tool:harden": self.tool}, timer_factory=lambda *a: None, **kwargs)
+        plugin.init(self.organizer)
+        self.addCleanup(plugin._unsubscribe)
+        return plugin
+
+    def test_an_action_for_a_tool_name_runs_instead_of_the_tool(self) -> None:
+        opened = []
+        plugin = self.plugin_with(actions={"tool:harden": opened.append})
+        with mock.patch.object(plugin_module, "_parent", return_value="window"):
+            plugin.startGuidedFix(diagnosis.number("HARDEN_STALE"))
+        self.assertEqual(opened, ["window"])
+        self.assertEqual(self.tool.displayed, 0)
+
+    def test_on_init_gets_the_organizer(self) -> None:
+        seen = []
+        self.plugin_with(on_init=seen.append)
+        self.assertEqual(seen, [self.organizer])
+
+    def test_an_on_init_that_raises_is_logged_and_the_plugin_still_starts(self) -> None:
+        def broken(organizer) -> None:
+            raise RuntimeError("cannot register")
+
+        heard = []
+        self.addCleanup(problems.subscribe(lambda: heard.append(1)))
+        plugin = plugin_module.EldenRingDiagnose({}, timer_factory=lambda *a: "timer", on_init=broken)
+        self.assertIs(plugin.init(self.organizer), True)
+        self.addCleanup(plugin._unsubscribe)
+        self.assertTrue(any("cannot register" in warning for warning in WARNINGS))
+        self.assertEqual(plugin._timer, "timer")
+        mobase.IPluginDiagnose.core_callback = lambda: heard.append("core")
+        problems.invalidate()
+        self.assertIn("core", heard)
+
+
 class CreatePluginsTests(unittest.TestCase):
     def test_the_tools_keep_their_menu_order_and_the_diagnose_plugin_opens_the_same_instances(self) -> None:
         plugins = PLUGINS.createPlugins()
@@ -292,18 +351,17 @@ class CreatePluginsTests(unittest.TestCase):
             [type(plugin).__name__ for plugin in plugins],
             [
                 "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "HardenTool",
-                "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool", "EldenRingDiagnose",
+                "ExportListTool", "VerifyListTool", "ImportListTool", "EldenRingDiagnose",
             ],
         )
         opened = plugins[-1]._tools
         self.assertEqual(
             sorted(opened),
-            ["tool:harden", "tool:kind", "tool:me3", "tool:rebuild", "tool:saves", "tool:sync"],
+            ["tool:harden", "tool:kind", "tool:me3", "tool:rebuild", "tool:saves"],
         )
         by_type = {type(plugin).__name__: plugin for plugin in plugins}
         self.assertIs(opened["tool:harden"], by_type["HardenTool"])
         self.assertIs(opened["tool:me3"], by_type["InstallMe3Tool"])
-        self.assertIs(opened["tool:sync"], by_type["SyncDeployedTool"])
 
     def test_every_tool_fix_the_diagnosis_can_name_has_a_tool(self) -> None:
         plugins = PLUGINS.createPlugins()
@@ -311,6 +369,9 @@ class CreatePluginsTests(unittest.TestCase):
             getattr(diagnosis, name) for name in dir(diagnosis) if name.startswith("TOOL_")
         }
         self.assertEqual(names, set(plugins[-1]._tools))
+        with mock.patch.object(mobase, "IModList", type("IModList", (), {"addContextMenuAction": None}), create=True):
+            plugins = PLUGINS.createPlugins()
+        self.assertEqual(names, set(plugins[-1]._tools) | set(plugins[-1]._actions))
 
 
 if __name__ == "__main__":

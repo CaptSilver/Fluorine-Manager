@@ -106,6 +106,8 @@ import eldenring_testsupport as support  # noqa: E402  (after the stubs on purpo
 PACKAGE = support.load_support("_eldenring_tools_tests")
 PLUGINS = support.module(PACKAGE, "plugins")
 tools = support.module(PACKAGE, "plugins.tools")
+diagnose = support.module(PACKAGE, "plugins.diagnose")
+diagnosis = support.module(PACKAGE, "diagnosis")
 me3_host = support.module(PACKAGE, "me3_host")
 deploy = support.module(PACKAGE, "deploy")
 generated = support.module(PACKAGE, "generated")
@@ -144,13 +146,13 @@ class CreatePluginsTests(ToolCase):
             [type(plugin).__name__ for plugin in plugins],
             [
                 "InstallMe3Tool", "SaveToolsTool", "RebuildTool", "SetModKindTool", "HardenTool",
-                "SyncDeployedTool", "ExportListTool", "VerifyListTool", "ImportListTool", "EldenRingDiagnose",
+                "ExportListTool", "VerifyListTool", "ImportListTool", "EldenRingDiagnose",
             ],
         )
 
     def test_every_tool_sits_in_the_elden_ring_submenu(self) -> None:
         shown = [plugin for plugin in PLUGINS.createPlugins() if isinstance(plugin, tools.EldenRingTool)]
-        self.assertEqual(len(shown), 9)
+        self.assertEqual(len(shown), 8)
         for plugin in shown:
             group, slash, entry = plugin.displayName().partition("/")
             self.assertEqual((group, slash), ("Elden Ring", "/"), plugin.displayName())
@@ -1249,6 +1251,15 @@ class SetModKindToolTests(ModToolCase):
     def kind(self):
         return self.mod.pluginSetting(kinds.PLUGIN, "kind")
 
+    def test_a_kind_set_from_the_tools_menu_refreshes_the_problems_list(self) -> None:
+        heard = []
+        self.addCleanup(problems.subscribe(lambda: heard.append(1)))
+        self.drive(choice=2)
+        self.assertEqual(heard, [1])
+        heard.clear()
+        self.drive(choice=None)
+        self.assertEqual(heard, [])
+
     def test_the_generated_mod_is_not_offered(self) -> None:
         pick, _ = self.drive(picked=(None,))
         self.assertEqual(pick.call_args.args[3], ["Some Mod"])
@@ -1369,6 +1380,150 @@ class SetModKindToolTests(ModToolCase):
             self.drive(picked=("Some Mod", "mods/a.dll"), choice=1)
         self.assertEqual(SHOWN[-1][0], "critical")
         self.assertIn("not a DLL here", SHOWN[-1][2])
+
+
+class ModMenuApiMixin:
+    """Makes the stubbed mobase look like a Fluorine with or without IModList.addContextMenuAction."""
+
+    def with_mod_menu_api(self, present: bool) -> None:
+        members = {"addContextMenuAction": None} if present else {}
+        patcher = mock.patch.object(sys.modules["mobase"], "IModList", type("IModList", (), members), create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class SetModKindContextActionTests(ModMenuApiMixin, ModToolCase):
+    LABEL = "Set Elden Ring kind..."
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.game.name = lambda: "Elden Ring Support Plugin"
+        self.tool = tools.SetModKindTool()
+        self.modlist.add(generated.NAME, kind="generated")
+        self.mod = self.modlist.add("Some Mod", files={"mods/a.dll": b"MZ"})
+        self.separator = self.modlist.add("Section_separator")
+        self.separator.isSeparator = lambda: True
+
+    def test_the_entry_is_registered_with_the_organizers_mod_list(self) -> None:
+        self.tool.register_context_action(self.organizer)
+        self.assertEqual(list(self.modlist.context_actions), [self.LABEL])
+
+    def test_it_is_shown_for_a_regular_mod_of_an_elden_ring_instance_only(self) -> None:
+        self.tool.register_context_action(self.organizer)
+        self.assertTrue(self.modlist.action_visible(self.LABEL, self.mod))
+        self.assertFalse(self.modlist.action_visible(self.LABEL, self.separator))
+        self.assertFalse(self.modlist.action_visible(self.LABEL, self.modlist.getMod(generated.NAME)))
+        self.game.name = lambda: "Skyrim Special Edition"
+        self.assertFalse(self.modlist.action_visible(self.LABEL, self.mod))
+        self.organizer.managedGame = lambda: None
+        self.assertFalse(self.modlist.action_visible(self.LABEL, self.mod))
+
+    def test_triggering_it_opens_the_kind_dialog_for_that_mod_without_a_picker(self) -> None:
+        self.tool.register_context_action(self.organizer)
+        window = object()
+        with mock.patch.object(tools.qtui, "pick_item") as pick, \
+                mock.patch.object(tools, "_choose", return_value=2) as choose:
+            self.modlist.fire(self.LABEL, self.mod, window)
+        pick.assert_not_called()
+        self.assertIs(choose.call_args.args[0], window)
+        self.assertIn("Some Mod", choose.call_args.args[2])
+        self.assertEqual(self.mod.pluginSetting(kinds.PLUGIN, "kind"), "ersc")
+
+    def test_a_kind_set_or_reclassified_from_the_menu_refreshes_the_problems_list(self) -> None:
+        heard = []
+        self.addCleanup(problems.subscribe(lambda: heard.append(1)))
+        self.tool.register_context_action(self.organizer)
+        for index in (2, len(tools.SET_KIND_CHOICES) - 1):
+            with self.subTest(choice=tools.SET_KIND_CHOICES[index]), mock.patch.object(tools, "_choose", return_value=index):
+                heard.clear()
+                self.modlist.fire(self.LABEL, self.mod, object())
+                self.assertEqual(heard, [1])
+
+    def test_cancelling_the_menu_dialog_does_not_refresh_the_problems_list(self) -> None:
+        heard = []
+        self.addCleanup(problems.subscribe(lambda: heard.append(1)))
+        self.tool.register_context_action(self.organizer)
+        with mock.patch.object(tools, "_choose", return_value=None):
+            self.modlist.fire(self.LABEL, self.mod, object())
+        self.assertEqual(heard, [])
+
+    def test_a_failure_in_the_dialog_is_shown_on_the_window_the_menu_passed(self) -> None:
+        self.tool.register_context_action(self.organizer)
+        windows = []
+        with mock.patch.object(tools, "_choose", side_effect=RuntimeError("boom")), \
+                mock.patch.object(tools.QMessageBox, "critical", side_effect=lambda w, *a: windows.append(w)):
+            self.modlist.fire(self.LABEL, self.mod, "the window")
+        self.assertEqual(windows, ["the window"])
+        self.assertTrue(any("boom" in warning for warning in WARNINGS))
+
+
+class SetModKindPlacementTests(ModMenuApiMixin, ModToolCase):
+    """Where Set mod kind is offered, with and without the core's mod menu entry."""
+
+    def plugins(self, api: bool) -> dict:
+        self.with_mod_menu_api(api)
+        self.game.name = lambda: "Elden Ring Support Plugin"
+        return {type(plugin).__name__: plugin for plugin in PLUGINS.createPlugins()}
+
+    def start(self, plugins: dict):
+        """Initialise the plugins as the core does and return the diagnose plugin."""
+        diag = plugins["EldenRingDiagnose"]
+        diag._timer_factory = lambda milliseconds, callback: None
+        for plugin in plugins.values():
+            plugin.init(self.organizer)
+        self.addCleanup(diag._unsubscribe)
+        return diag
+
+    def fix_from_problems_list(self, diag) -> None:
+        row = diagnosis.Problem("UNKNOWN_KIND", "x", diagnosis.TOOL_KIND)
+        with mock.patch.object(diag, "_current", return_value=[row]), \
+                mock.patch.object(diagnose, "_parent", return_value="main window"):
+            diag.startGuidedFix(diagnosis.number("UNKNOWN_KIND"))
+
+    def test_with_the_api_set_mod_kind_leaves_the_tools_menu_for_the_mod_menu(self) -> None:
+        plugins = self.plugins(api=True)
+        self.assertNotIn("SetModKindTool", plugins)
+        self.start(plugins)
+        # The game plugin registers the entry, so it does not depend on this plugin being enabled.
+        self.assertEqual(self.modlist.context_actions, {})
+
+    def test_the_api_check_follows_the_core(self) -> None:
+        self.with_mod_menu_api(True)
+        self.assertTrue(kinds.mod_menu_takes_actions())
+        self.with_mod_menu_api(False)
+        self.assertFalse(kinds.mod_menu_takes_actions())
+
+    def test_messages_that_send_a_person_to_the_dialog_name_both_places(self) -> None:
+        self.assertIn(f'"{kinds.SET_KIND_LABEL}"', kinds.SET_KIND_WHERE)
+        self.assertIn("Tools > Tool Plugins > Elden Ring > Set mod kind…", kinds.SET_KIND_WHERE)
+
+    def test_without_the_api_it_stays_a_tools_entry_and_the_mod_menu_is_left_alone(self) -> None:
+        plugins = self.plugins(api=False)
+        self.assertEqual(plugins["SetModKindTool"].displayName(), "Elden Ring/Set mod kind…")
+        self.start(plugins)
+        self.assertEqual(self.modlist.context_actions, {})
+
+    def test_the_problems_fix_opens_the_dialog_with_a_mod_picker_when_the_tool_is_not_in_the_menu(self) -> None:
+        self.modlist.add(generated.NAME, kind="generated")
+        self.modlist.add("Some Mod")
+        diag = self.start(self.plugins(api=True))
+        with mock.patch.object(tools.qtui, "pick_item", return_value="Some Mod") as pick, \
+                mock.patch.object(tools, "_choose", return_value=2) as choose:
+            self.fix_from_problems_list(diag)
+        self.assertEqual(pick.call_args.args[:2], ("main window", "Elden Ring: Set mod kind…"))
+        self.assertEqual(pick.call_args.args[3], ["Some Mod"])
+        self.assertIn("Some Mod", choose.call_args.args[2])
+        self.assertEqual(self.modlist.getMod("Some Mod").pluginSetting(kinds.PLUGIN, "kind"), "ersc")
+
+    def test_the_problems_fix_still_opens_the_tools_entry_without_the_api(self) -> None:
+        self.modlist.add(generated.NAME, kind="generated")
+        self.modlist.add("Some Mod")
+        plugins = self.plugins(api=False)
+        diag = self.start(plugins)
+        plugins["SetModKindTool"].setParentWidget("tools window")
+        with mock.patch.object(tools.qtui, "pick_item", return_value=None) as pick:
+            self.fix_from_problems_list(diag)
+        self.assertEqual(pick.call_args.args[:2], ("tools window", "Elden Ring: Set mod kind…"))
 
 
 class SaveQuestionTests(ModToolCase):
@@ -1595,83 +1750,6 @@ class HardenToolDeployedTests(HardenToolCase):
         self.assertTrue(self.deployed.exists())
         self.assertEqual((self.launcher_bytes(), self.locked), (GAME, True))
 
-
-
-class SyncDeployedToolTests(HardenToolCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.tool = tools.SyncDeployedTool()
-        self.tool.init(self.organizer)
-        self.paths = state.InstancePaths(self.organizer)
-        self.mod = self.modlist.add(
-            "Thing mod", files={"mods/Thing.dll": b"MZ", "mods/Thing/config.ini": "a=1\n"}
-        )
-        kinds.set_kind(self.mod, kinds.NATIVE, native_dll="mods/Thing.dll", deploy_config=["mods/Thing/config.ini"])
-        self.deployed = self.game_dir / "mods/Thing/config.ini"
-
-    def run_tool(self) -> None:
-        self.tool.display()
-
-    def test_it_is_named_and_limited_to_the_game(self) -> None:
-        self.assertEqual(self.tool.displayName(), "Elden Ring/Sync deployed files…")
-        self.assertEqual(self.tool.requirements(), [("gameDependency", "Elden Ring")])
-
-    def test_with_nothing_to_do_it_says_so_and_changes_nothing(self) -> None:
-        self.modlist.active.discard("Thing mod")
-        self.run_tool()
-        self.assertIn("already holds exactly", self.shown()[0])
-        self.assertFalse((self.game_dir / "mods").exists())
-
-    def test_under_a_hardened_launcher_it_copies_and_lists_what_it_did(self) -> None:
-        self.harden_by_hand()
-        self.run_tool()
-        self.assertEqual(self.deployed.read_text(), "a=1\n")
-        self.assertIn("Copied mods/Thing/config.ini", self.shown()[0])
-        self.assertEqual(list(deploy.read_manifest(self.paths).files), ["mods/Thing/config.ini"])
-        self.assertEqual(self.heard, [1])
-
-    def test_an_unhardened_launcher_is_refused_with_the_harden_tool_named_and_nothing_copied(self) -> None:
-        self.run_tool()
-        [text] = self.shown("critical")
-        self.assertIn("Harden or unharden launcher", text)
-        self.assertFalse((self.game_dir / "mods").exists())
-        self.assertEqual(self.heard, [1])
-
-    def test_a_file_the_dll_rewrote_is_kept_and_copied_again(self) -> None:
-        self.harden_by_hand()
-        self.run_tool()
-        self.deployed.write_text("written by the DLL\n")
-        SHOWN.clear()
-        self.run_tool()
-        self.assertEqual(self.deployed.read_text(), "a=1\n")
-        self.assertIn("Kept mods/Thing/config.ini", self.shown()[0])
-
-    def test_a_disabled_native_is_removed_without_a_hardened_launcher(self) -> None:
-        self.harden_by_hand()
-        self.run_tool()
-        self.modlist.active.discard("Thing mod")
-        self.harden_by_hand(locked=False, launcher=EAC)
-        SHOWN.clear()
-        self.run_tool()
-        self.assertFalse(self.deployed.exists())
-        self.assertIn("Removed mods/Thing/config.ini", self.shown()[0])
-
-    def test_a_running_game_is_refused_and_nothing_is_touched(self) -> None:
-        self.harden_by_hand()
-        self.up = [(4242, "eldenring.exe")]
-        with mock.patch.object(tools.procs, "game_running", return_value=self.up):
-            self.run_tool()
-        self.assertIn("eldenring.exe (pid 4242)", self.shown("critical")[0])
-        self.assertFalse((self.game_dir / "mods").exists())
-        self.assertEqual(self.heard, [1])
-
-    def test_a_mod_list_that_cannot_be_deployed_is_explained(self) -> None:
-        self.harden_by_hand()
-        self.mod.setPluginSetting(kinds.PLUGIN, "deploy_config", json.dumps(["mods/Thing/x.dll"]))
-        self.run_tool()
-        [text] = self.shown("critical")
-        self.assertIn("x.dll", text)
-        self.assertIn("Set mod kind", text)
 
 
 class ListToolCase(ModToolCase):

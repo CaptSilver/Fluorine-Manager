@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# How a veto points at the Problems list, where the fixes it names are.
+PROBLEMS_LIST = "the Problems list (the warning icon in the toolbar)"
+
 
 class Veto(Exception):
     """Something has to change before the game can be launched or the mods rebuilt.

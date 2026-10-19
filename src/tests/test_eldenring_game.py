@@ -344,6 +344,54 @@ class GateWiringTests(GameCase):
         self.assertIn("me3", critical.call_args.args[2])
 
 
+class KindMenuRegistrationTests(GameCase):
+    """Set mod kind is offered from the game plugin, which every Elden Ring instance initialises."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.registered: list = []
+        outer = self
+
+        class SetModKindTool:
+            def register_context_action(self, organizer) -> None:
+                if outer.failure is not None:
+                    raise outer.failure
+                outer.registered.append(organizer)
+
+        self.failure = None
+        package = f"{GAME.__package__}.eldenring_support.plugins"
+        plugins = types.ModuleType(package)
+        plugins.tools = types.ModuleType(f"{package}.tools")
+        plugins.tools.SetModKindTool = SetModKindTool
+        patcher = mock.patch.dict(sys.modules, {package: plugins, plugins.tools.__name__: plugins.tools})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def with_mod_menu_api(self, present: bool) -> None:
+        members = {"addContextMenuAction": None} if present else {}
+        patcher = mock.patch.object(GAME.mobase, "IModList", type("IModList", (), members), create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_init_registers_the_menu_entry_when_the_core_has_the_api(self) -> None:
+        self.with_mod_menu_api(True)
+        self.assertIs(self.game.init(self.organizer), True)
+        self.assertEqual(self.registered, [self.organizer])
+
+    def test_init_leaves_the_mod_menu_alone_without_the_api(self) -> None:
+        self.with_mod_menu_api(False)
+        self.assertIs(self.game.init(self.organizer), True)
+        self.assertEqual(self.registered, [])
+
+    def test_a_registration_that_fails_is_logged_and_init_carries_on(self) -> None:
+        self.with_mod_menu_api(True)
+        self.failure = RuntimeError("no menu")
+        with mock.patch.object(GAME, "qWarning") as warn:
+            self.assertIs(self.game.init(self.organizer), True)
+        self.assertIn("no menu", warn.call_args.args[0])
+        self.assertEqual(len(self.organizer.about_to_run), 1)  # the launch gate was still wired up
+
+
 class ModKindWiringTests(GameCase):
     def setUp(self) -> None:
         super().setUp()
