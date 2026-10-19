@@ -265,29 +265,12 @@ def test_identify_refuses_when_steam_has_no_buildid(tmp_path, monkeypatch):
         gamebuild.identify(game, tmp_path)
 
 
-def test_drift_is_empty_when_nothing_moved():
-    assert gamebuild.drift(build_id(), build_id()) == ()
-
-
 def test_build_id_requires_every_identity_field():
     # classify() keys on the three identity sources disagreeing, so a defaulted
     # field would let a caller construct a half-populated identity and have the
     # placeholder read as agreement. Test convenience lives in build_id().
     assert gamebuild.BuildId._field_defaults == {}
     assert set(build_id()._asdict()) == set(gamebuild.BuildId._fields)
-
-
-def test_drift_names_every_field_that_moved():
-    stamped = build_id(exe="2.6.2.0", app="1.16.0", regulation="11601000",
-                       steam_buildid="1", regulation_sha="b" * 64)
-    moved = {c.field for c in gamebuild.drift(stamped, build_id())}
-    assert moved == {"exe", "app", "regulation", "steam_buildid", "regulation_sha"}
-
-
-def test_drift_against_an_unstamped_stack_is_empty():
-    # A stack that was never stamped isn't "drifted" -- it's unknown. Callers
-    # decide what to do; drift must not invent five changes out of nothing.
-    assert gamebuild.drift(None, build_id()) == ()
 
 
 def test_classify_unchanged():

@@ -178,12 +178,6 @@ class BuildId(NamedTuple):
     regulation_sha: str
 
 
-class Change(NamedTuple):
-    field: str
-    was: str
-    now: str
-
-
 # What the difference between two BuildIds means.
 UNCHANGED = "unchanged"     # nothing moved
 PATCHED = "patched"         # a real game patch: exe/buildid AND regulation
@@ -230,19 +224,6 @@ def identify(game_dir, library_root, cache_path=None):
         steam_buildid=buildid,
         regulation_sha=hashlib.sha256(blob).hexdigest(),
     )
-
-
-def drift(stamped, live):
-    """Which identity fields moved between `stamped` and `live`.
-
-    An unstamped stack yields no drift: "unknown" is not "changed", and
-    reporting five phantom changes on a first run would be noise.
-    """
-    if stamped is None:
-        return ()
-    return tuple(Change(f, getattr(stamped, f), getattr(live, f))
-                 for f in BuildId._fields
-                 if getattr(stamped, f) != getattr(live, f))
 
 
 def classify(stamped, live):

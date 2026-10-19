@@ -170,10 +170,6 @@ class Problem:
     # Shown, but nothing is wrong: the launch is not blocked by it.
     informational: bool = False
 
-    @property
-    def short(self) -> str:
-        return TITLES[self.key]
-
 
 def as_html(text: str) -> str:
     """Plain text as the HTML the problems panel renders: escaped, with line breaks kept."""

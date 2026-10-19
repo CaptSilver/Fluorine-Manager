@@ -435,18 +435,6 @@ def archive_layout(archive, subdir: str | None) -> Layout:
     return Layout(_lay_out(members, subdir), _has_fomod(members))
 
 
-def layout_differences(archive, subdir: str | None, installed: list[str]) -> tuple[list[str], list[str]] | None:
-    """(files in the folder the archive would not put there, files it would put there that are missing).
-
-    None when the archive's layout cannot be told.
-    """
-    files = archive_layout(archive, subdir).files
-    if files is None:
-        return None
-    have, would = set(installed), set(files)
-    return sorted(have - would), sorted(would - have)
-
-
 # -- writing a list ------------------------------------------------------------
 
 

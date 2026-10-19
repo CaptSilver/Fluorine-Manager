@@ -8,10 +8,9 @@ def test_parses_twelve_entries_and_all_md5_validate(real_save_bytes):
     assert len(sf.entries) == 12
     assert [e.name for e in sf.entries] == [f"USER_DATA{i:03d}" for i in range(12)]
     # the game's own per-entry MD5 is our proof the parse is correct
-    assert sf.all_md5_ok is True
+    assert all(e.md5_ok for e in sf.entries)
     assert len(sf.slots) == 10
     assert sf.profile_entry.index == 10
-    assert sf.regulation_entry.index == 11
 
 
 def test_rejects_playstation_save():

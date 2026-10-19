@@ -5,11 +5,6 @@ from pathlib import Path
 from .errors import ErmError, PathError
 
 
-def is_hardened(game):
-    """Hardened iff our backup of the real EAC launcher exists."""
-    return (Path(game) / "start_protected_game.exe.erm-backup").exists()
-
-
 def harden_swap(game):
     """FS-only (no privilege): back up the real EAC launcher (ONCE) and swap in
     a copy of eldenring.exe. Returns the spg path. Idempotent-safe."""

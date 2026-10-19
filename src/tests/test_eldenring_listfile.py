@@ -492,14 +492,6 @@ class LayoutTests(unittest.TestCase):
     def test_an_empty_archive_lays_out_to_nothing(self) -> None:
         self.assertEqual(listfile.archive_layout(self.zip([]), None).files, [])
 
-    def test_differences_name_what_the_archive_would_not_have_put_there(self) -> None:
-        archive = self.zip(["Wrapper/regulation.bin", "Wrapper/a.bin"])
-        extra, missing = listfile.layout_differences(archive, None, ["regulation.bin", "mine.bin"])
-        self.assertEqual((extra, missing), (["mine.bin"], ["a.bin"]))
-
-    def test_differences_are_none_when_the_archive_cannot_be_laid_out(self) -> None:
-        self.assertIsNone(listfile.layout_differences(self.tmp / "none.rar", None, ["a"]))
-
 
 class Instance:
     """A Fluorine instance whose mods were installed from archives in downloads/.

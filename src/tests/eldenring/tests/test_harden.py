@@ -64,14 +64,6 @@ def test_unharden_restore_raises_patherror_when_not_hardened(game):
         harden.unharden_restore(game)
 
 
-def test_is_hardened_true_after_swap_false_after_restore(game):
-    assert harden.is_hardened(game) is False
-    harden.harden_swap(game)
-    assert harden.is_hardened(game) is True
-    harden.unharden_restore(game)
-    assert harden.is_hardened(game) is False
-
-
 @pytest.fixture
 def chattr_path(monkeypatch):
     import shutil

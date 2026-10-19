@@ -7,7 +7,6 @@ from ermlib.paths import (
     APPID,
     MODDED_SAVE_NAME,
     SAVE_NAMES,
-    find_compatdata,
     find_prefix,
     find_save_dir,
     is_safe_relpath,
@@ -110,7 +109,7 @@ def test_find_save_dir_raises_without_save(tmp_path):
 
 
 def test_find_prefix_finds_a_prefix_in_a_secondary_library(tmp_path):
-    # find_prefix, find_compatdata, find_save_dir and saves.save_dir all go
+    # find_prefix, find_save_dir and saves.save_dir all go
     # through _library_dirs, so this is the one test of its libraryfolders.vdf
     # parse. Ported from erm's find_game_dir case for a secondary library.
     steam = tmp_path / "steam"
@@ -122,18 +121,6 @@ def test_find_prefix_finds_a_prefix_in_a_secondary_library(tmp_path):
         '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' % lib2
     )
     assert find_prefix(steam).samefile(pfx)
-    assert find_compatdata(steam).samefile(pfx.parent)
-
-
-def test_find_compatdata_locates_and_raises(tmp_path):
-    cd = tmp_path / "steamapps" / "compatdata" / APPID
-    cd.mkdir(parents=True)
-    assert find_compatdata(tmp_path).samefile(cd)
-
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    with pytest.raises(PathError):
-        find_compatdata(empty)
 
 
 def test_find_save_dir_skips_unreadable_root(tmp_path):

@@ -88,15 +88,6 @@ def find_prefix(steam_root):
     raise PathError(f"Proton prefix compatdata/{APPID}/pfx not found")
 
 
-def find_compatdata(steam_root):
-    """The compatdata/<APPID> dir (parent of pfx) for STEAM_COMPAT_DATA_PATH."""
-    for sa in _library_dirs(steam_root):
-        cd = sa / "compatdata" / APPID
-        if cd.is_dir():
-            return cd
-    raise PathError(f"compatdata/{APPID} not found")
-
-
 def find_save_dir(steam_root):
     pfx = find_prefix(steam_root)
     roots = [
