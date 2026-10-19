@@ -209,6 +209,43 @@ class AtomicMoveTests(TempDirCase):
         self.assertFalse((self.tmp / "b.bin").exists())
 
 
+class FreeNameTests(TempDirCase):
+    def test_a_free_name_is_returned_as_it_is(self) -> None:
+        self.assertEqual(atomic.free_name(self.tmp / "a.bin"), self.tmp / "a.bin")
+
+    def test_a_taken_name_gets_the_next_free_number(self) -> None:
+        (self.tmp / "a.bin").write_bytes(b"x")
+        self.assertEqual(atomic.free_name(self.tmp / "a.bin"), self.tmp / "a.bin.1")
+        (self.tmp / "a.bin.1").write_bytes(b"x")
+        self.assertEqual(atomic.free_name(self.tmp / "a.bin"), self.tmp / "a.bin.2")
+
+    def test_a_dangling_link_holds_its_name(self) -> None:
+        (self.tmp / "a.bin").symlink_to(self.tmp / "nowhere")
+        self.assertEqual(atomic.free_name(self.tmp / "a.bin"), self.tmp / "a.bin.1")
+
+
+class RemoveTests(TempDirCase):
+    def test_a_file_a_link_and_a_folder_tree_are_deleted(self) -> None:
+        (self.tmp / "file").write_bytes(b"x")
+        (self.tmp / "link").symlink_to(self.tmp / "file")
+        (self.tmp / "tree" / "sub").mkdir(parents=True)
+        (self.tmp / "tree" / "sub" / "leaf").write_bytes(b"x")
+        for name in ("link", "file", "tree"):
+            atomic.remove(self.tmp / name)
+            self.assertFalse(os.path.lexists(self.tmp / name), name)
+
+    def test_a_link_to_a_folder_goes_without_touching_the_folder(self) -> None:
+        (self.tmp / "dir").mkdir()
+        (self.tmp / "dir" / "keep").write_bytes(b"x")
+        (self.tmp / "alias").symlink_to(self.tmp / "dir")
+        atomic.remove(self.tmp / "alias")
+        self.assertFalse(os.path.lexists(self.tmp / "alias"))
+        self.assertTrue((self.tmp / "dir" / "keep").is_file())
+
+    def test_nothing_there_is_not_an_error(self) -> None:
+        atomic.remove(self.tmp / "missing")
+
+
 class FsProbeTests(TempDirCase):
     def test_each_kind_of_thing_is_named(self) -> None:
         (self.tmp / "file").write_bytes(b"x")
@@ -232,6 +269,27 @@ class FsProbeTests(TempDirCase):
         with mock.patch.object(fsprobe.os, "lstat", side_effect=PermissionError("denied")):
             self.assertIsNone(fsprobe.kind(self.tmp))
         self.assertIsNone(fsprobe.kind("bad\0path"))
+
+    def test_is_file_and_is_dir_follow_links(self) -> None:
+        (self.tmp / "file").write_bytes(b"x")
+        (self.tmp / "dir").mkdir()
+        (self.tmp / "to-file").symlink_to(self.tmp / "file")
+        (self.tmp / "to-dir").symlink_to(self.tmp / "dir")
+        (self.tmp / "dangling").symlink_to(self.tmp / "nowhere")
+        for name, file_, dir_ in (
+            ("file", True, False), ("to-file", True, False), ("dir", False, True),
+            ("to-dir", False, True), ("dangling", False, False), ("missing", False, False),
+        ):
+            self.assertIs(fsprobe.is_file(self.tmp / name), file_, name)
+            self.assertIs(fsprobe.is_dir(self.tmp / name), dir_, name)
+
+    def test_is_file_and_is_dir_take_a_str_and_treat_errors_as_no(self) -> None:
+        (self.tmp / "file").write_bytes(b"x")
+        self.assertTrue(fsprobe.is_file(str(self.tmp / "file")))
+        for check in (fsprobe.is_file, fsprobe.is_dir):
+            with mock.patch.object(fsprobe.os, "stat", side_effect=PermissionError("denied")):
+                self.assertFalse(check(self.tmp))
+            self.assertFalse(check("bad\0path"))
 
 
 class QuarantineTests(TempDirCase):
@@ -404,6 +462,17 @@ class ReadJsonObjectTests(TempDirCase):
 
 
 class CacheTests(TempDirCase):
+    def test_file_sha256_reads_the_file_without_a_cache_and_goes_through_one_with_it(self) -> None:
+        target = self.tmp / "a.bin"
+        target.write_bytes(b"data")
+        digest = hashlib.sha256(b"data").hexdigest()
+        self.assertEqual(state.file_sha256(target), digest)
+        cache: dict = {}
+        self.assertEqual(state.file_sha256(target, cache), digest)
+        self.assertIn(str(target), cache)
+        with mock.patch.object(state.github, "sha256_file", side_effect=AssertionError("hashed")):
+            self.assertEqual(state.file_sha256(target, cache), digest)
+
     def test_read_cache_gives_an_empty_dict_for_missing_damaged_or_wrong_shape(self) -> None:
         self.assertEqual(state.read_cache(self.tmp / "missing.json"), {})
         damaged = self.tmp / "damaged.json"

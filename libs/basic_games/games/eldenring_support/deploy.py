@@ -145,7 +145,7 @@ def write_manifest(paths: state.InstancePaths, manifest: Manifest) -> None:
 
 # -- what should be there -----------------------------------------------------
 
-_PROGRAM_EXTS = frozenset({".dll", ".exe"})
+PROGRAM_EXTENSIONS = (".dll", ".exe")
 
 
 @dataclass(frozen=True)
@@ -207,7 +207,7 @@ def reserved_reason(native_dll: str, config_path: object) -> str | None:
     if not name_ok(name):
         return "its file name cannot be one file name under Game/mods/"
     lowered = name.lower()
-    if PurePosixPath(lowered).suffix in _PROGRAM_EXTS:
+    if PurePosixPath(lowered).suffix in PROGRAM_EXTENSIONS:
         return "a program is never deployed"
     if lowered == "log.txt" or lowered.endswith(".log"):
         return "the DLL writes its own log there, and a deployed one would read as drift"
@@ -718,9 +718,8 @@ def sync_removes(
     manifest = read_manifest(paths)
     if not manifest.files and not manifest.dirs:
         return Applied()
-    up = (running or procs.game_running)()
-    if up:
-        names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+    names = procs.running_names(running)
+    if names is not None:
         return Applied(skipped=f"{names} is running")
     return apply_removes(plan(desired(organizer), manifest, game_dir), manifest, paths, game_dir)
 

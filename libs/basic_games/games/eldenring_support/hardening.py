@@ -22,7 +22,6 @@ from typing import Callable
 
 from . import fsprobe, procs, quarantine, session
 from . import state as instance_state
-from .ermlib import github
 from .ermlib import harden as ermharden
 from .ermlib.errors import ErmError
 
@@ -72,10 +71,6 @@ def is_immutable(path) -> bool:
         os.close(fd)
 
 
-def _sha(path: Path, cache: dict | None) -> str:
-    return github.sha256_file(path) if cache is None else instance_state.cached_sha256(cache, path)
-
-
 def state(game_dir, cache: dict | None = None) -> str:
     """Where the launcher stands, decided from file contents.
 
@@ -100,10 +95,10 @@ def state(game_dir, cache: dict | None = None) -> str:
     if launcher_kind != fsprobe.FILE or backup_kind != fsprobe.FILE:
         return STALE
     try:
-        current = _sha(launcher, cache)
-        if fsprobe.kind(exe) == fsprobe.FILE and current == _sha(exe, cache):
+        current = instance_state.file_sha256(launcher, cache)
+        if fsprobe.kind(exe) == fsprobe.FILE and current == instance_state.file_sha256(exe, cache):
             return HARDENED if is_immutable(launcher) else SWAPPED_UNLOCKED
-        if current == _sha(backup, cache):
+        if current == instance_state.file_sha256(backup, cache):
             return RESTORED
     except OSError as exc:
         # Unreadable files cannot be shown to be hardened, so they read as stale
@@ -272,9 +267,8 @@ _NOT_LOCKED = (
 
 def _refuse_while_running(running: Callable[[], list] | None) -> None:
     # Looked up at call time, so a test (or a caller) that patches procs.game_running is heard.
-    up = (running or procs.game_running)()
-    if up:
-        names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+    names = procs.running_names(running)
+    if names is not None:
         raise HardenError(
             f"{names} is running. The launcher is not swapped under a running game; quit it and try again."
         )

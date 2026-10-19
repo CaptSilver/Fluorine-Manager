@@ -432,13 +432,13 @@ class Diagnosis:
 
     def _session_rows(self, context: Context) -> list[Problem]:
         rows: list[Problem] = []
-        up = procs.game_running()
-        if up:
+        names = procs.running_names()
+        if names is not None:
             rows.append(
                 Problem(
                     "GAME_RUNNING",
-                    "Elden Ring or me3 is running: " + ", ".join(f"{name} (pid {pid})" for pid, name in up)
-                    + ". A launch waits for it to exit, and nothing edits Game/ under it.",
+                    f"Elden Ring or me3 is running: {names}. "
+                    "A launch waits for it to exit, and nothing edits Game/ under it.",
                     informational=True,
                 )
             )

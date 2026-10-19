@@ -8,7 +8,6 @@ same relative path, where the user can look at them.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path, PurePosixPath
 
 from . import atomic, fsprobe, state
@@ -74,10 +73,7 @@ def move_out(paths: state.InstancePaths, game_dir, rel: str, stamp: str) -> Path
     destination = paths.quarantine_game / stamp / rel
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        taken, number = destination, 0
-        while os.path.lexists(taken):
-            number += 1
-            taken = destination.with_name(f"{destination.name}.{number}")
+        taken = atomic.free_name(destination)
         atomic.move_durably(source, taken)
     except OSError as exc:
         raise QuarantineError(f"cannot move {source} into {destination.parent}: {exc}") from exc

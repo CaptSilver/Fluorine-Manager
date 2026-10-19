@@ -334,7 +334,7 @@ class SaveToolsTests(SaveToolsCase):
         with self.choose(0), mock.patch.object(session.procs, "game_running", return_value=[(42, "me3")]):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("pid 42", SHOWN[-1][2])
+        self.assertIn("(pid 42)", SHOWN[-1][2])
         self.assertEqual((self.save_dir / "ER0000.sl2").read_bytes(), SL2 + b"modded")
         self.assertIn("pending_restore", session.load_last_launch(self.paths))
 
@@ -566,7 +566,7 @@ class BackupToolTests(SaveToolsMenuCase):
         with self.menu(tools.BACKUP), mock.patch.object(session.procs, "game_running", return_value=[(4, "me3")]):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("me3 pid 4", SHOWN[-1][2])
+        self.assertIn("me3 (pid 4)", SHOWN[-1][2])
         self.assertFalse(self.paths.save_backups.exists())
 
 
@@ -2030,7 +2030,7 @@ class ImportListToolTests(ListToolCase):
         with mock.patch.object(tools.procs, "game_running", return_value=[(42, "eldenring.exe")]):
             self.tool.display()
         self.assertEqual(SHOWN[-1][0], "critical")
-        self.assertIn("eldenring.exe pid 42", SHOWN[-1][2])
+        self.assertIn("eldenring.exe (pid 42)", SHOWN[-1][2])
         self.assertEqual(FakeFetchDialog.instances, [])
 
     def test_a_file_that_is_not_a_list_is_shown_as_an_error(self) -> None:

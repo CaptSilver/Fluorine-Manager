@@ -94,6 +94,11 @@ def cached_sha256(cache: dict, path) -> str:
     return digest
 
 
+def file_sha256(path, cache: dict | None = None) -> str:
+    """sha256 of `path`: through cached_sha256 when the caller holds a hash cache, read fresh otherwise."""
+    return github.sha256_file(path) if cache is None else cached_sha256(cache, path)
+
+
 def _json_object(path: Path) -> dict | None:
     """The JSON object in `path`; None when it is not there. Damaged raises StateError."""
     try:

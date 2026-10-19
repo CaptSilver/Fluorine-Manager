@@ -29,7 +29,6 @@ from typing import Callable, Collection, Iterable
 
 from . import deploy, doctor, hardening, state
 from .doctor import RUNTIME_NOISE, is_noise  # noqa: F401 - the noise list is documented here
-from .ermlib import github
 from .ermlib import paths as ermpaths
 from .ermlib.errors import ErmError
 
@@ -46,8 +45,6 @@ RESHADE_FILES = ("dxgi.dll", "d3dcompiler_47.dll", "ReShade.ini", "ReShade_shade
 # Written beside the links by ReShade itself while it is active. ReShade.log is
 # already covered by the *.log noise pattern.
 RESHADE_WRITTEN = ("ReShade2.ini",)
-
-PROGRAM_EXTENSIONS = (".dll", ".exe")
 
 
 class InventoryError(ErmError):
@@ -290,7 +287,7 @@ def reshade_link_ok(game_dir, rel: str, ctx: Context) -> bool:
 def _hash(path, size: int, cache: dict | None) -> str | None:
     if size > HASH_CAP:
         return None
-    return github.sha256_file(path) if cache is None else state.cached_sha256(cache, path)
+    return state.file_sha256(path, cache)
 
 
 def _link_entry(game_dir, rel: str, target: str, cache: dict | None) -> LinkEntry:
@@ -331,7 +328,7 @@ def ordered_for_dialog(rels: Iterable[str]) -> list[str]:
     person scanning the list for a stray needs to see before they scroll.
     """
     rels = sorted(set(rels))
-    programs = [rel for rel in rels if rel.lower().endswith(PROGRAM_EXTENSIONS)]
+    programs = [rel for rel in rels if rel.lower().endswith(deploy.PROGRAM_EXTENSIONS)]
     seen_folders: set[str] = set()
     firsts = []
     for rel in rels:
@@ -620,7 +617,7 @@ class Diff:
 
 def _suspect(rel: str, appeared: bool, known_tops: set[str]) -> bool:
     low = rel.lower()
-    if low.endswith(PROGRAM_EXTENSIONS) or low.rsplit("/", 1)[-1] in doctor.BLOCKLIST_FILES:
+    if low.endswith(deploy.PROGRAM_EXTENSIONS) or low.rsplit("/", 1)[-1] in doctor.BLOCKLIST_FILES:
         return True
     return appeared and "/" in rel and rel.split("/")[0].lower() not in known_tops
 

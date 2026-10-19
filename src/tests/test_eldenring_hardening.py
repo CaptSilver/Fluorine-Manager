@@ -131,7 +131,7 @@ class StateTests(HardeningCase):
 
     def test_an_unreadable_executable_is_stale_not_an_exception(self) -> None:
         self.harden_by_hand()
-        with mock.patch.object(hardening.github, "sha256_file", side_effect=PermissionError("denied")):
+        with mock.patch.object(hardening.instance_state.github, "sha256_file", side_effect=PermissionError("denied")):
             with self.assertLogs(level="WARNING") as logged:
                 self.assertEqual(hardening.state(self.game), hardening.STALE)
         text = "\n".join(logged.output)
@@ -141,7 +141,7 @@ class StateTests(HardeningCase):
     def test_the_hashes_come_from_the_cache_and_are_not_taken_again(self) -> None:
         self.harden_by_hand()
         cache: dict = {}
-        with mock.patch.object(hardening.github, "sha256_file", wraps=hardening.github.sha256_file) as spy:
+        with mock.patch.object(hardening.instance_state.github, "sha256_file", wraps=hardening.instance_state.github.sha256_file) as spy:
             self.assertEqual(hardening.state(self.game, cache), hardening.HARDENED)
             first = spy.call_count
             self.assertEqual(hardening.state(self.game, cache), hardening.HARDENED)
@@ -149,7 +149,7 @@ class StateTests(HardeningCase):
         self.assertEqual(spy.call_count, first)
 
     def test_a_vanilla_launcher_is_not_hashed_at_all(self) -> None:
-        with mock.patch.object(hardening.github, "sha256_file", side_effect=AssertionError("hashed")):
+        with mock.patch.object(hardening.instance_state.github, "sha256_file", side_effect=AssertionError("hashed")):
             self.assertEqual(hardening.state(self.game), hardening.VANILLA)
 
 

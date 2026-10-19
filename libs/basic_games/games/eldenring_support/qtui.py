@@ -100,8 +100,11 @@ def pick_files(parent, title: str, text: str, items: list[str], checked: list[st
 
 
 
-def show_text(parent, title: str, text: str) -> None:
-    """A scrollable, read-only text window, for reports too long for a message box."""
+def _text_dialog(parent, title: str, text: str, buttons):
+    """A scrollable, read-only text window with the given QDialogButtonBox buttons, not yet shown.
+
+    Returns (dialog, button box) so a caller can relabel a button before exec().
+    """
     from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
 
     dialog = QDialog(parent)
@@ -112,10 +115,18 @@ def show_text(parent, title: str, text: str) -> None:
     view.setReadOnly(True)
     view.setPlainText(text)
     layout.addWidget(view)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-    buttons.rejected.connect(dialog.reject)
-    buttons.accepted.connect(dialog.accept)
-    layout.addWidget(buttons)
+    box = QDialogButtonBox(buttons)
+    box.rejected.connect(dialog.reject)
+    box.accepted.connect(dialog.accept)
+    layout.addWidget(box)
+    return dialog, box
+
+
+def show_text(parent, title: str, text: str) -> None:
+    """A scrollable, read-only text window, for reports too long for a message box."""
+    from PyQt6.QtWidgets import QDialogButtonBox
+
+    dialog, _box = _text_dialog(parent, title, text, QDialogButtonBox.StandardButton.Close)
     dialog.exec()
 
 
@@ -196,21 +207,11 @@ def review(parent, title: str, text: str, accept: str) -> bool:
 
     For lists too long for a message box that the user has to read before saying yes.
     """
-    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox
 
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(title)
-    dialog.resize(760, 520)
-    layout = QVBoxLayout(dialog)
-    view = QPlainTextEdit()
-    view.setReadOnly(True)
-    view.setPlainText(text)
-    layout.addWidget(view)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.button(QDialogButtonBox.StandardButton.Ok).setText(accept)
-    buttons.accepted.connect(dialog.accept)
-    buttons.rejected.connect(dialog.reject)
-    layout.addWidget(buttons)
+    ok, cancel = QDialogButtonBox.StandardButton.Ok, QDialogButtonBox.StandardButton.Cancel
+    dialog, box = _text_dialog(parent, title, text, ok | cancel)
+    box.button(ok).setText(accept)
     return dialog.exec() == QDialog.DialogCode.Accepted
 
 

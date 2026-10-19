@@ -964,7 +964,7 @@ class WatchTests(DiagnosisCase):
 
     def test_only_entries_whose_stat_moved_are_read(self) -> None:
         self.watch.changed()
-        with mock.patch.object(diagnosis.inventory.github, "sha256_file", wraps=inventory.github.sha256_file) as hashed:
+        with mock.patch.object(diagnosis.inventory.state.github, "sha256_file", wraps=inventory.state.github.sha256_file) as hashed:
             self.watch.changed()
             self.assertEqual(hashed.call_count, 0)
             os.utime(self.game_dir / "eldenring.exe", ns=(1, 1))

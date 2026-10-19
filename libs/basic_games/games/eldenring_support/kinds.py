@@ -10,10 +10,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple, Protocol
 
+from . import atomic
 from .ermlib import me3pkg
 from .ermlib.errors import ErmError
 from .ermlib.paths import is_safe_relpath
@@ -270,13 +270,6 @@ def deploy_config_candidates(mod_dir, native_dll) -> list[str]:
 
 # -- re-rooting an installed folder -------------------------------------------
 
-def _remove(path: Path) -> None:
-    if os.path.islink(path) or os.path.isfile(path):
-        path.unlink()
-    else:
-        shutil.rmtree(path)
-
-
 def _move_children(source: Path, destination: Path) -> None:
     """Move what `source` holds into `destination`, then remove `source`.
 
@@ -287,10 +280,10 @@ def _move_children(source: Path, destination: Path) -> None:
     for child in sorted(source.iterdir()):
         target = destination / child.name
         if child.name == META_INI:
-            _remove(child)
+            atomic.remove(child)
             continue
         if os.path.lexists(target):
-            _remove(target)
+            atomic.remove(target)
         os.replace(child, target)
     source.rmdir()
 
@@ -317,11 +310,11 @@ def reroot(mod_dir, subdir) -> bool:
         return False
     temp = mod_dir / REROOT_TEMP
     if os.path.lexists(temp):
-        _remove(temp)
+        atomic.remove(temp)
     os.rename(source, temp)
     for entry in sorted(mod_dir.iterdir()):
         if entry.name not in (META_INI, REROOT_TEMP):
-            _remove(entry)
+            atomic.remove(entry)
     _move_children(temp, mod_dir)
     return True
 
@@ -352,7 +345,7 @@ def strip_wrapper(mod_dir, keep=(), force=False) -> bool:
         return False
     temp = mod_dir / UNWRAP_TEMP
     if os.path.lexists(temp):
-        _remove(temp)
+        atomic.remove(temp)
     os.rename(wrapper, temp)
     _move_children(temp, mod_dir)
     return True

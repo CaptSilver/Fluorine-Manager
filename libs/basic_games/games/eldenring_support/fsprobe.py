@@ -1,4 +1,4 @@
-"""What is at a path, without following a symbolic link."""
+"""What is at a path, without following a symbolic link, and the same questions asked through one."""
 
 from __future__ import annotations
 
@@ -27,3 +27,23 @@ def kind(path) -> str | None:
     if stat.S_ISDIR(mode):
         return DIR
     return OTHER
+
+
+def is_file(path) -> bool:
+    """Whether `path`, followed through links, is a regular file.
+
+    Path.is_file lets EACCES from an unsearchable parent escape on the bundled
+    Python; here that, like any other error, is False.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        return False
+
+
+def is_dir(path) -> bool:
+    """Whether `path`, followed through links, is a directory. See is_file."""
+    try:
+        return stat.S_ISDIR(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        return False

@@ -100,6 +100,31 @@ class ReviewTests(unittest.TestCase):
         self.assertIs(self.shown(REJECT)[0], False)
 
 
+class ShowTextTests(unittest.TestCase):
+    def test_the_text_is_read_only_under_a_title_and_a_close_button(self) -> None:
+        seen = {}
+
+        def fake_exec(dialog):
+            from PyQt6.QtWidgets import QDialogButtonBox, QPlainTextEdit
+
+            view = dialog.findChild(QPlainTextEdit)
+            box = dialog.findChild(QDialogButtonBox)
+            seen.update(
+                title=dialog.windowTitle(), text=view.toPlainText(), read_only=view.isReadOnly(),
+                buttons=box.standardButtons(),
+            )
+            return 0
+
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox
+
+        with mock.patch.object(QDialog, "exec", fake_exec):
+            qtui.show_text(None, "Report", "line one\nline two")
+        self.assertEqual(seen["title"], "Report")
+        self.assertEqual(seen["text"], "line one\nline two")
+        self.assertTrue(seen["read_only"])
+        self.assertEqual(seen["buttons"], QDialogButtonBox.StandardButton.Close)
+
+
 class InformTests(unittest.TestCase):
     def test_a_short_text_is_a_message_box_and_a_long_one_is_the_scrollable_window(self) -> None:
         with mock.patch("PyQt6.QtWidgets.QMessageBox.information") as box, mock.patch.object(qtui, "show_text") as window:

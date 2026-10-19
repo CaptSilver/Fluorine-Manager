@@ -715,9 +715,8 @@ class SyncDeployedTool(EldenRingTool):
         busy = None
         try:
             # Inside the try so a refused run tells the listeners too.
-            up = procs.game_running()
-            if up:
-                names = ", ".join(f"{name} (pid {pid})" for pid, name in up)
+            names = procs.running_names()
+            if names is not None:
                 raise ErmError(f"{names} is running. Game/ is not edited under a running game; quit it and try again.")
             game_dir = Path(self._organizer.managedGame().dataDirectory().absolutePath())
             paths = state.InstancePaths(self._organizer)

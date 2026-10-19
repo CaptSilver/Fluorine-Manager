@@ -288,7 +288,7 @@ class BackupAllTests(SaveFolderCase):
         sl2 = self.write("ER0000.sl2", SL2)
         with self.assertRaises(errors.ErmError) as caught:
             saves.backup_all([sl2], self.backups, "manual", STAMP, running=lambda: [(42, "me3")])
-        self.assertIn("me3 pid 42", str(caught.exception))
+        self.assertIn("me3 (pid 42)", str(caught.exception))
         self.assertFalse(self.backups.exists())
 
     def test_a_copy_that_does_not_read_back_the_same_is_removed_and_reported(self) -> None:
@@ -470,7 +470,7 @@ class RestoreBackupTests(SaveFolderCase):
         self.put(f"ER0000.co2.{STAMP}-manual", CO2)
         with self.assertRaises(errors.ErmError) as caught:
             self.restore(f"ER0000.co2.{STAMP}-manual", running=lambda: [(7, "eldenring.exe")])
-        self.assertIn("eldenring.exe pid 7", str(caught.exception))
+        self.assertIn("eldenring.exe (pid 7)", str(caught.exception))
         self.assertEqual((self.folder / "ER0000.co2").read_bytes(), b"old")
 
     def test_an_empty_backup_is_never_copied_over_a_save(self) -> None:
@@ -570,7 +570,7 @@ class QuarantineVanillaTests(SaveFolderCase):
     def test_a_running_game_is_refused(self) -> None:
         with self.assertRaises(errors.ErmError) as caught:
             self.quarantine(running=lambda: [(5, "me3")])
-        self.assertIn("me3 pid 5", str(caught.exception))
+        self.assertIn("me3 (pid 5)", str(caught.exception))
         self.assert_untouched()
 
     def test_no_steam_save_to_move_is_said_plainly(self) -> None:
@@ -761,7 +761,7 @@ class MoveToModdedTests(SaveFolderCase):
     def test_a_running_game_is_refused(self) -> None:
         with self.assertRaises(errors.ErmError) as caught:
             self.move(self.folder / "ER0000.sl2", running=lambda: [(5, "eldenring.exe")])
-        self.assertIn("eldenring.exe pid 5", str(caught.exception))
+        self.assertIn("eldenring.exe (pid 5)", str(caught.exception))
         self.assertEqual((self.folder / "ER0000.sl2").read_bytes(), SL2)
 
     def test_an_empty_or_missing_save_is_refused(self) -> None:

@@ -180,6 +180,22 @@ class StartTicksTests(FakeProc):
         self.assertIsInstance(procs.start_ticks(os.getpid()), int)
 
 
+class RunningNamesTests(unittest.TestCase):
+    def test_nothing_running_is_none(self) -> None:
+        self.assertIsNone(procs.running_names(lambda: []))
+
+    def test_every_process_is_named_with_its_pid(self) -> None:
+        self.assertEqual(
+            procs.running_names(lambda: [(8, "me3"), (9, "eldenring.exe")]), "me3 (pid 8), eldenring.exe (pid 9)"
+        )
+
+    def test_the_default_is_the_process_scan_looked_up_when_called(self) -> None:
+        with mock.patch.object(procs, "game_running", return_value=[(3, "me3")]):
+            self.assertEqual(procs.running_names(), "me3 (pid 3)")
+        with mock.patch.object(procs, "game_running", return_value=[]):
+            self.assertIsNone(procs.running_names())
+
+
 class RefuseWhileRunningTests(unittest.TestCase):
     def test_nothing_running_returns_quietly(self) -> None:
         self.assertIsNone(procs.refuse_while_running(lambda: [], "restore"))
@@ -188,8 +204,8 @@ class RefuseWhileRunningTests(unittest.TestCase):
         with self.assertRaises(errors.ErmError) as caught:
             procs.refuse_while_running(lambda: [(8, "me3"), (9, "eldenring.exe")], "restore")
         text = str(caught.exception)
-        self.assertIn("me3 pid 8", text)
-        self.assertIn("eldenring.exe pid 9", text)
+        self.assertIn("me3 (pid 8)", text)
+        self.assertIn("eldenring.exe (pid 9)", text)
         self.assertTrue(text.endswith("Quit the game, then restore."))
 
     def test_the_default_is_the_process_scan_looked_up_when_called(self) -> None:

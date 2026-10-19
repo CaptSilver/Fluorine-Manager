@@ -306,13 +306,11 @@ class ImportRun:
             return  # queued before a Cancel was processed
         self._installing = True
         report = self.report
-        up = (self._running or procs.game_running)()
-        if up:
+        names = procs.running_names(self._running)
+        if names is not None:
             # The dialog can wait for minutes on downloads, and Steam can start the game meanwhile.
             report.fail(
-                "Elden Ring or me3 started while the import waited ("
-                + ", ".join(f"{name} pid {pid}" for pid, name in up)
-                + "), so nothing was installed. Quit it and run the import again; what arrived stays in the downloads folder."
+                f"Elden Ring or me3 started while the import waited: {names}. Nothing was installed. Quit it and run the import again; what arrived stays in the downloads folder."
             )
             self._finish_once()
             return
